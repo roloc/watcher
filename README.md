@@ -21,14 +21,36 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/spawn.sh          the loop (systemd runs it); --dry-run / --once
     bin/board.py          the board CLI: list/show/move/unclaim (BOARD_OWNER, BOARD_NUMBER)
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
-    bin/test-spawn.sh     85 cases, no network, every external command stubbed
+    bin/test-spawn.sh     86 cases, no network, every external command stubbed
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     agents/reviewer.md    the one review pass: blocking findings only, one round
+    docs/how-it-works.md  the map, written for the agents: pieces, board, life of a card, state
+    docs/talking-to-steve.md  the format for anything a human reads (see below)
+    docs/steve-cheat-sheet.md one page for Steve: columns, answering a Stuck card, pause, logs
+    CLAUDE.md             rules for editing this repo
     projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER
     deploy/watcher@.service, deploy/install.sh
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
-A project-level `.claude/commands/watch.md` overrides the generic one.
+A project-level `.claude/commands/watch.md` overrides the generic one. The generic one reads
+the project's `CLAUDE.md` for the names it needs (the required CI check, contracts a builder
+must not touch). The spawner exports `WATCHER_HOME` so a tick can read `docs/` from any
+worktree.
+
+## Talking to Steve
+
+Steve is the only human in the loop, and he is dyslexic. Every message aimed at him — a
+Stuck comment from the tick, a park comment from the spawner, a reviewer finding headed his
+way — follows `docs/talking-to-steve.md`:
+
+- **First line is the ask**, bold, starting `Needs Steve:` (or `FYI:` when nothing is needed).
+- **Bullets, not paragraphs.** At most 8 above the fold, one fact each.
+- **One question**, ending in `?`, with lettered options. Recommended option first.
+- **How to answer**, always: reply A, B or C on the card, move it back to In progress.
+- **Paths, logs and code go under `<details>`**, never above the fold.
+
+He answers by replying on the card and moving it. Moving a parked card back to
+**In progress** resets its attempt count. `docs/steve-cheat-sheet.md` is his one page.
 
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 

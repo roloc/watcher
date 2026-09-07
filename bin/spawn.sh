@@ -35,12 +35,20 @@
 #   POLL_INTERVAL      daemon poll cadence in SECONDS           (default: 60)
 #   WATCHER_MAX_POLLS  stop the daemon loop after this many polls (tests only)
 #
+# Exported to the tick (so `/watch` can read the watcher's own docs from any worktree):
+#   WATCHER_HOME       this repo's root                          (default: parent of bin/)
+#
+# Every comment this script leaves on a card is read by Steve on his phone. The shape is
+# fixed by docs/talking-to-steve.md: first line is the ask, bullets, one question, lettered
+# options, how to answer. test-spawn.sh checks the park comment keeps that shape.
+#
 #   bin/spawn.sh              # the daemon loop (what systemd runs)
 #   bin/spawn.sh --dry-run    # print the pick + the exact claude command, exit 0
 #   bin/spawn.sh --once       # one poll iteration, then exit (tests)
 set -euo pipefail
 
 WATCHER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export WATCHER_HOME="${WATCHER_HOME:-$(dirname "$WATCHER_HERE")}"
 if [ -n "${WATCHER_PROJECT:-}" ]; then
   # shellcheck disable=SC1090
   . "$WATCHER_PROJECT"
@@ -226,7 +234,7 @@ pick_card() {
       # board mutation dry-run is explicitly not supposed to make.
       log "#$r_issue skipped: $attempts attempts, parking in Stuck"
       if [ "${DRY_RUN:-0}" != 1 ]; then
-        park_stuck "$r_issue" "Still In progress with $attempts attempts on file when pick_card looked at it (a previous park_stuck call may have failed)."
+        park_stuck "$r_issue" "The card was still In progress with $attempts attempts on file (an earlier move to Stuck may have failed)."
       fi
       continue
     fi
@@ -304,12 +312,36 @@ park_stuck() {
 
   $WATCHER_GH issue edit "$n" --remove-label in-flight || true
   local retry_note=""
-  [ -f "$ok" ] || retry_note=" The move to Stuck - Needs help failed; the spawner will keep retrying it on later polls."
+  [ -f "$ok" ] || retry_note=$'\n- The move to Stuck did not go through yet; I will keep retrying it.'
   # The marker means "the one Stuck comment was POSTED" (review round 7): it is written only
   # when `gh issue comment` succeeds, so a failed comment is retried on the next poll — a
   # retry there costs nothing, and a parked card with no explanation on it is what the
   # marker exists to prevent, not to cause.
-  if $WATCHER_GH issue comment "$n" --body "🤖 Watcher: #$n has had 2 attempts with no progress; parking in Stuck - Needs help.$retry_note $detail"; then
+  #
+  # The body is for Steve (docs/talking-to-steve.md): the ask on line one, bullets, one
+  # question, lettered options with the recommendation first, and how to answer. The
+  # spawner only knows the card failed twice, not why, so the options are the three moves
+  # Steve can make; $detail and the log path are the engineer's crumbs, kept short.
+  local body
+  body="🤖 **Needs Steve: this card failed 2 attempts, so I parked it.**
+
+- Moved to **Stuck - Needs help**. The bots will not retry on their own.
+- Why: $detail${retry_note}
+
+**Question: what should happen to this card?**
+- **A. Try again** (recommended if the failure looks like bad luck) — move it back to **In progress**.
+- **B. Fix the card first** — make it smaller or clearer, then move it back to **In progress**.
+- **C. Drop it** — close the card.
+
+Reply A, B or C on this card, then move it.
+
+<details><summary>Details</summary>
+
+- Logs: $WATCHER_LOGS
+- Attempts on file: 2
+
+</details>"
+  if $WATCHER_GH issue comment "$n" --body "$body"; then
     : > "$tried"
   else
     log "stuck comment failed for #$n; retried on a later poll only while the card is still seen in In progress (once the move lands, nothing re-enters park_stuck)"
@@ -356,7 +388,7 @@ prepare_worktree() {
       local attempts
       attempts="$(bump_attempts "$n")"
       if [ "$attempts" -ge 2 ]; then
-        park_stuck "$n" "worktree create failed twice in a row; see $WATCHER_LOGS/spawn.log."
+        park_stuck "$n" "Could not create the card's work folder (git worktree) twice in a row."
       fi
       return 1
     fi
@@ -538,7 +570,13 @@ except Exception:
   # Only ever sweeps the card THIS run holds — never a claim it did not make.
   if [ "$has_in_flight" = yes ] && [ "$(cat "$CURRENTFILE" 2>/dev/null || true)" = "$n" ]; then
     $WATCHER_BOARD unclaim "$n" || log "unclaim failed for #$n"
-    $WATCHER_GH issue comment "$n" --body "🤖 Watcher: tick exited ${rc}/${subtype} after ${elapsed_min} min, ${denials:-0} permission denials, agent cost \$${total_cost:-0}; log $(basename "$json")" \
+    # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve here — the card is
+    # released and the next poll may retry it; two of these in a row become a park.
+    $WATCHER_GH issue comment "$n" --body "🤖 FYI: the run ended without finishing this card. I released it; the next poll may retry once.
+- Exit: ${rc}/${subtype} after ${elapsed_min} min
+- ${denials:-0} permission denials
+- Agent cost: \$${total_cost:-0}
+- Log: $(basename "$json")" \
       || log "sweeper comment failed for #$n"
   fi
 
@@ -554,7 +592,7 @@ except Exception:
   else
     attempts="$(bump_attempts "$n")"
     if [ "$attempts" -ge 2 ] && [ "$is_in_progress" = yes ]; then
-      park_stuck "$n" "Still In progress. See $(basename "$json") and earlier logs in $WATCHER_LOGS."
+      park_stuck "$n" "The run ended with the card still In progress (log: $(basename "$json"))."
     fi
   fi
 
@@ -632,10 +670,10 @@ except Exception:
     local attempts
     attempts="$(bump_attempts "$n")"
     $WATCHER_BOARD unclaim "$n" || log "reconcile: unclaim failed for #$n"
-    $WATCHER_GH issue comment "$n" --body "🤖 Watcher: found #$n still marked in-flight with no tick process running (a stale claim, from a crashed run or a board outage at the previous exit); unclaiming." \
+    $WATCHER_GH issue comment "$n" --body "🤖 FYI: a run died while holding this card (still marked in-flight, no process running). I released it; the next poll may retry." \
       || log "reconcile: unclaim comment failed for #$n"
     if [ "$attempts" -ge 2 ]; then
-      park_stuck "$n" "Reached via reconciliation after a stale in-flight claim (a crashed tick or a board.py outage at a previous exit), attempts=$attempts."
+      park_stuck "$n" "A run died holding this card (a crashed tick, or a board outage at its exit); found on cleanup, attempts=$attempts."
     fi
   else
     log "reconcile: #$n was not in-flight; nothing to unclaim"

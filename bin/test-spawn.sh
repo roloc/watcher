@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Tests for scripts/watcher/spawn.sh. No network, no launchd, no real claude/gh/board.py —
+# Tests for bin/spawn.sh. No network, no launchd, no real claude/gh/board.py —
 # every external command is a stub under $TMP/bin, wired in through spawn.sh's own
 # override env vars. Each case gets a fresh state/log dir unless the case is explicitly
 # about state persisting across two polls (the second-attempt → Stuck case).
 #
-#   bash scripts/watcher/test-spawn.sh        # exit 0 = all cases hold; 1 = a case failed
+#   bash bin/test-spawn.sh                    # exit 0 = all cases hold; 1 = a case failed
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -206,9 +206,13 @@ STUB
 chmod +x "$BIN/claude"
 
 # gh: records every call, does nothing else.
+# gh: logs every call on ONE line, newlines in a --body collapsed to spaces — the spawner's
+# comments to Steve are multi-line (docs/talking-to-steve.md), and every assertion below
+# greps the whole call as a single line ("gh issue comment 40.*2 attempts").
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
-echo "gh $*" >> "$TEST_LOG"
+args="$*"
+echo "gh ${args//$'\n'/ }" >> "$TEST_LOG"
 exit 0
 STUB
 chmod +x "$BIN/gh"
@@ -362,6 +366,20 @@ run --once >/dev/null
 if [ "$(cat "$STATE/attempts/40")" = 2 ]; then pass "attempts/40 = 2 after the second launch"; else flunk "attempts/40" "$(cat "$STATE/attempts/40")"; fi
 if grepped 'board.py move 40 Stuck - Needs help'; then pass "second attempt with no progress → moved to Stuck"; else flunk "Stuck move" "$(cat "$TESTLOG")"; fi
 if grepped 'gh issue comment 40' && grep -q 'gh issue comment 40.*2 attempts' "$TESTLOG"; then pass "Stuck comment names the two attempts"; else flunk "Stuck comment" "$(cat "$TESTLOG")"; fi
+# The park comment is read by Steve on his phone (docs/talking-to-steve.md): the ask on the
+# first line, one question, lettered options with the recommendation first, and how to
+# answer. A regression to a prose paragraph must fail here, not on a card.
+park_line="$(grep 'gh issue comment 40' "$TESTLOG" || true)"
+if printf '%s' "$park_line" | grep -q 'gh issue comment 40 --body 🤖 \*\*Needs Steve:' \
+   && printf '%s' "$park_line" | grep -q '\*\*Question: [^?]*?\*\*' \
+   && printf '%s' "$park_line" | grep -q '\*\*A\. [^*]*\*\* (recommended' \
+   && printf '%s' "$park_line" | grep -q '\*\*B\. ' \
+   && printf '%s' "$park_line" | grep -q '\*\*C\. ' \
+   && printf '%s' "$park_line" | grep -q 'Reply A, B or C on this card'; then
+  pass "Stuck comment keeps the Steve shape: 'Needs Steve:' first, one Question, A/B/C with A recommended, how to answer"
+else
+  flunk "Stuck comment shape" "$park_line"
+fi
 
 # ============================================================================
 echo "5. pidfile guard refuses a second instance"
