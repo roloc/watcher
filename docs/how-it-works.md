@@ -124,6 +124,8 @@ its own `.claude/agents/`, its own CI, and can override `/watch` with its own
 `.claude/commands/watch.md`. The generic `/watch` reads the project's `CLAUDE.md` for the
 names it needs (the CI check, the contracts it must not touch, the spend receipt if any).
 
-The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
+Deploying a new watcher version is `deploy/rollout.sh <project> [branch]`: it pulls,
+pauses, waits for a running tick to finish, restarts the unit, un-pauses. It never signals
+a tick. The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
 the tick as `WATCHER_HOME`, so `cat "$WATCHER_HOME/docs/talking-to-steve.md"` works from any
 worktree.

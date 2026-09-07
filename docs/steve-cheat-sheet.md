@@ -36,6 +36,12 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 | 🤖 Watcher: the run ended without finishing | the tick died or ran out of budget; the card will be retried once | nothing, unless it happens twice |
 | 🤖 Watcher: a run died while holding this card | cleanup after a crash | nothing |
 
+## Deploy a new watcher version
+
+- One command, as root on the box: `/opt/watcher/deploy/rollout.sh riffmap`
+- It waits for any running tick to finish. It never kills one.
+- Add a branch name at the end to deploy a branch before it merges.
+
 ## Pause, resume, logs
 
 <details><summary>Commands (on the box)</summary>

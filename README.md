@@ -30,6 +30,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
     CLAUDE.md             rules for editing this repo
     projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER
     deploy/watcher@.service, deploy/install.sh
+    deploy/rollout.sh     deploy a new version without killing a running tick (see below)
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
 A project-level `.claude/commands/watch.md` overrides the generic one. The generic one reads
@@ -70,6 +71,17 @@ Then by hand, once:
    `.env.local` and any private inputs in place.
 4. **Start:** `systemctl enable --now watcher@riffmap`; `journalctl -u watcher@riffmap -f`.
    Pause with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
+
+## Deploy a new version (without killing a running tick)
+
+    /opt/watcher/deploy/rollout.sh riffmap            # main
+    /opt/watcher/deploy/rollout.sh riffmap <branch>   # a branch, before it merges
+
+It pulls the code, pauses the spawner, **waits for the running tick to finish on its own**,
+restarts the unit, and un-pauses. It never signals a tick. The new `/watch`, reviewer and
+docs are live for the next tick as soon as the pull lands; only `spawn.sh` itself needs the
+restart. If a tick is still running after 170 minutes it gives up, leaves the spawner
+paused, and tells you to run it again.
 
 ## Add a project
 

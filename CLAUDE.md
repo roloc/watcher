@@ -16,7 +16,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
 - `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
   (`steve-cheat-sheet.md`).
-- `deploy/`, `projects/` — the systemd unit, the installer, one env file per project.
+- `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (deploy without
+  killing a running tick: pull, pause, wait, restart, un-pause), one env file per project.
 
 ## Rules for editing this repo
 
