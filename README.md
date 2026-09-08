@@ -33,6 +33,12 @@ probes and a classifier, and the day that was tried it cost more than the featur
     deploy/rollout.sh     deploy a new version without killing a running tick (see below)
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
+
+**Stage.** Besides Status, the board carries a single-select `Stage` field (Claimed,
+Designing, Building, Testing, Reviewing, PR open, Merging, Parked). The tick sets it at each
+step with `board stage <n> <value>`; the spawner sets Parked when it parks a card. Status
+says who owns the card, Stage says what is happening to it. A board view grouped by Stage
+is the per-step column view; `board list` prints the stage as its fifth column.
 A project-level `.claude/commands/watch.md` overrides the generic one. The generic one reads
 the project's `CLAUDE.md` for the names it needs (the required CI check, contracts a builder
 must not touch). The spawner exports `WATCHER_HOME` so a tick can read `docs/` from any

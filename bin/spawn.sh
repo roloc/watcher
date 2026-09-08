@@ -341,6 +341,7 @@ Reply A, B or C on this card, then move it.
 - Attempts on file: 2
 
 </details>"
+  $WATCHER_BOARD stage "$n" Parked >/dev/null 2>&1 || true
   if $WATCHER_GH issue comment "$n" --body "$body"; then
     : > "$tried"
   else
