@@ -64,6 +64,9 @@ case "$1" in
     fi
     cat "$BOARD_LIST_FILE"
     ;;
+  queue)
+    cat "${BOARD_QUEUE_FILE:-/dev/null}"
+    ;;
   show)
     if [ "${BOARD_SHOW_FAIL:-0}" = 1 ]; then
       echo "board.py: transient API error" >&2
@@ -268,6 +271,7 @@ board_show() { # board_show <json> -> writes $STATE/board-show.json
 run() {
   TEST_LOG="$TESTLOG" \
   BOARD_LIST_FILE="${BOARD_LIST_FILE:-/dev/null}" BOARD_LIST_FAIL="${BOARD_LIST_FAIL:-0}" \
+  BOARD_QUEUE_FILE="${BOARD_QUEUE_FILE:-/dev/null}" \
   BOARD_SHOW_FILE="${BOARD_SHOW_FILE:-/dev/null}" BOARD_SHOW_FAIL="${BOARD_SHOW_FAIL:-0}" \
   BOARD_MOVE_FAIL="${BOARD_MOVE_FAIL:-0}" \
   BOARD_MOVE_FAIL_COUNT="${BOARD_MOVE_FAIL_COUNT:-}" BOARD_MOVE_COUNTER_FILE="${BOARD_MOVE_COUNTER_FILE:-}" \
@@ -776,6 +780,27 @@ if [ ! -f "$STATE/parked/270" ]; then pass "poll 2: parked/270 (comment-posted) 
 if grep -q '#270: In progress with a confirmed parked-ok marker on file' "$TMP/retry27.err"; then pass "poll 2 logs the manual-retry reconciliation"; else flunk "expected a log line naming the manual retry" "$(cat "$TMP/retry27.err")"; fi
 if grepped 'claude -p /watch 270'; then pass "poll 2: #270 was picked and launched, not skipped again"; else flunk "expected #270 to be launched on poll 2" "$(cat "$TESTLOG")"; fi
 if [ "$(cat "$STATE/attempts/270" 2>/dev/null)" = 1 ]; then pass "poll 2: attempts/270 = 1 (reset to 0 by the retry, then bumped once by this poll's own launch), not left at the old 2"; else flunk "expected attempts/270 = 1 after poll 2" "$(cat "$STATE/attempts/270" 2>/dev/null)"; fi
+
+# ============================================================================
+echo "29. The Waiting stage: a card dragged there (not In progress) is moved to In progress, then launched"
+# ============================================================================
+reset
+board_list ""                                    # nothing In progress
+BOARD_QUEUE_FILE="$STATE/board-queue.tsv"
+printf '300\tP1\tbuilder\t-\tWaiting\tCard three hundred\n' > "$BOARD_QUEUE_FILE"
+board_show '{"number":300,"state":"OPEN","labels":[],"status":"In progress"}'
+claude_result success 0
+run --once >/dev/null 2>"$TMP/q.err" || true
+if grepped "board.py move 300 In progress"; then pass "queued card moved to In progress before launch"; else flunk "expected board.py move 300 In progress" "$(cat "$TESTLOG")"; fi
+if grepped "/watch 300"; then pass "queued card launched"; else flunk "expected a launch for #300" "$(cat "$TESTLOG")"; fi
+if grep -q "picked #300 (P1) Card three hundred" "$TMP/q.err"; then pass "six-column row parsed: title intact after the stage column"; else flunk "title parse" "$(cat "$TMP/q.err")"; fi
+# a queue row that is in-flight is skipped like any other
+reset
+board_list ""
+printf '301\tP1\tbuilder\tin-flight\tWaiting\tCard three-oh-one\n' > "$BOARD_QUEUE_FILE"
+run --once >/dev/null 2>&1 || true
+if not_grepped "/watch 301"; then pass "an in-flight queue row is not launched"; else flunk "in-flight queue row launched"; fi
+unset BOARD_QUEUE_FILE
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

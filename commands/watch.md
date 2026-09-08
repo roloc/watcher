@@ -35,7 +35,10 @@ board stage <n> Claimed
 board show <n>     # full body, labels, priority, status
 ```
 
-**Keep the Stage current.** The board has a `Stage` field Steve watches from his phone:
+**Keep the Stage current.** The board has a `Stage` field Steve watches from his phone,
+and it is also how he hands work over: dragging a card into **Waiting** on the Stage view
+is enough — the spawner moves it to In progress and launches you; you never pick from
+Waiting yourself.
 `in-flight` says a tick owns the card, Stage says what it is doing. Set it the moment you
 cross into each step, not afterwards — `board stage <n> Designing` (a decision or spec
 before code), `Building`, `Testing` (build and tests running), `Reviewing` (the reviewer

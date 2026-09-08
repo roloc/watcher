@@ -148,6 +148,23 @@ def set_option(issue, field_name, value):
     return opt["name"]
 
 
+QUEUE_STAGE = "Waiting"
+
+
+def cmd_queue():
+    """Cards Steve dragged into the `Waiting` stage from any column but In progress, Done
+    or Stuck — the spawner moves the one it picks to In progress before launching, so
+    Status stays truthful and the Stage-grouped board view is the only thing he touches."""
+    rows = [i for i in items() if i["state"] == "OPEN" and i["stage"] == QUEUE_STAGE
+            and i["status"] not in ("In progress", "Done", "Stuck - Needs help")]
+    rows.sort(key=lambda r: (PRI_ORDER.get(r["priority"], 3), r["number"]))
+    for r in rows:
+        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "steve-decision"})) or "-"
+        print(f"{r['number']}\t{r['priority'] or '-'}\t{agent_of(r['labels']) or '-'}\t{flags}\t"
+              f"{r['stage'] or '-'}\t{r['title']}")
+    return 0
+
+
 def cmd_move(issue, status):
     name = set_option(issue, STATUS_FIELD, status)
     print(f"#{issue} → {name}")
@@ -191,12 +208,13 @@ def cmd_show(issue):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage"):
+    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "queue"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
                   "move": lambda: cmd_move(a[1], a[2]),
                   "stage": lambda: cmd_stage(a[1], a[2]),
+                  "queue": lambda: cmd_queue(),
                   "show": lambda: cmd_show(a[1]),
                   "unclaim": lambda: cmd_unclaim(a[1])}[a[0]]())
     except IndexError:
