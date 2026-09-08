@@ -22,6 +22,9 @@ chmod +x /opt/watcher/bin/*.sh /opt/watcher/deploy/*.sh
 
 install -d -m 750 -o root -g watcher /etc/watcher
 [ -f /etc/watcher/env ] || { echo "CLAUDE_CODE_OAUTH_TOKEN=" > /etc/watcher/env; chown root:watcher /etc/watcher/env; chmod 640 /etc/watcher/env; }
+# Discord is optional: an empty DISCORD_WEBHOOK_URL is the off switch. The line is added
+# once so the file documents itself; existing values are never touched.
+grep -q '^DISCORD_WEBHOOK_URL=' /etc/watcher/env || echo "DISCORD_WEBHOOK_URL=" >> /etc/watcher/env
 
 install -d -o watcher -g watcher /home/watcher/.claude /home/watcher/projects
 ln -sfn /opt/watcher/commands /home/watcher/.claude/commands
@@ -53,6 +56,8 @@ cat <<'NEXT'
 Next, by hand:
   1. Token:   claude setup-token   (on a machine with a browser); put the printed value in
               /etc/watcher/env as CLAUDE_CODE_OAUTH_TOKEN=…
+  1b. Discord: optional; put the channel's webhook in the same file as DISCORD_WEBHOOK_URL=…
+              (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)
   2. GitHub:  su - watcher; gh auth login   (the bot account); gh auth setup-git
   3. Project: install.sh <project>  clones it; drop its .env.local / private inputs in place.
   4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f

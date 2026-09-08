@@ -330,6 +330,7 @@ if [ "$RC" = 0 ]; then pass "successful tick → spawn.sh --once exits 0"; else 
 if grepped "worktree.sh new card-20" && grepped "/watch 20"; then pass "worktree created and tick launched for #20"; else flunk "launch" "$(cat "$TESTLOG")"; fi
 if not_grepped "board.py unclaim 20"; then pass "no unclaim: in-flight was never on the card"; else flunk "unexpected unclaim"; fi
 if not_grepped "worktree.sh remove card-20"; then pass "worktree kept: card is still OPEN"; else flunk "worktree should not be removed"; fi
+if not_grepped "board.py notify"; then pass "no Discord post from the spawner: an ordinary tick is not an event (board.py posts the tick's own moves)"; else flunk "unexpected board.py notify" "$(cat "$TESTLOG")"; fi
 [ "$(cat "$STATE/attempts/20" 2>/dev/null)" = 1 ] && pass "attempts/20 = 1 after one launch" || flunk "attempts/20" "$(cat "$STATE/attempts/20" 2>/dev/null)"
 
 echo "2b. …same, but the card is CLOSED → worktree removed"
@@ -338,6 +339,7 @@ board_list $'21\tP1\tbuilder\t-\tCard twenty-one'
 board_show '{"number":21,"state":"CLOSED","status":"Done","labels":[]}'
 run --once >/dev/null
 if grepped "worktree.sh remove card-21"; then pass "worktree removed: card is CLOSED"; else flunk "worktree remove" "$(cat "$TESTLOG")"; fi
+if grepped "board.py notify 21 shipped"; then pass "Discord: a card that closed is reported as shipped (board.py downgrades it to 'closed' if no PR merged)"; else flunk "expected board.py notify 21 shipped" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "3. --once: stub claude exits 143 (killed), in-flight STILL on the card → unclaim + sweeper comment with the right numbers"
@@ -357,6 +359,13 @@ if printf '%s' "$comment_line" | grep -q '143/error_during_execution' \
 else
   flunk "sweeper comment content" "$comment_line"
 fi
+released_line="$(grep 'board.py notify 30 released' "$TESTLOG" || true)"
+if [ -n "$released_line" ] && printf '%s' "$released_line" | grep -q 'error_during_execution' \
+   && ! printf '%s' "$released_line" | grep -q 'card-30-'; then
+  pass "Discord: the sweeper posts 'released' with the exit reason and no log path (plain words)"
+else
+  flunk "board.py notify 30 released" "$released_line"
+fi
 
 # ============================================================================
 echo "4. Second attempt on the same card (attempts file reaches 2, card still In progress) → Stuck move + comment"
@@ -367,9 +376,16 @@ CLAUDE_SUBTYPE=error_max_turns CLAUDE_RC=1 CLAUDE_COST=0.10 CLAUDE_TURNS=400 CLA
 run --once >/dev/null
 [ "$(cat "$STATE/attempts/40")" = 1 ] || flunk "precondition: attempts/40 should be 1 after the first run"
 if not_grepped "Stuck"; then pass "first attempt: no Stuck move yet"; else flunk "Stuck moved too early"; fi
+if not_grepped "board.py notify"; then pass "first attempt: nothing posted to Discord (a first failure is not an event)"; else flunk "unexpected board.py notify on the first attempt" "$(cat "$TESTLOG")"; fi
 run --once >/dev/null
 if [ "$(cat "$STATE/attempts/40")" = 2 ]; then pass "attempts/40 = 2 after the second launch"; else flunk "attempts/40" "$(cat "$STATE/attempts/40")"; fi
 if grepped 'board.py move 40 Stuck - Needs help'; then pass "second attempt with no progress → moved to Stuck"; else flunk "Stuck move" "$(cat "$TESTLOG")"; fi
+why_line="$(grep 'board.py move 40 Stuck - Needs help --why ' "$TESTLOG" || true)"
+if printf '%s' "$why_line" | grep -q '2 attempts' && ! printf '%s' "$why_line" | grep -q '\.json'; then
+  pass "the Stuck move carries --why for the Discord alert: names the two attempts, no log path"
+else
+  flunk "Stuck move --why" "$why_line"
+fi
 if grepped 'gh issue comment 40' && grep -q 'gh issue comment 40.*2 attempts' "$TESTLOG"; then pass "Stuck comment names the two attempts"; else flunk "Stuck comment" "$(cat "$TESTLOG")"; fi
 # The park comment is read by Steve on his phone (docs/talking-to-steve.md): the ask on the
 # first line, one question, lettered options with the recommendation first, and how to

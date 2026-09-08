@@ -14,6 +14,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   receipts) come from the project's own `CLAUDE.md`, never hard-coded here.
 - `agents/reviewer.md` — the one review pass. Read-only, blocking findings only, one round.
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
+- `bin/notify.py` — Discord posts, called only from `board.py` (`move`, `stage`, `notify`).
+  `python3 bin/test-notify.py` is its offline test; run it after touching either file.
 - `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
   (`steve-cheat-sheet.md`).
 - `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (deploy without
@@ -32,4 +34,7 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - Comment bodies passed to `gh issue comment --body` may be multi-line. The test stub logs
   each call on one line, so assertions can grep the whole body.
 - No permission prompts exist on the box. Nothing in the tick may depend on one.
+- Discord is a repeater, never a record: a post happens after the board change lands, a
+  failed post is one stderr line and nothing else, and no message goes out per poll or
+  per tick. The webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
 - American English in every file. Dates like September 7, 2026.

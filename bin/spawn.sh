@@ -15,6 +15,9 @@
 #   PROJECT_ROOT     the project's main checkout on this box (worktrees go beside it)
 #   BOARD_OWNER      GitHub user/org that owns the Projects board   (board.py reads these)
 #   BOARD_NUMBER     the board's number
+#   DISCORD_WEBHOOK_URL  optional; a per-project Discord channel for card events. Usually
+#                    set once for the box in /etc/watcher/env instead (see notify.py).
+#   DISCORD_MENTION  optional; who a Stuck alert pings (`<@id>`, `<@&roleid>`, `@here`)
 #
 # Every external command is overridable so this can be tested with stubs, never the network:
 #   WATCHER_PROJECT    path to the project file                  (default: none — required
@@ -57,6 +60,10 @@ WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 [ -n "$WATCHER_ROOT" ] || { echo "spawn.sh: set WATCHER_PROJECT=projects/<name>.env (or WATCHER_ROOT)" >&2; exit 64; }
 PROJECT_NAME="${PROJECT_NAME:-$(basename "$WATCHER_ROOT")}"
 export BOARD_OWNER="${BOARD_OWNER:-}" BOARD_NUMBER="${BOARD_NUMBER:-}"
+# Discord is board.py's job (notify.py): every `board move` / `board stage` posts by itself,
+# from this script and from inside the tick alike, so the webhook only has to reach
+# board.py's environment. A project file may set it; /etc/watcher/env usually does.
+export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}" DISCORD_MENTION="${DISCORD_MENTION:-}"
 # The repo the cards live in. `gh` infers a repo from the cwd, and this script's cwd is
 # /opt/watcher — a checkout of the WATCHER, not the project — so on the first night every
 # unclaim and sweeper comment hit the wrong repo and three finished cards sat in-flight
@@ -309,7 +316,10 @@ park_stuck() {
   mkdir -p "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok"
 
   if [ ! -f "$ok" ]; then
-    if $WATCHER_BOARD move "$n" "Stuck - Needs help"; then
+    # `--why` is the ask in the Discord alert board.py posts for a move to Stuck (the
+    # spawner's own comment goes out after the move, so board.py cannot read it there).
+    # Plain words, no paths: the log path lives under the comment's fold, not here.
+    if $WATCHER_BOARD move "$n" "Stuck - Needs help" --why "This card failed 2 attempts, so I parked it. Details are in the comment on the card."; then
       : > "$ok"
     else
       log "move to Stuck failed for #$n; will keep retrying on later polls"
@@ -590,6 +600,10 @@ except Exception:
 - Agent cost: \$${total_cost:-0}
 - Log: $(basename "$json")" \
       || log "sweeper comment failed for #$n"
+    # Discord, if configured (board.py notify is a no-op otherwise). A retry is not an
+    # alert — the park, if it comes, is — but a died run is rare enough to be worth a line.
+    $WATCHER_BOARD notify "$n" released "The run ended after ${elapsed_min} min without finishing (${subtype}). I released the card; the next poll may retry once." \
+      || log "discord notify failed for #$n"
   fi
 
   attn="$WATCHER_STATE/attempts/$n"
@@ -609,6 +623,10 @@ except Exception:
   fi
 
   if [ "$is_closed" = yes ]; then
+    # Done is the one column nothing moves a card into through board.py — the merge's
+    # `Closes #n` does it — so the "shipped" post has to come from here. board.py checks
+    # the card's PR and posts "closed without a merge" instead when there is none.
+    $WATCHER_BOARD notify "$n" shipped || log "discord notify failed for #$n"
     if $WATCHER_WORKTREE remove "card-$n"; then
       log "worktree removed for #$n (issue closed)"
     else
@@ -684,6 +702,8 @@ except Exception:
     $WATCHER_BOARD unclaim "$n" || log "reconcile: unclaim failed for #$n"
     $WATCHER_GH issue comment "$n" --body "🤖 FYI: a run died while holding this card (still marked in-flight, no process running). I released it; the next poll may retry." \
       || log "reconcile: unclaim comment failed for #$n"
+    $WATCHER_BOARD notify "$n" released "A run died while holding this card; found on cleanup. I released it; the next poll may retry." \
+      || log "reconcile: discord notify failed for #$n"
     if [ "$attempts" -ge 2 ]; then
       park_stuck "$n" "A run died holding this card (a crashed tick, or a board outage at its exit); found on cleanup, attempts=$attempts."
     fi

@@ -13,6 +13,7 @@ short version.
 | **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the one review a change gets; blocking findings only |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
+| **Discord** | `bin/notify.py` | imported by the board CLI | posts a card's stage and column changes, and the Stuck alert, to Steve's channel — when a webhook is configured |
 | **Steve** | a human | GitHub, on his phone | moves cards, answers Stuck cards, owns every product decision |
 
 Steve is the only human. Everything else is a bot. The box the bots run in is throwaway and
@@ -94,6 +95,27 @@ instead. Steve moving a parked card back to In progress resets the count to zero
 
 `claude -p` result subtypes the spawner reads: `success`; `error_max_turns`;
 `error_max_budget_usd`; `error_during_execution`; a killed tick shows exit 143.
+
+## Discord
+
+Steve does not sit on the board; he gets pinged. When `DISCORD_WEBHOOK_URL` is set (in
+`/etc/watcher/env` for the box, or in a project's env file), `board.py` posts to the
+channel **after** a change lands, so the board is always the record and Discord only ever
+repeats it. Every post names the card, links to it, and links the PR when one exists.
+
+| Event | Posted by | Looks like |
+|---|---|---|
+| a column change (`board move`) | whoever moved it: the tick, or the spawner taking a Waiting card | 📋 `#87 Add speaker names → In review` |
+| a stage step (`board stage`) | the tick, at every step | 🔧 `#87 … → Building` |
+| **a move to Stuck** | the tick (comment first, then move) or the spawner's park | 🚨 **Needs Steve:** the ask, quoted from the card, red; `DISCORD_MENTION` pings someone |
+| the card closed | the spawner, at the tick's exit | ✅ `shipped` with the merged PR, or 🗂️ `closed without a merge` |
+| a run died holding the card | the spawner's sweeper or reconciliation | ⚠️ `the run ended without finishing`; the next poll may retry |
+
+Nothing is posted per poll, per tick, or for a quiet tick; `Parked` as a stage is silent
+because the Stuck alert already covered it. A post that fails is one line on stderr and
+nothing else — a notification can never fail a board command or a tick. `python3
+bin/test-notify.py` checks the shapes offline; `python3 bin/notify.py stuck 1 "smoke test"
+https://example.com` sends one by hand.
 
 ## Where Steve comes in
 

@@ -95,12 +95,15 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 
 ## 4. Stuck — the important half
 
-Move to **Stuck - Needs help** the moment you need Steve, rather than guessing:
+Move to **Stuck - Needs help** the moment you need Steve, rather than guessing —
+**comment first, then move**, so the Discord alert the move sends (see below) can quote
+your ask, and a crash between the two leaves the explanation on the card:
 
 ```
-board move <n> "Stuck - Needs help"
-gh issue edit <n> --remove-label in-flight
 gh issue comment <n> --body-file /tmp/card-<n>-stuck.md
+board move <n> "Stuck - Needs help"
+board stage <n> Parked
+gh issue edit <n> --remove-label in-flight
 ```
 
 Go to Stuck when: the card needs a product decision; it is `steve-decision`; its `agent:`
@@ -154,6 +157,12 @@ The rules behind the shape (full version in `talking-to-steve.md`):
   not the check's name. Everything an engineer wants goes under `<details>`.
 - **Say how to answer.** The last line above the fold is always the reply-and-move line.
 - A reviewer finding headed to Steve arrives with its own `For Steve` block; paste it in.
+
+**Discord is not your job.** When the box has a webhook configured, `board move` and
+`board stage` post the change to Steve's channel by themselves, with a link to the card,
+and a move to Stuck posts the alert. Never post to Discord directly, never mention it in a
+comment, and never skip a `board stage` call because "it would be noisy" — the stage
+posts are the updates Steve asked for.
 
 ## 5. Always leave the board true
 

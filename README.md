@@ -19,9 +19,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
 ## Layout
 
     bin/spawn.sh          the loop (systemd runs it); --dry-run / --once
-    bin/board.py          the board CLI: list/show/move/unclaim (BOARD_OWNER, BOARD_NUMBER)
+    bin/board.py          the board CLI: list/show/move/stage/unclaim/notify (BOARD_OWNER, BOARD_NUMBER)
+    bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
-    bin/test-spawn.sh     86 cases, no network, every external command stubbed
+    bin/test-spawn.sh     96 cases, no network, every external command stubbed
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     agents/reviewer.md    the one review pass: blocking findings only, one round
     docs/how-it-works.md  the map, written for the agents: pieces, board, life of a card, state
@@ -62,6 +63,16 @@ way — follows `docs/talking-to-steve.md`:
 He answers by replying on the card and moving it. Moving a parked card back to
 **In progress** resets its attempt count. `docs/steve-cheat-sheet.md` is his one page.
 
+## Discord
+
+Set `DISCORD_WEBHOOK_URL` in `/etc/watcher/env` (a channel webhook; a secret, so it stays
+out of git) and the board CLI posts to that channel after every change it makes: a card
+changing column (📋), a card crossing into a new stage (🔧), a card shipped (✅), a run that
+died (⚠️), and — the one that matters — a card landing in **Stuck - Needs help** (🚨, red,
+quoting the ask from the card). Every post names the card and links to it, and to its PR
+when there is one. Nothing is posted per poll or per tick. `DISCORD_MENTION` (`<@id>` or
+`@here`) makes the Stuck alert ping someone. Unset the URL and it is all silent again.
+
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 
     apt install git python3 curl gh                # plus node 22 and whatever the project builds with
@@ -74,6 +85,7 @@ Then by hand, once:
 1. **Claude login:** on a machine with a browser run `claude setup-token`, and put the printed
    value in `/etc/watcher/env` as `CLAUDE_CODE_OAUTH_TOKEN=…`. That file must not set
    `ANTHROPIC_API_KEY` — the key outranks the login and would bill the API instead.
+   `DISCORD_WEBHOOK_URL=…` goes in the same file if you want the channel (see above).
 2. **GitHub:** `su - watcher`, `gh auth login` as the bot account, `gh auth setup-git`. The bot
    needs write access to the repo and access to the Projects board.
 3. **Project:** `deploy/install.sh riffmap` clones it under `/home/watcher/projects/`; drop its

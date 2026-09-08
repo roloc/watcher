@@ -6,9 +6,17 @@ resolved by NAME, not by hard-coded id, so this survives a board edit and can be
 copied to another project by changing OWNER/NUMBER.
 
     python3 scripts/board.py list ["In progress"]   # cards in a column, as TSV
-    python3 scripts/board.py move <issue> "<status>"
+    python3 scripts/board.py move <issue> "<status>" [--why "<one line>"]
+    python3 scripts/board.py stage <issue> "<stage>"
     python3 scripts/board.py show <issue>
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
+    python3 scripts/board.py notify <issue> shipped|closed|released ["<detail>"]
+
+Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), `move` and `stage` post the
+change to the channel after it lands, a move to Stuck posts the alert (with the ask taken
+from the card's latest `Needs Steve` comment, or from `--why`), and `notify` posts the
+events only the spawner sees (a card shipped, a run that died). A failed post is one
+stderr line, never a non-zero exit — the board is the record, Discord is the pager.
 
 Every failure exits 1 with a one-line `board.py: ...` message on stderr; only a
 successful command exits 0. A caller may therefore treat any non-zero exit as "do not
@@ -18,10 +26,15 @@ rather than printing nothing and looking like an empty column.
 import json
 import os, subprocess, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import notify  # noqa: E402  (bin/notify.py, beside this file)
+
 OWNER = os.environ.get("BOARD_OWNER") or "roloc"
 NUMBER = int(os.environ.get("BOARD_NUMBER") or 1)
 STAGE_FIELD = "Stage"
 STATUS_FIELD = "Status"
+STUCK_STATUS = "Stuck - Needs help"
+BOARD_URL = f"https://github.com/users/{OWNER}/projects/{NUMBER}"
 
 
 def gh(query, **vars):
@@ -145,7 +158,54 @@ def set_option(issue, field_name, value):
     m = """mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{
       projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item{ id } } }"""
     gh(m, p=proj["id"], i=it["item"], f=f["id"], o=opt["id"])
-    return opt["name"]
+    return opt["name"], it
+
+
+# --- Discord ---------------------------------------------------------------------------
+# Every function here is best-effort: a lookup that fails returns nothing and the post
+# goes out without that detail. None of them may raise past the board command.
+
+def pr_for(issue):
+    """The card's pull request, found by its branch (`card-<n>`, worktree.sh's naming).
+    Returns {"url", "state"} or None. One `gh pr list`, so only called for the events
+    where a PR link is worth showing."""
+    n = issue_num(issue)
+    try:
+        r = subprocess.run(["gh", "pr", "list", "--head", f"card-{n}", "--state", "all",
+                            "--json", "url,state", "--limit", "1"],
+                           capture_output=True, text=True, timeout=20)
+        prs = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
+    except Exception:
+        return None
+    return prs[0] if prs else None
+
+
+def needs_steve_ask(issue):
+    """The first line of the card's newest `Needs Steve` comment, or "". The tick posts
+    that comment before it moves the card to Stuck (watch.md §4), so the alert can carry
+    the ask; the spawner passes its own reason with `--why` instead."""
+    n = issue_num(issue)
+    try:
+        r = subprocess.run(["gh", "issue", "view", str(n), "--json", "comments"],
+                           capture_output=True, text=True, timeout=20)
+        comments = json.loads(r.stdout).get("comments", []) if r.returncode == 0 else []
+    except Exception:
+        return ""
+    for c in reversed(comments):
+        first = (c.get("body") or "").strip().splitlines()
+        first = first[0].strip() if first else ""
+        if "Needs Steve:" in first:
+            return first.replace("🤖", "", 1).strip()
+    return ""
+
+
+def announce(kind, card, detail="", with_pr=False, pr=None):
+    if not notify.enabled():
+        return
+    if with_pr and pr is None:
+        pr = pr_for(card["number"])
+    notify.post(kind, card, detail=detail, pr=pr,
+                board_url=BOARD_URL if kind == "stuck" else "")
 
 
 QUEUE_STAGE = "Waiting"
@@ -165,18 +225,64 @@ def cmd_queue():
     return 0
 
 
-def cmd_move(issue, status):
-    name = set_option(issue, STATUS_FIELD, status)
+def cmd_move(issue, status, *rest):
+    """`move <issue> "<status>" [--why "<one line>"]`. `--why` is only read for a move to
+    Stuck: it becomes the ask in the Discord alert (the spawner uses it, since its own
+    comment goes out after the move). Without it the alert quotes the card's newest
+    `Needs Steve` comment."""
+    why = ""
+    rest = list(rest)
+    if rest and rest[0] == "--why":
+        why = rest[1] if len(rest) > 1 else ""
+        rest = rest[2:]
+    if rest:
+        sys.exit(f"board.py: move: unexpected arguments {rest!r}")
+    name, it = set_option(issue, STATUS_FIELD, status)
     print(f"#{issue} → {name}")
+    if name == STUCK_STATUS:
+        announce("stuck", it, detail=why or needs_steve_ask(issue), with_pr=True)
+    else:
+        announce("status", it, detail=name, with_pr=name in ("In review", "Done"))
     return 0
+
+
+# Stage values whose Discord post would only repeat a status move that already posted.
+QUIET_STAGES = {"Parked"}
 
 
 def cmd_stage(issue, stage):
     """What the tick is doing right now: Claimed | Designing | Building | Testing |
     Reviewing | PR open | Merging | Parked. Status says who owns the card; Stage says
     where it is. A board view grouped by Stage shows the columns Steve asked for."""
-    name = set_option(issue, STAGE_FIELD, stage)
+    name, it = set_option(issue, STAGE_FIELD, stage)
     print(f"#{issue} stage → {name}")
+    if name not in QUIET_STAGES:
+        announce("stage", it, detail=name, with_pr=name in ("PR open", "Merging"))
+    return 0
+
+
+def cmd_notify(issue, kind, detail=""):
+    """Post an event the board itself never sees (the spawner's exit handling):
+    `shipped` (closed by a merged PR), `closed` (closed without one), `released` (a run
+    died holding the card). Exits 0 whether or not Discord is configured or reachable."""
+    if kind not in ("shipped", "closed", "released"):
+        sys.exit(f"board.py: notify: unknown event {kind!r} (shipped | closed | released)")
+    if not notify.enabled():
+        return 0
+    try:
+        it = next((i for i in items() if i["number"] == issue_num(issue)), None)
+    except SystemExit:  # a board outage must not fail a notification; post without a title
+        it = None
+    if not it:
+        it = {"number": issue_num(issue), "title": "", "url": ""}
+    pr = None
+    if kind in ("shipped", "closed"):
+        pr = pr_for(issue)
+        # The spawner only knows the card closed. "Shipped" means a merged PR did it;
+        # a card Steve closed by hand (option C on a park) is reported as what it is.
+        if kind == "shipped" and (pr or {}).get("state") != "MERGED":
+            kind = "closed"
+    announce(kind, it, detail=detail, pr=pr)
     return 0
 
 
@@ -208,14 +314,15 @@ def cmd_show(issue):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "queue"):
+    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "queue", "notify"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
-                  "move": lambda: cmd_move(a[1], a[2]),
+                  "move": lambda: cmd_move(a[1], a[2], *a[3:]),
                   "stage": lambda: cmd_stage(a[1], a[2]),
                   "queue": lambda: cmd_queue(),
                   "show": lambda: cmd_show(a[1]),
+                  "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),
                   "unclaim": lambda: cmd_unclaim(a[1])}[a[0]]())
     except IndexError:
         sys.exit(__doc__)

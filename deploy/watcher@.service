@@ -1,6 +1,7 @@
 # One watcher instance per project: `systemctl enable --now watcher@riffmap`.
-# /etc/watcher/env holds the Claude login token (CLAUDE_CODE_OAUTH_TOKEN) and nothing else;
-# it must NOT export ANTHROPIC_API_KEY — the key outranks the login and would bill the API.
+# /etc/watcher/env holds the Claude login token (CLAUDE_CODE_OAUTH_TOKEN) and, optionally,
+# the Discord webhook (DISCORD_WEBHOOK_URL, DISCORD_MENTION) — see bin/notify.py. It must
+# NOT export ANTHROPIC_API_KEY — the key outranks the login and would bill the API.
 [Unit]
 Description=Board watcher for %i
 After=network-online.target

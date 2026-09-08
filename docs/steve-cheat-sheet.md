@@ -36,6 +36,24 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 | 🤖 Watcher: the run ended without finishing | the tick died or ran out of budget; the card will be retried once | nothing, unless it happens twice |
 | 🤖 Watcher: a run died while holding this card | cleanup after a crash | nothing |
 
+## What the Discord messages mean
+
+Discord repeats the board; the card is always the record. Every message links to the card.
+
+| Message starts with | Meaning | You need to do |
+|---|---|---|
+| 🚨 **Needs Steve:** | a card is in Stuck; the ask is in the message | open the card, pick A, B or C, move it back to In progress |
+| 📋 #n → **In review** | the PR is green but did not merge | merge it, or ask why |
+| 📋 #n → *(any other column)* | the card changed column | nothing |
+| 🔧 #n → **Building** (or any stage) | the bot crossed into that step | nothing |
+| ✅ #n shipped | merged and closed; the PR is linked | nothing |
+| 🗂️ #n was closed without a merge | the card was closed by hand | nothing |
+| ⚠️ #n: the run ended without finishing | the tick died; it will be retried once | nothing, unless it comes back as 🚨 |
+
+To turn it off, remove `DISCORD_WEBHOOK_URL` from `/etc/watcher/env` on the box and
+restart the unit. To get pinged on 🚨 only, set `DISCORD_MENTION` there to your Discord
+user mention (`<@your-id>`) or `@here`.
+
 ## Deploy a new watcher version
 
 - One command, as root on the box: `/opt/watcher/deploy/rollout.sh riffmap`

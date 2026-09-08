@@ -1,2 +1,2 @@
-*.log
-.DS_Store
+bin/__pycache__/
+__pycache__/
