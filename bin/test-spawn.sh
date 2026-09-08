@@ -212,7 +212,7 @@ chmod +x "$BIN/claude"
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
-echo "gh ${args//$'\n'/ }" >> "$TEST_LOG"
+echo "gh ${args//$'\n'/ } [GH_REPO=${GH_REPO:-}]" >> "$TEST_LOG"
 exit 0
 STUB
 chmod +x "$BIN/gh"
@@ -282,7 +282,7 @@ run() {
   CLAUDE_UNTRUSTED_KEY="${CLAUDE_UNTRUSTED_KEY:-}" \
   CLAUDE_PROBE_FAIL_OTHER="${CLAUDE_PROBE_FAIL_OTHER:-}" \
   WORKTREE_NEW_FAIL="${WORKTREE_NEW_FAIL:-0}" \
-  WATCHER_ROOT="$FAKE_ROOT" \
+  WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
   WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
   WATCHER_CLAUDE_JSON="${CLAUDE_JSON_PATH:-$TMP/unused-claude.json}" \
@@ -345,6 +345,7 @@ run --once >/dev/null; RC=$?
 [ "$RC" != 0 ] && pass "a killed tick is a non-success exit (spawn.sh --once returns non-zero)" || flunk "exit code should be non-zero, got $RC"
 if grepped "board.py unclaim 30"; then pass "unclaim called: in-flight leaked"; else flunk "unclaim not called" "$(cat "$TESTLOG")"; fi
 comment_line="$(grep 'gh issue comment 30' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q '\[GH_REPO=owner/proj\]'; then pass "repo-scoped gh calls carry GH_REPO=<project repo> (watcher#3: the spawner's cwd is not the project)"; else flunk "GH_REPO on the sweeper comment" "$comment_line"; fi
 if printf '%s' "$comment_line" | grep -q '143/error_during_execution' \
    && printf '%s' "$comment_line" | grep -q '2 permission denials' \
    && printf '%s' "$comment_line" | grep -q '\$0.42'; then

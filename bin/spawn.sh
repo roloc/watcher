@@ -57,6 +57,12 @@ WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 [ -n "$WATCHER_ROOT" ] || { echo "spawn.sh: set WATCHER_PROJECT=projects/<name>.env (or WATCHER_ROOT)" >&2; exit 64; }
 PROJECT_NAME="${PROJECT_NAME:-$(basename "$WATCHER_ROOT")}"
 export BOARD_OWNER="${BOARD_OWNER:-}" BOARD_NUMBER="${BOARD_NUMBER:-}"
+# The repo the cards live in. `gh` infers a repo from the cwd, and this script's cwd is
+# /opt/watcher — a checkout of the WATCHER, not the project — so on the first night every
+# unclaim and sweeper comment hit the wrong repo and three finished cards sat in-flight
+# (watcher#3). GH_REPO pins every repo-scoped gh call here AND in board.py (a child).
+PROJECT_REPO="${PROJECT_REPO:-$(git -C "$WATCHER_ROOT" remote get-url origin 2>/dev/null | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')}"
+[ -n "$PROJECT_REPO" ] && export GH_REPO="$PROJECT_REPO"
 WATCHER_CLAUDE="${WATCHER_CLAUDE:-claude}"
 WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"

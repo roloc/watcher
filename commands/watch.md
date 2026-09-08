@@ -64,8 +64,12 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
-- Wait for the project's **required CI check** (its `CLAUDE.md` names it), then
-  `gh pr merge --squash --delete-branch`. **You do the merging.** `main` requires 0
+- Wait for the project's **required CI check** (its `CLAUDE.md` names it) **in the
+  foreground** — `gh pr checks <pr> --watch --fail-fast` blocks until it finishes — then
+  `gh pr merge --squash --delete-branch`. **You do the merging.** **Never end your turn to
+  wait** — not for CI, not for a subagent, not for anything: headless, ending the turn ends
+  the process, the PR stays open, the card stays in-flight and the work is lost (three cards
+  on the first night, watcher#4). Subagents run in the foreground only. `main` requires 0
   approvals; CI is the required check; `reviewer` is the only other gate and runs once. If
   you changed code after its pass and the change is more than the fix it asked for, run it
   once more on that fix only.
