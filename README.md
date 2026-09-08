@@ -34,8 +34,11 @@ probes and a classifier, and the day that was tried it cost more than the featur
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
 
-**Stage.** Besides Status, the board carries a single-select `Stage` field (Claimed,
-Designing, Building, Testing, Reviewing, PR open, Merging, Parked). The tick sets it at each
+**Stage.** Besides Status, the board carries a single-select `Stage` field (Waiting,
+Claimed, Designing, Building, Testing, Reviewing, PR open, Merging, Parked). **Waiting is
+the hand-off:** drag a card there on a Stage-grouped view and the spawner moves it to In
+progress and picks it up (`board queue` lists them), so Status never has to be touched by
+hand. The tick sets it at each
 step with `board stage <n> <value>`; the spawner sets Parked when it parks a card. Status
 says who owns the card, Stage says what is happening to it. A board view grouped by Stage
 is the per-step column view; `board list` prints the stage as its fifth column.

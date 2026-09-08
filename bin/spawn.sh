@@ -141,6 +141,9 @@ poll_board() {
   if ROWS="$($WATCHER_BOARD list "In progress" 2>"$errfile")"; then
     BOARD_ERR="$(cat "$errfile" 2>/dev/null)"
     rm -f "$errfile"
+    # The Waiting stage: cards Steve dragged there on the Stage-grouped view. Best-effort —
+    # a failure here must not stop In progress from being served, so it only logs.
+    QUEUE_ROWS="$($WATCHER_BOARD queue 2>/dev/null)" || { QUEUE_ROWS=""; log "board.py queue failed; serving In progress only"; }
     return 0
   else
     BOARD_ERR="$(cat "$errfile" 2>/dev/null)"
@@ -186,8 +189,10 @@ board_show_retry() {
 pick_card() {
   ISSUE=""; PRIORITY=""; AGENT=""; TITLE=""
   local r_issue r_priority r_agent r_flags r_title attempts attn parked_ok parked_tried
-  while IFS=$'\t' read -r r_issue r_priority r_agent r_flags r_title; do
+  while IFS=$'\t' read -r r_issue r_priority r_agent r_flags r_stage r_title; do
     [ -z "$r_issue" ] && continue
+    # Five-column rows (an older board.py, or the tests' fixtures) have no stage column.
+    if [ -z "$r_title" ]; then r_title="$r_stage"; r_stage=""; fi
     case ",$r_flags," in
       *,in-flight,*) log "#$r_issue skipped: in-flight"; continue ;;
     esac
@@ -246,7 +251,7 @@ pick_card() {
     fi
     ISSUE="$r_issue"; PRIORITY="$r_priority"; AGENT="$r_agent"; TITLE="$r_title"
     return 0
-  done <<< "$ROWS"
+  done <<< "${1-$ROWS}"
   return 1
 }
 
@@ -373,8 +378,8 @@ do_dry_run() {
     echo "dry-run: board.py failed: $BOARD_ERR" >&2
     exit 1
   fi
-  if ! pick_card; then
-    echo "dry-run: nothing claimable in In progress"
+  if ! pick_card "$ROWS" && ! { [ -n "${QUEUE_ROWS:-}" ] && pick_card "$QUEUE_ROWS"; }; then
+    echo "dry-run: nothing claimable in In progress or Waiting"
     exit 0
   fi
   local dir="$WORKTREE_BASE/card-$ISSUE" ts
@@ -705,12 +710,31 @@ tick_once() {
     return 2
   fi
 
-  if ! pick_card; then
+  QUEUED=0
+  if ! pick_card "$ROWS"; then
+    if [ -n "${QUEUE_ROWS:-}" ] && pick_card "$QUEUE_ROWS"; then
+      QUEUED=1
+    else
+      log "nothing claimable in In progress or Waiting"
+    fi
+  fi
+  if [ -z "$ISSUE" ]; then
     log "nothing claimable in In progress"
     return 0
   fi
 
   log "picked #$ISSUE ($PRIORITY) $TITLE"
+  if [ "$QUEUED" = 1 ]; then
+    # Status stays truthful: a card the watcher works is In progress, whatever column it
+    # was dragged from. If the move fails, don't launch — the tick's claim would then
+    # sit on a card the board says nobody is working.
+    if $WATCHER_BOARD move "$ISSUE" "In progress"; then
+      log "#$ISSUE taken from Waiting → In progress"
+    else
+      log "#$ISSUE: could not move from Waiting to In progress; not launching"
+      return 1
+    fi
+  fi
 
   if ! prepare_worktree "$ISSUE"; then
     log "aborting this poll for #$ISSUE: worktree not ready"
