@@ -20,6 +20,7 @@ import os, subprocess, sys
 
 OWNER = os.environ.get("BOARD_OWNER") or "roloc"
 NUMBER = int(os.environ.get("BOARD_NUMBER") or 1)
+STAGE_FIELD = "Stage"
 STATUS_FIELD = "Status"
 
 
@@ -83,6 +84,7 @@ def items():
                 "url": c["url"], "state": c["state"],
                 "labels": [l["name"] for l in c["labels"]["nodes"]],
                 "status": sel.get(STATUS_FIELD), "priority": sel.get("Priority"),
+                "stage": sel.get(STAGE_FIELD),
             })
         if not page["pageInfo"]["hasNextPage"]:
             return out
@@ -121,19 +123,21 @@ def cmd_list(status="In progress"):
     rows.sort(key=lambda r: (PRI_ORDER.get(r["priority"], 3), r["number"]))
     for r in rows:
         flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "steve-decision"})) or "-"
-        print(f"{r['number']}\t{r['priority'] or '-'}\t{agent_of(r['labels']) or '-'}\t{flags}\t{r['title']}")
+        print(f"{r['number']}\t{r['priority'] or '-'}\t{agent_of(r['labels']) or '-'}\t{flags}\t"
+              f"{r['stage'] or '-'}\t{r['title']}")
     return 0
 
 
-def cmd_move(issue, status):
+def set_option(issue, field_name, value):
+    """Set a single-select field (Status, Stage) on the card to the option named `value`."""
     proj, fields = project()
-    f = fields.get(STATUS_FIELD)
+    f = fields.get(field_name)
     if not f:
-        sys.exit(f"board.py: the board has no '{STATUS_FIELD}' field. Have: "
+        sys.exit(f"board.py: the board has no '{field_name}' field. Have: "
                  + " | ".join(sorted(fields)))
-    opt = next((o for o in f["options"] if o["name"].lower() == status.lower()), None)
+    opt = next((o for o in f["options"] if o["name"].lower() == value.lower()), None)
     if not opt:
-        sys.exit(f"board.py: no '{STATUS_FIELD}' option {status!r}. Have: "
+        sys.exit(f"board.py: no '{field_name}' option {value!r}. Have: "
                  + " | ".join(o["name"] for o in f["options"]))
     it = next((i for i in items() if i["number"] == issue_num(issue)), None)
     if not it:
@@ -141,7 +145,21 @@ def cmd_move(issue, status):
     m = """mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{
       projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item{ id } } }"""
     gh(m, p=proj["id"], i=it["item"], f=f["id"], o=opt["id"])
-    print(f"#{issue} → {opt['name']}")
+    return opt["name"]
+
+
+def cmd_move(issue, status):
+    name = set_option(issue, STATUS_FIELD, status)
+    print(f"#{issue} → {name}")
+    return 0
+
+
+def cmd_stage(issue, stage):
+    """What the tick is doing right now: Claimed | Designing | Building | Testing |
+    Reviewing | PR open | Merging | Parked. Status says who owns the card; Stage says
+    where it is. A board view grouped by Stage shows the columns Steve asked for."""
+    name = set_option(issue, STAGE_FIELD, stage)
+    print(f"#{issue} stage → {name}")
     return 0
 
 
@@ -173,11 +191,12 @@ def cmd_show(issue):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "show", "unclaim"):
+    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
                   "move": lambda: cmd_move(a[1], a[2]),
+                  "stage": lambda: cmd_stage(a[1], a[2]),
                   "show": lambda: cmd_show(a[1]),
                   "unclaim": lambda: cmd_unclaim(a[1])}[a[0]]())
     except IndexError:

@@ -17,7 +17,7 @@ The rules you need from both are repeated here; read the docs when something is 
 board list "In progress"
 ```
 
-Columns: `issue  priority  agent  flags  title`. Rows are already sorted P0 → P2.
+Columns: `issue  priority  agent  flags  stage  title`. Rows are already sorted P0 → P2.
 
 - Take the **first row whose flags do not include `in-flight`** — unless Steve named one
   here: $ARGUMENTS
@@ -31,8 +31,16 @@ human-visible trace rather than a silently-owned card:
 ```
 gh issue comment <n> --body "🤖 Watcher picked this up at $(date -u +%FT%TZ)."
 gh issue edit <n> --add-label in-flight
+board stage <n> Claimed
 board show <n>     # full body, labels, priority, status
 ```
+
+**Keep the Stage current.** The board has a `Stage` field Steve watches from his phone:
+`in-flight` says a tick owns the card, Stage says what it is doing. Set it the moment you
+cross into each step, not afterwards — `board stage <n> Designing` (a decision or spec
+before code), `Building`, `Testing` (build and tests running), `Reviewing` (the reviewer
+pass), `PR open` (pushed, waiting on CI), `Merging`, and `Parked` when you send it to
+Stuck. One command each; never skip one because the step was short.
 
 **`in-flight` is a courtesy flag, not a lock.** Reading the board and adding the label are
 two calls with no compare-and-set, and `--add-label` succeeds silently on a label that is
