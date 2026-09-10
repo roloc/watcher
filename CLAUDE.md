@@ -19,7 +19,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
   (`steve-cheat-sheet.md`).
 - `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (deploy without
-  killing a running tick: pull, pause, wait, restart, un-pause), one env file per project.
+  killing a running tick: pull, pause, wait, restart, un-pause, per lane), one env file per
+  systemd instance. A project with two lanes has two files; the lane file sources the
+  project file and sets `PROJECT_NAME` and `LANE_AGENTS`, nothing else.
 
 ## Rules for editing this repo
 

@@ -48,9 +48,12 @@ Stuck. One command each; never skip one because the step was short.
 **`in-flight` is a courtesy flag, not a lock.** Reading the board and adding the label are
 two calls with no compare-and-set, and `--add-label` succeeds silently on a label that is
 already there — so two ticks racing that gap both believe they won. It is adequate because
-**one tick runs at a time** (the spawner's pidfile is the real lock); it would not be
-adequate for real concurrency. If the claim command fails or is denied, **abort the tick** —
-do not proceed unclaimed.
+**one tick runs at a time per lane**, and lanes never share a card: a project may run as
+two spawner instances (a design lane and a build lane, split by `agent:` label — see
+`how-it-works.md`, "Lanes"), each with its own pidfile, and the spawner only ever hands
+you a card from your lane. A card in flight on the board that is not yours belongs to the
+other lane; skip it and never touch it. If the claim command fails or is denied, **abort
+the tick** — do not proceed unclaimed.
 
 **Before claiming, check the card is not already stranded.** If a card is `in-flight` but
 its pick-up comment is more than ~30 minutes old and nothing has moved since, a previous
@@ -84,6 +87,13 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   approvals; CI is the required check; `reviewer` is the only other gate and runs once. If
   you changed code after its pass and the change is more than the fix it asked for, run it
   once more on that fix only.
+- **`main` may move under you** while you work — the other lane merges its own PRs, and so
+  does Steve. Before merging, and again if the merge is refused as not mergeable:
+  `git fetch origin && git merge origin/main`. If git merges it cleanly, push, wait for CI
+  again, then merge. If it leaves conflict markers, `git merge --abort` and go to **Stuck**
+  (§4) with the conflicting files under the fold. Never resolve a conflict by hand: the
+  other change was reviewed and merged on its own terms, and deciding what wins is not a
+  builder's call.
 - Docs-only changes go through a PR the same way; they get no `reviewer` pass.
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
@@ -180,7 +190,9 @@ bullets is enough).
 
 ## Guardrails
 
-- **One card per tick. One card at a time.** No exceptions.
+- **One card per tick. One card at a time in your lane.** No exceptions. Another lane's tick
+  may be running beside you on another card, in its own worktree; nothing of yours is
+  shared with it except `main`.
 - **Two different dollars, two different caps.** `--max-budget-usd` on the spawner's own
   `claude -p` invocation is *your* spend cap — client-side, includes every subagent, ends
   the run with `error_max_budget_usd` if crossed. The project's *own* API spend (through

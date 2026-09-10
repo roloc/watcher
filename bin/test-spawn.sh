@@ -294,6 +294,7 @@ run() {
   WATCHER_TRUST_PROBE_TIMEOUT_SEC="${WATCHER_TRUST_PROBE_TIMEOUT_SEC:-5}" \
   WATCHER_SLEEP="${WATCHER_SLEEP:-0}" \
   WATCHER_MAX_POLLS="${WATCHER_MAX_POLLS:-}" \
+  LANE_AGENTS="${LANE_AGENTS:-}" \
   bash "$SPAWN" "$@"
   return $?
 }
@@ -800,22 +801,98 @@ if [ "$(cat "$STATE/attempts/270" 2>/dev/null)" = 1 ]; then pass "poll 2: attemp
 # ============================================================================
 echo "29. The Waiting stage: a card dragged there (not In progress) is moved to In progress, then launched"
 # ============================================================================
-reset
+fresh_state
 board_list ""                                    # nothing In progress
 BOARD_QUEUE_FILE="$STATE/board-queue.tsv"
 printf '300\tP1\tbuilder\t-\tWaiting\tCard three hundred\n' > "$BOARD_QUEUE_FILE"
 board_show '{"number":300,"state":"OPEN","labels":[],"status":"In progress"}'
-claude_result success 0
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
 run --once >/dev/null 2>"$TMP/q.err" || true
 if grepped "board.py move 300 In progress"; then pass "queued card moved to In progress before launch"; else flunk "expected board.py move 300 In progress" "$(cat "$TESTLOG")"; fi
 if grepped "/watch 300"; then pass "queued card launched"; else flunk "expected a launch for #300" "$(cat "$TESTLOG")"; fi
 if grep -q "picked #300 (P1) Card three hundred" "$TMP/q.err"; then pass "six-column row parsed: title intact after the stage column"; else flunk "title parse" "$(cat "$TMP/q.err")"; fi
 # a queue row that is in-flight is skipped like any other
-reset
+fresh_state
 board_list ""
 printf '301\tP1\tbuilder\tin-flight\tWaiting\tCard three-oh-one\n' > "$BOARD_QUEUE_FILE"
 run --once >/dev/null 2>&1 || true
 if not_grepped "/watch 301"; then pass "an in-flight queue row is not launched"; else flunk "in-flight queue row launched"; fi
+unset BOARD_QUEUE_FILE
+
+# ============================================================================
+echo "30. Lanes: LANE_AGENTS partitions the board by agent label, so two instances of one"
+echo "    project (a design lane and a build lane) can run side by side without ever"
+echo "    wanting the same card — the per-instance pidfile stays the only lock"
+# ============================================================================
+# The same board for every sub-case: a builder card first (P0), then an architect card,
+# a designer card, and one with no agent label at all.
+lane_board() {
+  board_list $'400\tP0\tbuilder\t-\tBuild card' \
+             $'401\tP1\tarchitect\t-\tDesign card' \
+             $'402\tP1\tdesigner\t-\tMockup card' \
+             $'403\tP2\t-\t-\tUnlabeled card'
+  board_show '{"number":401,"state":"OPEN","status":"In progress","labels":[]}'
+}
+fresh_state; lane_board
+OUT="$(LANE_AGENTS='architect,designer' run --dry-run 2>"$TMP/lane.err")"
+if printf '%s' "$OUT" | grep -q '^pick: #401 ' && printf '%s' "$OUT" | grep -q '^lane: architect,designer'; then
+  pass "design lane (architect,designer): skips the P0 builder card, picks #401, and --dry-run names the lane"
+else
+  flunk "design lane pick" "out=[$OUT]"
+fi
+if grep -q "#400 skipped: agent 'builder' is not in this lane" "$TMP/lane.err"; then pass "the skip is logged with the agent and the lane"; else flunk "skip log" "$(cat "$TMP/lane.err")"; fi
+
+fresh_state; lane_board
+OUT="$(LANE_AGENTS='!architect,designer' run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #400 '; then pass "build lane (!architect,designer): picks the builder card"; else flunk "build lane pick" "out=[$OUT]"; fi
+
+fresh_state
+board_list $'401\tP1\tarchitect\t-\tDesign card' \
+           $'403\tP2\t-\t-\tUnlabeled card'
+OUT="$(LANE_AGENTS='!architect,designer' run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #403 '; then pass "build lane: a card with NO agent label is 'the rest' and lands with the builder"; else flunk "unlabeled card in the build lane" "out=[$OUT]"; fi
+
+fresh_state
+board_list $'401\tP1\tarchitect\t-\tDesign card' \
+           $'403\tP2\t-\t-\tUnlabeled card'
+OUT="$(LANE_AGENTS='-' run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #403 '; then pass "a lane may name '-' to take exactly the unlabeled cards"; else flunk "'-' lane" "out=[$OUT]"; fi
+
+fresh_state; lane_board
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #400 ' && printf '%s' "$OUT" | grep -q '^lane: every card'; then pass "no LANE_AGENTS: every card, first row wins — a single-lane project is unchanged"; else flunk "single-lane default" "out=[$OUT]"; fi
+
+fresh_state
+board_list $'401\tP1\tarchitect\t-\tDesign card'
+OUT="$(LANE_AGENTS='!architect,designer' run --dry-run 2>"$TMP/lane2.err")"; RC=$?
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'nothing claimable'; then pass "build lane with only design cards on the board: a quiet poll, not an error"; else flunk "quiet poll" "rc=$RC out=[$OUT]"; fi
+
+# The other lane's card at attempts >= 2 is NOT this lane's to park: the safety net in
+# pick_card runs after the lane filter, so a build lane never parks a design card (and
+# never even consults its own attempts/<n> for it).
+fresh_state; lane_board
+mkdir -p "$STATE/attempts"; echo 2 > "$STATE/attempts/401"; echo 2 > "$STATE/attempts/400"
+LANE_AGENTS='!architect,designer' run --once >/dev/null 2>&1 || true
+if grepped 'board.py move 400 Stuck - Needs help' && not_grepped 'board.py move 401'; then
+  pass "build lane parks ITS card at 2 attempts (#400) and leaves the design lane's (#401) alone"
+else
+  flunk "cross-lane park" "$(cat "$TESTLOG")"
+fi
+if not_grepped '/watch 401'; then pass "…and never launches the other lane's card either"; else flunk "cross-lane launch" "$(cat "$TESTLOG")"; fi
+
+# Waiting-stage rows go through the same filter.
+fresh_state
+board_list ""
+BOARD_QUEUE_FILE="$STATE/board-queue.tsv"
+printf '410\tP1\tbuilder\t-\tWaiting\tQueued build\n411\tP1\tarchitect\t-\tWaiting\tQueued design\n' > "$BOARD_QUEUE_FILE"
+board_show '{"number":411,"state":"OPEN","labels":[],"status":"In progress"}'
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+LANE_AGENTS='architect,designer' run --once >/dev/null 2>&1 || true
+if grepped "board.py move 411 In progress" && grepped "/watch 411" && not_grepped "/watch 410"; then
+  pass "a Waiting card is taken by the lane its agent label belongs to, not by the first lane to poll"
+else
+  flunk "lane filter on the Waiting queue" "$(cat "$TESTLOG")"
+fi
 unset BOARD_QUEUE_FILE
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"

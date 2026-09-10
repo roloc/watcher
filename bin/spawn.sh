@@ -3,7 +3,9 @@
 # The watcher's spawner: a systemd-kept-alive loop with no Claude session of its own. It
 # polls one project's board once a minute and starts `claude -p "/watch <n>"` only when a
 # claimable card exists. One spawner that refuses to start a second tick while one runs IS
-# the lock (a pidfile) — there is no compare-and-set on the board's `in-flight` label. The
+# the lock (a pidfile) — there is no compare-and-set on the board's `in-flight` label. A
+# project may run two of these side by side as LANES (LANE_AGENTS below), and the lock
+# still holds because the lanes partition the board and never want the same card. The
 # spawner is also the stale-claim sweeper: it never claims a card itself.
 #
 # It runs INSIDE a throwaway box with --dangerously-skip-permissions: no allow lists, no
@@ -18,6 +20,15 @@
 #   DISCORD_WEBHOOK_URL  optional; a per-project Discord channel for card events. Usually
 #                    set once for the box in /etc/watcher/env instead (see notify.py).
 #   DISCORD_MENTION  optional; who a Stuck alert pings (`<@id>`, `<@&roleid>`, `@here`)
+#   LANE_AGENTS      optional; which cards THIS instance may pick, by `agent:` label. A
+#                    comma-separated list of agent names (`architect,designer`), or the
+#                    same list with a leading `!` for every card EXCEPT those
+#                    (`!architect,designer`). `-` names a card with no agent label. Unset
+#                    means every card — a project with a single lane. Two instances of one
+#                    project (two systemd units, two project files, two state dirs) become
+#                    two LANES that run side by side; give them complementary lists so no
+#                    card can ever belong to both, and the per-instance pidfile stays the
+#                    only lock the design needs. See docs/how-it-works.md, "Lanes".
 #
 # Every external command is overridable so this can be tested with stubs, never the network:
 #   WATCHER_PROJECT    path to the project file                  (default: none — required
@@ -81,6 +92,7 @@ TICK_TIMEOUT="${TICK_TIMEOUT:-150}"
 TICK_MAX_TURNS="${TICK_MAX_TURNS:-400}"
 TICK_MAX_BUDGET_USD="${TICK_MAX_BUDGET_USD:-15}"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"
+LANE_AGENTS="${LANE_AGENTS:-}"
 
 # ../<repo>-worktrees, same derivation as worktree.sh's own MAIN/HOME_DIR.
 WORKTREE_BASE="$(dirname "$WATCHER_ROOT")/$(basename "$WATCHER_ROOT")-worktrees"
@@ -188,6 +200,26 @@ board_show_retry() {
   return 1
 }
 
+# lane_takes <agent> — is a card with this `agent:` label (board.py prints `-` for none)
+# this instance's to pick? Unset LANE_AGENTS takes everything. A list takes exactly those
+# names; a `!`-prefixed list takes everything else, so one lane can be "the rest" and a
+# label nobody listed (a new agent, no label at all) still lands somewhere instead of
+# nowhere. Two lanes of one project must be complements of each other: this filter is
+# what keeps them from ever wanting the same card, and nothing on the board enforces it.
+lane_takes() {
+  local agent="${1:--}" spec="$LANE_AGENTS" listed=0 name
+  [ -n "$spec" ] || return 0
+  local negate=0
+  case "$spec" in '!'*) negate=1; spec="${spec#!}" ;; esac
+  local IFS=','
+  for name in $spec; do
+    name="${name// /}"
+    [ -n "$name" ] || continue
+    if [ "$name" = "$agent" ]; then listed=1; break; fi
+  done
+  [ "$listed" != "$negate" ]
+}
+
 # --- section 1, step 3: the pick ---------------------------------------------------------
 # First row whose flags do not include in-flight and whose attempts/<n> is below 2. Rows
 # are already P0-first (board.py). blocked/steve-decision are NOT filtered here — the
@@ -203,6 +235,9 @@ pick_card() {
     case ",$r_flags," in
       *,in-flight,*) log "#$r_issue skipped: in-flight"; continue ;;
     esac
+    # Another lane's card. Nothing below this line — the parked-ok reconciliation, the
+    # attempts safety net, the pick itself — is this instance's business for it.
+    if ! lane_takes "$r_agent"; then log "#$r_issue skipped: agent '$r_agent' is not in this lane ($LANE_AGENTS)"; continue; fi
     attn="$WATCHER_STATE/attempts/$r_issue"
     attempts=0
     [ -f "$attn" ] && attempts="$(cat "$attn" 2>/dev/null || echo 0)"
@@ -394,6 +429,7 @@ do_dry_run() {
   fi
   local dir="$WORKTREE_BASE/card-$ISSUE" ts
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  echo "lane: ${LANE_AGENTS:-every card (no LANE_AGENTS)}"
   echo "pick: #$ISSUE ($PRIORITY) $TITLE"
   echo "worktree: $dir"
   echo "claude command:"
@@ -776,6 +812,7 @@ run_daemon() {
   # No standalone reconcile_stale_current call here: tick_once runs it at the top of every
   # iteration (including this loop's first), so a separate call before the loop would only
   # duplicate the very first poll's reconciliation.
+  log "lane: ${LANE_AGENTS:-every card (no LANE_AGENTS)}; state $WATCHER_STATE"
   local polls=0
   while true; do
     local rc=0

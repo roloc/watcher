@@ -3,35 +3,40 @@
 #
 #   deploy/rollout.sh <project> [branch]      # default branch: main
 #
+# A project with LANES (projects/<project>-<lane>.env next to projects/<project>.env —
+# riffmap has riffmap-design) is rolled as one: every lane's unit is drained and swapped
+# by this same command, each one the moment its own tick is done, so a long build never
+# holds the design lane on old code or the other way around.
+#
 # What it does, in order:
 #   1. Pulls /opt/watcher (the branch given, fast-forward only) and re-runs install.sh.
 #      git replaces files by rename, so the spawn.sh that is already running keeps reading
 #      its old copy; nothing running is disturbed. /watch, the reviewer and docs/ are
 #      symlinked into ~watcher/.claude, so the NEXT tick already uses the new ones.
-#   2. Pauses the spawner (touch PAUSE): it finishes whatever tick it is on and idles.
-#   3. Waits until no tick is running in the unit's cgroup — the running tick, if any, is
-#      left alone until it exits on its own (up to TICK_TIMEOUT, 150 min by default).
-#   4. Restarts the unit, so the new spawn.sh is the one running, and removes PAUSE.
+#   2. Pauses every unit (touch PAUSE): each finishes whatever tick it is on and idles.
+#   3. Waits, per unit, until no tick is running in its cgroup — a running tick is left
+#      alone until it exits on its own (up to TICK_TIMEOUT, 150 min by default) — and
+#   4. restarts that unit, so the new spawn.sh is the one running, and removes its PAUSE.
 #
-# If the wait times out, PAUSE is left in place, the unit is NOT restarted, and the exit
-# code is 1 — run it again later; it is idempotent. Nothing here ever sends a signal to a
-# tick.
+# If the wait times out, the units still waiting keep their PAUSE, are NOT restarted, and
+# the exit code is 1 — run it again later; it is idempotent. Nothing here ever sends a
+# signal to a tick.
 set -euo pipefail
 
 PROJECT="${1:-}"; BRANCH="${2:-main}"
 [ -n "$PROJECT" ] || { echo "usage: deploy/rollout.sh <project> [branch]" >&2; exit 64; }
-UNIT="watcher@$PROJECT"
-STATE="/home/watcher/.local/state/watcher/$PROJECT"
-PAUSE="$STATE/PAUSE"
 WAIT_MAX="${ROLLOUT_WAIT_MAX_MIN:-170}"     # minutes; TICK_TIMEOUT (150) plus margin
 POLL="${ROLLOUT_POLL_SEC:-30}"
 
 say() { printf '%s rollout: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
+state_of() { echo "/home/watcher/.local/state/watcher/$1"; }
+
 # A tick is a `claude … --dangerously-skip-permissions` process inside this unit's cgroup.
-# Checking the cgroup (not a global pgrep) means another project's tick never blocks us.
+# Checking the cgroup (not a global pgrep) means another project's tick — or the other
+# lane's — never blocks us.
 tick_running() {
-  local procs="/sys/fs/cgroup/system.slice/$UNIT.service/cgroup.procs" pid
+  local name="$1" procs="/sys/fs/cgroup/system.slice/watcher@$1.service/cgroup.procs" pid
   if [ -r "$procs" ]; then
     while read -r pid; do
       [ -r "/proc/$pid/cmdline" ] || continue
@@ -42,7 +47,7 @@ tick_running() {
     return 1
   fi
   # cgroup v1 or a non-systemd box: fall back to the spawner's own bookkeeping.
-  [ -f "$STATE/current" ]
+  [ -f "$(state_of "$name")/current" ]
 }
 
 # 1. Code first, so even if we bail out below the next tick already has the new /watch.
@@ -51,31 +56,59 @@ su - watcher -c "git -C /opt/watcher fetch -q origin '$BRANCH' && git -C /opt/wa
 /opt/watcher/deploy/install.sh "$PROJECT" >/dev/null
 say "code at $(su - watcher -c 'git -C /opt/watcher log --oneline -1')"
 
-if ! systemctl is-active --quiet "$UNIT"; then
-  say "$UNIT is not running; starting it on the new code"
-  systemctl start "$UNIT"
-  exit 0
-fi
-
-# 2. Drain.
-mkdir -p "$STATE"; chown watcher:watcher "$STATE"
-touch "$PAUSE"; chown watcher:watcher "$PAUSE"
-say "paused $UNIT; waiting for the running tick (if any) to finish on its own"
-
-# 3. Wait, never kill.
-deadline=$(( $(date +%s) + WAIT_MAX * 60 ))
-while tick_running; do
-  if [ "$(date +%s)" -ge "$deadline" ]; then
-    say "a tick is still running after $WAIT_MAX min. NOT restarting. PAUSE left in place;"
-    say "run this again later (it picks up where it left off), or rm $PAUSE to resume as is."
-    exit 1
-  fi
-  say "tick still running (card $(cat "$STATE/current" 2>/dev/null || echo '?')); checking again in ${POLL}s"
-  sleep "$POLL"
+# The project and its lanes, from the project files now on disk (after the pull, so a lane
+# added by this very version is rolled too). A lane's unit that was never enabled is
+# started here the same way a project's is: the file is the declaration.
+NAMES=("$PROJECT")
+for f in /opt/watcher/projects/"$PROJECT"-*.env; do
+  [ -f "$f" ] || continue
+  f="$(basename "$f" .env)"; NAMES+=("$f")
 done
 
-# 4. Swap the spawner and resume.
-say "no tick running; restarting $UNIT"
-systemctl restart "$UNIT"
-rm -f "$PAUSE"
-say "done. $UNIT is on the new code and un-paused. Follow it with: journalctl -u $UNIT -f"
+# 2. Drain: pause every unit that is running; start the ones that are not.
+PENDING=()
+for name in "${NAMES[@]}"; do
+  unit="watcher@$name"
+  if ! systemctl is-active --quiet "$unit"; then
+    # A stale PAUSE from an earlier, interrupted rollout would leave it idle while this
+    # says it is live (review nit).
+    rm -f "$(state_of "$name")/PAUSE"
+    say "$unit is not running; starting it on the new code"
+    systemctl enable --now "$unit"
+    continue
+  fi
+  state="$(state_of "$name")"
+  mkdir -p "$state"; chown watcher:watcher "$state"
+  touch "$state/PAUSE"; chown watcher:watcher "$state/PAUSE"
+  say "paused $unit; waiting for its running tick (if any) to finish on its own"
+  PENDING+=("$name")
+done
+
+# 3. Wait, never kill — and 4. swap each unit the moment it is idle.
+deadline=$(( $(date +%s) + WAIT_MAX * 60 ))
+while [ "${#PENDING[@]}" -gt 0 ]; do
+  STILL=()
+  for name in "${PENDING[@]}"; do
+    unit="watcher@$name"; state="$(state_of "$name")"
+    if tick_running "$name"; then
+      say "$unit: tick still running (card $(cat "$state/current" 2>/dev/null || echo '?'))"
+      STILL+=("$name")
+      continue
+    fi
+    say "$unit: no tick running; restarting it"
+    systemctl restart "$unit"
+    rm -f "$state/PAUSE"
+    say "$unit is on the new code and un-paused. Follow it with: journalctl -u $unit -f"
+  done
+  PENDING=("${STILL[@]+"${STILL[@]}"}")
+  [ "${#PENDING[@]}" -gt 0 ] || break
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    say "a tick is still running after $WAIT_MAX min in: ${PENDING[*]}. NOT restarting those;"
+    say "their PAUSE is left in place. Run this again later (it picks up where it left off),"
+    say "or rm the PAUSE file to resume a unit as is."
+    exit 1
+  fi
+  say "checking again in ${POLL}s"
+  sleep "$POLL"
+done
+say "done."

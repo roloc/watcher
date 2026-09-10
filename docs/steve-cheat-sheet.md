@@ -10,6 +10,14 @@
 - **Done** — shipped.
 - **Stuck - Needs help** — the bots need you. Read the last comment on the card.
 
+## Two lanes
+
+- Design cards and build cards run **side by side**, one of each at a time.
+- The label decides the lane: `agent: architect` or `agent: designer` is the design lane.
+- Every other card, labeled or not, is the build lane. Two builds never run at once.
+- A card in one lane never waits on the other. It never touches the other's branch either.
+- To move a card between lanes, change its `agent:` label.
+
 ## When a card lands in Stuck
 
 1. Read the **first line** of the bot's comment. That is the ask.
@@ -57,7 +65,8 @@ user mention (`<@your-id>`) or `@here`.
 ## Deploy a new watcher version
 
 - One command, as root on the box: `/opt/watcher/deploy/rollout.sh riffmap`
-- It waits for any running tick to finish. It never kills one.
+- It covers both lanes. Each lane waits for its own running tick to finish, then swaps.
+  It never kills one.
 - Add a branch name at the end to deploy a branch before it merges.
 
 ## Pause, resume, logs
@@ -65,12 +74,13 @@ user mention (`<@your-id>`) or `@here`.
 <details><summary>Commands (on the box)</summary>
 
 ```
-# pause / resume one project
+# pause / resume one lane (the design lane is riffmap-design; pause both to pause riffmap)
 touch ~watcher/.local/state/watcher/riffmap/PAUSE
 rm    ~watcher/.local/state/watcher/riffmap/PAUSE
 
-# what is the spawner doing right now
+# what is a lane doing right now
 journalctl -u watcher@riffmap -f
+journalctl -u watcher@riffmap-design -f
 
 # what did the last tick say and cost
 ls -t ~watcher/.local/state/watcher/riffmap/logs/ | head

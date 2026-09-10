@@ -8,7 +8,7 @@ short version.
 
 | Piece | File | Runs as | Job |
 |---|---|---|---|
-| **Spawner** | `bin/spawn.sh` | a systemd unit, plain bash, no Claude session | polls the board once a minute, starts one tick at a time, sweeps stale claims, parks cards that fail twice |
+| **Spawner** | `bin/spawn.sh` | a systemd unit, plain bash, no Claude session | polls the board once a minute, starts one tick at a time in its lane, sweeps stale claims, parks cards that fail twice |
 | **Tick** | `commands/watch.md` (`/watch`) | `claude -p`, permissions skipped, in the card's worktree | claims one card, does the work, opens the PR, merges it or parks the card |
 | **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the one review a change gets; blocking findings only |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
@@ -35,8 +35,9 @@ Columns, in order: `Backlog | Ready | In progress | In review | Done | Stuck - N
 Labels and fields the bots read:
 
 - **`in-flight`** — a tick is working this card right now. A courtesy flag, not a lock: the
-  spawner's pidfile is the real lock, since only one tick runs at a time. Must be removed on
-  every exit, or the next tick skips the card forever.
+  spawner's pidfile is the real lock, since only one tick runs at a time per lane and lanes
+  never share a card (see "Lanes" below). Must be removed on every exit, or the next tick
+  skips the card forever.
 - **`agent: <name>`** — exactly one, or none. Names the project subagent that should do the
   work. `evaluator`, `reviewer` and `scribe` produce a measurement or a document rather
   than a PR, so the tick routes those to Stuck for a human.
@@ -64,13 +65,44 @@ Labels and fields the bots read:
 7. **Sleep:** 60 seconds after a normal poll, 10 minutes after a failed tick, 5 minutes
    after a board outage.
 
+## Lanes
+
+A project can run as **two spawner instances side by side** — two systemd units, two
+project files, two state directories — so a design card and a build card are worked at the
+same time. Each instance is a **lane**, and `LANE_AGENTS` in its project file says which
+cards are its to pick, by `agent:` label:
+
+| Lane | Unit | Project file | `LANE_AGENTS` | Takes |
+|---|---|---|---|---|
+| design | `watcher@riffmap-design` | `projects/riffmap-design.env` | `architect,designer` | exactly those agents |
+| build | `watcher@riffmap` | `projects/riffmap.env` | `!architect,designer` | everything else, including cards with no agent label |
+
+The two lists are complements by construction (the design file sources the build file and
+reuses its `DESIGN_AGENTS`), so **no card can ever belong to both lanes**. That is what
+makes the pidfile-per-instance enough of a lock: two lanes never want the same card, so
+they never race for one, and the `in-flight` label goes on doing the courtesy job it
+always did. A project with no `LANE_AGENTS` is one lane that takes every card — nothing
+about it changed.
+
+What a lane shares with its sibling: the board, the repo, the main checkout, the worktree
+directory (one worktree per card, so never the same one), and `main`. What it does not:
+its state (`attempts/`, `parked/`, `current`, `PAUSE`, the pidfile, the logs), its poll
+clock, its sleeps. A card that changes agent label mid-life changes lanes, and starts its
+two-attempt budget over in the new lane's state.
+
+The one thing concurrency adds for a tick is that **`main` can move under it**: the other
+lane merges its own PRs. `/watch` merges `origin/main` into the branch before merging and
+re-runs CI if that changed anything; a real conflict is a Stuck card, never a hand-resolved
+merge. Design PRs live in `docs/` and build PRs in the source tree, so it should be rare.
+
 **Two attempts, then Steve.** That rule is enforced by the spawner, not by the tick. A tick
 that keeps retrying the same failing thing inside one run is wasting the budget; go to Stuck
 instead. Steve moving a parked card back to In progress resets the count to zero.
 
 ## State on disk
 
-`~/.local/state/watcher/<project>/` on the box (`WATCHER_STATE`):
+`~/.local/state/watcher/<project>/` on the box (`WATCHER_STATE`), one directory per lane
+(`riffmap/` and `riffmap-design/`):
 
 | Path | Meaning |
 |---|---|
@@ -129,7 +161,8 @@ https://example.com` sends one by hand.
 
 ## Hard rules for every agent
 
-- One card per tick. One card at a time. Never pull from Ready or tidy the board.
+- One card per tick. One card at a time per lane; the other lane's card is not yours,
+  in flight or not. Never pull from Ready or tidy the board.
 - Never force-push, never merge red, never push `main` directly, never `--admin`, never
   touch a project's secrets, never relax a hard rule to make a card pass.
 - Never wait on an external reviewer. There is none. The reviewer runs in the session and
@@ -147,7 +180,7 @@ its own `.claude/agents/`, its own CI, and can override `/watch` with its own
 names it needs (the CI check, the contracts it must not touch, the spend receipt if any).
 
 Deploying a new watcher version is `deploy/rollout.sh <project> [branch]`: it pulls,
-pauses, waits for a running tick to finish, restarts the unit, un-pauses. It never signals
-a tick. The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
+pauses every lane of the project, waits for each lane's running tick to finish, restarts
+that lane's unit, un-pauses it. It never signals a tick. The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
 the tick as `WATCHER_HOME`, so `cat "$WATCHER_HOME/docs/talking-to-steve.md"` works from any
 worktree.

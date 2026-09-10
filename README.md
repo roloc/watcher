@@ -22,18 +22,26 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
-    bin/test-spawn.sh     96 cases, no network, every external command stubbed
+    bin/test-spawn.sh     106 cases, no network, every external command stubbed
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     agents/reviewer.md    the one review pass: blocking findings only, one round
     docs/how-it-works.md  the map, written for the agents: pieces, board, life of a card, state
     docs/talking-to-steve.md  the format for anything a human reads (see below)
     docs/steve-cheat-sheet.md one page for Steve: columns, answering a Stuck card, pause, logs
     CLAUDE.md             rules for editing this repo
-    projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER
+    projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, and LANE_AGENTS for a lane
     deploy/watcher@.service, deploy/install.sh
     deploy/rollout.sh     deploy a new version without killing a running tick (see below)
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
+
+**Lanes.** A project can run as two instances side by side, split by `agent:` label, so a
+design card and a build card are worked at the same time: `projects/riffmap-design.env`
+takes `architect,designer` and `projects/riffmap.env` takes `!architect,designer` — every
+other card. The two lists are one list (`DESIGN_AGENTS`, defined once), so no card can
+ever belong to both lanes and each instance's pidfile stays the only lock. Each lane is
+its own unit (`watcher@riffmap`, `watcher@riffmap-design`) with its own state directory;
+`rollout.sh` rolls both. Details in `docs/how-it-works.md`, "Lanes".
 
 **Stage.** Besides Status, the board carries a single-select `Stage` field (Waiting,
 Claimed, Designing, Building, Testing, Reviewing, PR open, Merging, Parked). **Waiting is
@@ -90,8 +98,9 @@ Then by hand, once:
    needs write access to the repo and access to the Projects board.
 3. **Project:** `deploy/install.sh riffmap` clones it under `/home/watcher/projects/`; drop its
    `.env.local` and any private inputs in place.
-4. **Start:** `systemctl enable --now watcher@riffmap`; `journalctl -u watcher@riffmap -f`.
-   Pause with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
+4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design` (the build
+   lane and the design lane); `journalctl -u watcher@riffmap -f` follows one.
+   Pause a lane with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
 
 ## Deploy a new version (without killing a running tick)
 
@@ -109,4 +118,7 @@ paused, and tells you to run it again.
 Add `projects/<name>.env`, run `deploy/install.sh <name>`, `systemctl enable --now
 watcher@<name>`. The project needs a board with the columns
 `Backlog | Ready | In progress | In review | Done | Stuck - Needs help`, an `in-flight`
-label, and CI that is a required check on `main`.
+label, and CI that is a required check on `main`. To split it into lanes, add
+`projects/<name>-<lane>.env` that sources `<name>.env` and sets `PROJECT_NAME=<name>-<lane>`
+and `LANE_AGENTS`, give `<name>.env` the complementary `!` list, and enable
+`watcher@<name>-<lane>` too; `rollout.sh <name>` finds the lane by the file name.
