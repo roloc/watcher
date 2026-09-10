@@ -16,7 +16,9 @@
 - The label decides the lane: `agent: architect` or `agent: designer` is the design lane.
 - Every other card, labeled or not, is the build lane. Two builds never run at once.
 - A card in one lane never waits on the other. It never touches the other's branch either.
-- To move a card between lanes, change its `agent:` label.
+- No label needed: a card that asks for options, examples or mockups is routed to the
+  design lane by the first bot that reads it. A bug or a removal is built as is.
+- To move a card between lanes yourself, change its `agent:` label.
 
 ## When a card lands in Stuck
 

@@ -69,6 +69,36 @@ names one; otherwise you are the builder. Build and test locally before opening 
 Run `reviewer` once on the branch when the change touches source or scripts; fix what it
 marks blocking, take or leave the nits. Docs-only changes get no review.
 
+**Route a design card before building it.** A card with no `agent:` label is build work
+by default, but Steve writes the ask in plain words and often skips the label. If the
+project has a design-shaped agent (an `agent: designer` or `agent: architect` label on the
+repo — `gh label list`), read the card as a designer would and route it when:
+
+- it asks for **options, examples, mockups, or a brief** ("show me some ways", "think of a
+  better way to show"), or names the designer or the architect; that is `designer` for
+  how something looks or reads, `architect` for a written decision about behavior, data,
+  or a contract;
+- it is **not** a bug, a removal, a calculation that is wrong, or a change to an already
+  approved mockup — those are yours to build, whatever words they use.
+
+A card that is both (a bad display *and* a broken link) goes to design; the designer's
+card spins off the build card. Routing is cheap — one short tick — and a wrong route to
+design costs a brief; a wrong route to build costs a guessed product decision. To route:
+
+```
+gh issue edit <n> --add-label "agent: designer"      # or architect
+board stage <n> Waiting
+gh issue comment <n> --body "🤖 FYI: this reads as design work, so I routed it to the designer.
+- The design lane picks it up on its next poll, within a minute.
+- Nothing for Steve to do."
+board unclaim <n>
+```
+
+Then stop and report (`Outcome: routed to designer`). The card stays **In progress**
+with the new label; the design lane takes it on its next poll and this lane never sees it
+again. Never route a card that already carries an `agent:` label, and never route in a
+project with no design agent to route to.
+
 A card whose `agent:` is empty and whose body asks a product question is a decision for
 Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4).
 
@@ -178,7 +208,8 @@ posts are the updates Steve asked for.
 
 Every tick ends with the card in exactly one of: **Done** (merged — the `Closes #n` does
 this), **In review** (PR up, waiting on a merge), **Stuck - Needs help**, or still
-**In progress** if you got nowhere.
+**In progress** if you got nowhere — or if you routed it to another lane (§2), which is
+the one In progress exit that is not a failure.
 
 **Remove `in-flight` on every one of those exits, without exception** — Done and In review
 included. It marks *a tick actively working*, nothing else. A leaked label strands the card
@@ -210,7 +241,7 @@ Bullets, five lines, in this order — it is what the log keeps and what Steve s
 
 ```
 - Card: #<n> <title>
-- Outcome: merged | PR up, waiting on merge | stuck | no progress
+- Outcome: merged | PR up, waiting on merge | stuck | routed to <agent> | no progress
 - Ended in: Done | In review | Stuck - Needs help | In progress
 - Cost: $<your spend>; project API spend ~$<x> (or "none")
 - Needs Steve: no | yes — <one line, the same as the first line of the Stuck comment>

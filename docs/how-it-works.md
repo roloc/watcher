@@ -90,6 +90,16 @@ its state (`attempts/`, `parked/`, `current`, `PAUSE`, the pidfile, the logs), i
 clock, its sleeps. A card that changes agent label mid-life changes lanes, and starts its
 two-attempt budget over in the new lane's state.
 
+**The label is Steve's, but the tick routes.** Steve writes cards in plain words and often
+leaves the `agent:` label off, so an unlabeled card lands in the build lane first. The
+build tick's first job is to read it; if it asks for options, examples, mockups, or a
+brief, the tick adds `agent: designer` (or `architect` for a written decision), releases
+the card with an FYI comment, and stops. The design lane picks it up on its next poll. A
+bug, a removal, or a change to an approved mockup is never routed. One short tick, well
+under a dollar, and it needs no new piece — the tick already reads the card and knows the
+project's agents. The build lane's spawner counts that exit as one attempt on the card;
+harmless, since the label keeps it from ever picking the card again.
+
 The one thing concurrency adds for a tick is that **`main` can move under it**: the other
 lane merges its own PRs. `/watch` merges `origin/main` into the branch before merging and
 re-runs CI if that changed anything; a real conflict is a Stuck card, never a hand-resolved
@@ -122,7 +132,7 @@ instead. Steve moving a parked card back to In progress resets the count to zero
 | Done | removed | success; attempts reset |
 | In review | removed | success; attempts reset |
 | Stuck - Needs help | removed | success as far as the tick goes; attempts reset; Steve's turn |
-| In progress | removed | no progress; attempts +1; at 2 the spawner parks it |
+| In progress | removed | no progress; attempts +1; at 2 the spawner parks it. Also how a routed card looks (the tick relabeled it for the other lane); the label keeps this lane from a second attempt |
 | any | still there | the tick died; the spawner unclaims, comments, attempts +1 |
 
 `claude -p` result subtypes the spawner reads: `success`; `error_max_turns`;
