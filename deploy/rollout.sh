@@ -17,6 +17,8 @@
 #   3. Waits, per unit, until no tick is running in its cgroup — a running tick is left
 #      alone until it exits on its own (up to TICK_TIMEOUT, 150 min by default) — and
 #   4. restarts that unit, so the new spawn.sh is the one running, and removes its PAUSE.
+#   5. Starts any unit of the project that was not running (a lane added by this version)
+#      — last, once every running sibling is on the new code (see the note at step 2).
 #
 # If the wait times out, the units still waiting keep their PAUSE, are NOT restarted, and
 # the exit code is 1 — run it again later; it is idempotent. Nothing here ever sends a
@@ -58,23 +60,26 @@ say "code at $(su - watcher -c 'git -C /opt/watcher log --oneline -1')"
 
 # The project and its lanes, from the project files now on disk (after the pull, so a lane
 # added by this very version is rolled too). A lane's unit that was never enabled is
-# started here the same way a project's is: the file is the declaration.
+# started by this same command: the file is the declaration. But only AFTER every running
+# sibling has been swapped (step 5, below), never before. A spawner still on the OLD code
+# may be holding a card the new lane would pick — the first rollout of lanes did exactly
+# this: the pre-lanes build spawner had launched a tick on a designer card two seconds
+# before the pause, the tick had not labeled it in-flight yet, and the freshly started
+# design lane picked the same card into the same worktree. Once the sibling runs the new
+# code the lane filters are disjoint and the window is gone.
 NAMES=("$PROJECT")
 for f in /opt/watcher/projects/"$PROJECT"-*.env; do
   [ -f "$f" ] || continue
   f="$(basename "$f" .env)"; NAMES+=("$f")
 done
 
-# 2. Drain: pause every unit that is running; start the ones that are not.
-PENDING=()
+# 2. Drain: pause every unit that is running; remember the ones that are not.
+PENDING=(); TO_START=()
 for name in "${NAMES[@]}"; do
   unit="watcher@$name"
   if ! systemctl is-active --quiet "$unit"; then
-    # A stale PAUSE from an earlier, interrupted rollout would leave it idle while this
-    # says it is live (review nit).
-    rm -f "$(state_of "$name")/PAUSE"
-    say "$unit is not running; starting it on the new code"
-    systemctl enable --now "$unit"
+    say "$unit is not running; it starts once the running units are on the new code"
+    TO_START+=("$name")
     continue
   fi
   state="$(state_of "$name")"
@@ -110,5 +115,16 @@ while [ "${#PENDING[@]}" -gt 0 ]; do
   fi
   say "checking again in ${POLL}s"
   sleep "$POLL"
+done
+
+# 5. Now the units that were not running: every sibling is on the new code, so a lane
+# started here can only ever pick cards its siblings will never touch.
+for name in "${TO_START[@]+"${TO_START[@]}"}"; do
+  unit="watcher@$name"
+  # A stale PAUSE from an earlier, interrupted rollout would leave it idle while this
+  # says it is live (review nit).
+  rm -f "$(state_of "$name")/PAUSE"
+  say "starting $unit on the new code"
+  systemctl enable --now "$unit"
 done
 say "done."
