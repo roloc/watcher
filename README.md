@@ -24,6 +24,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
     bin/test-spawn.sh     106 cases, no network, every external command stubbed
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
+    commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
     agents/reviewer.md    the one review pass: blocking findings only, one round
     docs/how-it-works.md  the map, written for the agents: pieces, board, life of a card, state
     docs/talking-to-steve.md  the format for anything a human reads (see below)
@@ -35,13 +36,23 @@ probes and a classifier, and the day that was tried it cost more than the featur
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
 
-**Lanes.** A project can run as two instances side by side, split by `agent:` label, so a
-design card and a build card are worked at the same time: `projects/riffmap-design.env`
-takes `architect,designer` and `projects/riffmap.env` takes `!architect,designer` — every
-other card. The two lists are one list (`DESIGN_AGENTS`, defined once), so no card can
-ever belong to both lanes and each instance's pidfile stays the only lock. Each lane is
-its own unit (`watcher@riffmap`, `watcher@riffmap-design`) with its own state directory;
-`rollout.sh` rolls both. Details in `docs/how-it-works.md`, "Lanes".
+**Lanes.** A project can run as several instances side by side, split by `agent:` label,
+so a design card and a build card are worked at the same time: `projects/riffmap-design.env`
+takes `architect,designer`, `projects/riffmap.env` takes `!architect,designer,-` — every
+other labeled card — and `projects/riffmap-triage.env` takes `-`, the cards with no label,
+only to label them: its tick is `/triage` (`LANE_COMMAND`, run in the main checkout with
+`LANE_WORKDIR=root`), which reads the card, adds the one `agent:` label, records which
+cards it waits on, and stops, so the right lane starts within a minute whatever the others
+are doing. The lists are one list (`DESIGN_AGENTS`, defined once) plus `-` named once, so
+no card can ever belong to two lanes and each instance's pidfile stays the only lock. Each
+lane is its own unit (`watcher@riffmap`, `watcher@riffmap-design`, `watcher@riffmap-triage`)
+with its own state directory; `rollout.sh` rolls them all. Details in
+`docs/how-it-works.md`, "Lanes".
+
+**Dependencies.** A card GitHub says is *blocked by* an open issue (the issue's
+Relationships field, set by Steve or recorded by `/triage` from the card's words) is
+skipped by every lane until the blocker closes, so a batch of cards handed over at once is
+worked in order. Details in `docs/how-it-works.md`, "Dependencies".
 
 **Stage.** Besides Status, the board carries a single-select `Stage` field (Waiting,
 Claimed, Designing, Building, Testing, Reviewing, PR open, Merging, Parked). **Waiting is
@@ -98,8 +109,9 @@ Then by hand, once:
    needs write access to the repo and access to the Projects board.
 3. **Project:** `deploy/install.sh riffmap` clones it under `/home/watcher/projects/`; drop its
    `.env.local` and any private inputs in place.
-4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design` (the build
-   lane and the design lane); `journalctl -u watcher@riffmap -f` follows one.
+4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design
+   watcher@riffmap-triage` (the build, design and triage lanes — without the triage lane
+   an unlabeled card is nobody's); `journalctl -u watcher@riffmap -f` follows one.
    Pause a lane with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
 
 ## Deploy a new version (without killing a running tick)

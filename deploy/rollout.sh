@@ -4,7 +4,7 @@
 #   deploy/rollout.sh <project> [branch]      # default branch: main
 #
 # A project with LANES (projects/<project>-<lane>.env next to projects/<project>.env —
-# riffmap has riffmap-design) is rolled as one: every lane's unit is drained and swapped
+# riffmap has riffmap-design and riffmap-triage) is rolled as one: every lane's unit is drained and swapped
 # by this same command, each one the moment its own tick is done, so a long build never
 # holds the design lane on old code or the other way around.
 #

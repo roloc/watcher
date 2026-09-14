@@ -10,6 +10,7 @@ short version.
 |---|---|---|---|
 | **Spawner** | `bin/spawn.sh` | a systemd unit, plain bash, no Claude session | polls the board once a minute, starts one tick at a time in its lane, sweeps stale claims, parks cards that fail twice |
 | **Tick** | `commands/watch.md` (`/watch`) | `claude -p`, permissions skipped, in the card's worktree | claims one card, does the work, opens the PR, merges it or parks the card |
+| **Triage tick** | `commands/triage.md` (`/triage`) | `claude -p`, permissions skipped, in the main checkout | puts the one `agent:` label on a card that has none and records what it waits on; never does the work |
 | **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the one review a change gets; blocking findings only |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
@@ -49,8 +50,8 @@ Labels and fields the bots read:
 
 1. **Steve moves a card to In progress.**
 2. **The spawner polls** (`board list "In progress"`) once a minute. It takes the first row
-   that is not `in-flight` and has fewer than 2 attempts on file. It never claims a card
-   itself.
+   that is not `in-flight`, has fewer than 2 attempts on file, and is not blocked by an
+   open issue (see "Dependencies"). It never claims a card itself.
 3. **A worktree** `../<repo>-worktrees/card-<n>` is created (or reused) on branch `card-<n>`.
 4. **The tick starts:** `claude -p "/watch <n>" --dangerously-skip-permissions --max-turns 400
    --max-budget-usd 15`, with a 150 minute watchdog that kills the whole process group.
@@ -75,14 +76,20 @@ cards are its to pick, by `agent:` label:
 | Lane | Unit | Project file | `LANE_AGENTS` | Takes |
 |---|---|---|---|---|
 | design | `watcher@riffmap-design` | `projects/riffmap-design.env` | `architect,designer` | exactly those agents |
-| build | `watcher@riffmap` | `projects/riffmap.env` | `!architect,designer` | everything else, including cards with no agent label |
+| build | `watcher@riffmap` | `projects/riffmap.env` | `!architect,designer,-` | everything else that has a label |
+| triage | `watcher@riffmap-triage` | `projects/riffmap-triage.env` | `-` | cards with no agent label — to label them, never to work them |
 
-The two lists are complements by construction (the design file sources the build file and
-reuses its `DESIGN_AGENTS`), so **no card can ever belong to both lanes**. That is what
-makes the pidfile-per-instance enough of a lock: two lanes never want the same card, so
-they never race for one, and the `in-flight` label goes on doing the courtesy job it
-always did. A project with no `LANE_AGENTS` is one lane that takes every card — nothing
-about it changed.
+The lists are complements by construction (the design and triage files source the build
+file and reuse its `DESIGN_AGENTS`; `-` is named exactly once), so **no card can ever
+belong to two lanes**. That is what makes the pidfile-per-instance enough of a lock:
+lanes never want the same card, so they never race for one, and the `in-flight` label
+goes on doing the courtesy job it always did. A project with no `LANE_AGENTS` is one lane
+that takes every card — nothing about it changed.
+
+A lane's project file can also set **`LANE_COMMAND`** (the slash command its tick runs,
+default `/watch`) and **`LANE_WORKDIR`** (`card`, the default, runs the tick in a worktree
+made for the card; `root` runs it in the main checkout with no worktree). The triage lane
+is `LANE_COMMAND=/triage LANE_WORKDIR=root` with a small turn and dollar cap.
 
 What a lane shares with its sibling: the board, the repo, the main checkout, the worktree
 directory (one worktree per card, so never the same one), and `main`. What it does not:
@@ -90,15 +97,22 @@ its state (`attempts/`, `parked/`, `current`, `PAUSE`, the pidfile, the logs), i
 clock, its sleeps. A card that changes agent label mid-life changes lanes, and starts its
 two-attempt budget over in the new lane's state.
 
-**The label is Steve's, but the tick routes.** Steve writes cards in plain words and often
-leaves the `agent:` label off, so an unlabeled card lands in the build lane first. The
-build tick's first job is to read it; if it asks for options, examples, mockups, or a
-brief, the tick adds `agent: designer` (or `architect` for a written decision), releases
-the card with an FYI comment, and stops. The design lane picks it up on its next poll. A
-bug, a removal, or a change to an approved mockup is never routed. One short tick, well
-under a dollar, and it needs no new piece — the tick already reads the card and knows the
-project's agents. The build lane's spawner counts that exit as one attempt on the card;
-harmless, since the label keeps it from ever picking the card again.
+**The label is Steve's, but the bots put it there.** Steve writes cards in plain words
+and usually leaves the `agent:` label off. An unlabeled card is the **triage lane's**: on
+its next poll — within a minute, whatever the other lanes are doing — it runs `/triage`
+(`commands/triage.md`), which reads the card, adds the one `agent:` label its words call
+for (design-shaped asks — options, examples, mockups, a brief, a decision — to `designer`
+or `architect`; a bug, a removal or a change to an approved design to the build agent for
+that area), records which cards it waits on (below), leaves an FYI comment, and stops.
+The lane that label names picks the card on its own next poll. A triage never claims the
+card, never touches a file, and costs cents. A card it cannot place goes to Stuck with the
+candidate agents as the lettered options. The spawner reads the relabel as a success for
+the triage lane (the card is In progress but no longer its to pick), so nothing counts
+toward an attempt.
+
+A project without a triage lane keeps the older shape: the unlabeled card lands in the
+build lane, and `/watch`'s own routing rule relabels a design-shaped one for the design
+lane and stops — one short tick, counted as a success the same way.
 
 The one thing concurrency adds for a tick is that **`main` can move under it**: the other
 lane merges its own PRs. `/watch` merges `origin/main` into the branch before merging and
@@ -109,10 +123,25 @@ merge. Design PRs live in `docs/` and build PRs in the source tree, so it should
 that keeps retrying the same failing thing inside one run is wasting the budget; go to Stuck
 instead. Steve moving a parked card back to In progress resets the count to zero.
 
+## Dependencies
+
+Steve can hand over several cards at once and the prerequisite is worked first. The
+spawner asks GitHub, before it picks any row, which open issues the card is **blocked by**
+— the issue's *Relationships* field. A card with one is skipped, whatever its priority,
+and gets one FYI comment naming what it waits on (one more if that set changes); the poll
+after the last blocker closes, it is picked. If the lookup itself fails the card is skipped
+for that poll, never launched on a guess. The Waiting stage goes through the same check.
+
+Where the relationships come from: Steve sets them by hand on the issue, or `/triage`
+records them from the card's own words ("after #291", "once the radar redesign lands",
+"depends on", a `Depends on` line — not "part of", "refs" or "see"). A card that already
+has an agent label is never triaged, so a dependency on one of those is Steve's to set or
+to write into the card before he labels it.
+
 ## State on disk
 
 `~/.local/state/watcher/<project>/` on the box (`WATCHER_STATE`), one directory per lane
-(`riffmap/` and `riffmap-design/`):
+(`riffmap/`, `riffmap-design/` and `riffmap-triage/`):
 
 | Path | Meaning |
 |---|---|
@@ -122,6 +151,7 @@ instead. Steve moving a parked card back to In progress resets the count to zero
 | `attempts/<n>` | attempt count for card n; reset on a success that left In progress, or when Steve moves a parked card back |
 | `parked/<n>` | the one Stuck comment for card n was posted |
 | `parked-ok/<n>` | the move to Stuck actually landed |
+| `waiting/<n>` | the FYI comment saying what card n waits on was posted, and for which blockers; cleared when it is picked |
 | `logs/card-<n>-<ts>.json` | the tick's JSON result: `subtype`, `total_cost_usd`, `num_turns`, `result` |
 | `logs/card-<n>-<ts>.stderr` | the tick's stderr |
 
@@ -132,7 +162,8 @@ instead. Steve moving a parked card back to In progress resets the count to zero
 | Done | removed | success; attempts reset |
 | In review | removed | success; attempts reset |
 | Stuck - Needs help | removed | success as far as the tick goes; attempts reset; Steve's turn |
-| In progress | removed | no progress; attempts +1; at 2 the spawner parks it. Also how a routed card looks (the tick relabeled it for the other lane); the label keeps this lane from a second attempt |
+| In progress, with THIS lane's label (or none) | removed | no progress; attempts +1; at 2 the spawner parks it |
+| In progress, with ANOTHER lane's label | removed | success: the tick relabeled it for that lane (a triage, or `/watch` routing a design card); attempts reset, the other lane starts its own count |
 | any | still there | the tick died; the spawner unclaims, comments, attempts +1 |
 
 `claude -p` result subtypes the spawner reads: `success`; `error_max_turns`;

@@ -12,6 +12,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `commands/watch.md` — the `/watch` contract, one tick of the loop. Generic: it must work
   for any project on the box. Project-specific names (the CI check, contracts, spend
   receipts) come from the project's own `CLAUDE.md`, never hard-coded here.
+- `commands/triage.md` — the `/triage` contract, the triage lane's tick: put the one
+  `agent:` label on an unlabeled card, record what it waits on, stop. Generic the same way.
 - `agents/reviewer.md` — the one review pass. Read-only, blocking findings only, one round.
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
 - `bin/notify.py` — Discord posts, called only from `board.py` (`move`, `stage`, `notify`).

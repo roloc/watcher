@@ -149,7 +149,7 @@ chmod +x "$BIN/board.py"
 # timeout or not).
 cat > "$BIN/claude" <<'STUB'
 #!/usr/bin/env bash
-echo "claude $*" >> "$TEST_LOG"
+echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
 if [ "$1" = "-p" ] && [ "$2" = "reply ok" ]; then
   # untrusted_message: the real CLI names the exact key it checked in the warning, when
   # $CLAUDE_UNTRUSTED_KEY is set — round 4 fold-in, ensure_trust's parse_trust_key.
@@ -212,10 +212,21 @@ chmod +x "$BIN/claude"
 # gh: logs every call on ONE line, newlines in a --body collapsed to spaces — the spawner's
 # comments to Steve are multi-line (docs/talking-to-steve.md), and every assertion below
 # greps the whole call as a single line ("gh issue comment 40.*2 attempts").
+# `gh api repos/<r>/issues/<n>/dependencies/blocked_by` (the spawner's dependency check)
+# prints $GH_DEPS_DIR/<n>.json when that file exists, else an empty list — or fails like
+# an outage when $GH_API_FAIL=1 (open_blockers must fail CLOSED: skip the card, never
+# launch it on a lookup that told us nothing).
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
 echo "gh ${args//$'\n'/ } [GH_REPO=${GH_REPO:-}]" >> "$TEST_LOG"
+case "$args" in
+  "api repos/"*"/dependencies/blocked_by")
+    if [ "${GH_API_FAIL:-0}" = 1 ]; then echo "gh: HTTP 502 (simulated)" >&2; exit 1; fi
+    n="$(printf '%s' "$args" | sed -E 's#.*/issues/([0-9]+)/dependencies/blocked_by.*#\1#')"
+    if [ -n "${GH_DEPS_DIR:-}" ] && [ -f "$GH_DEPS_DIR/$n.json" ]; then cat "$GH_DEPS_DIR/$n.json"; else echo "[]"; fi
+    ;;
+esac
 exit 0
 STUB
 chmod +x "$BIN/gh"
@@ -295,6 +306,8 @@ run() {
   WATCHER_SLEEP="${WATCHER_SLEEP:-0}" \
   WATCHER_MAX_POLLS="${WATCHER_MAX_POLLS:-}" \
   LANE_AGENTS="${LANE_AGENTS:-}" \
+  LANE_COMMAND="${LANE_COMMAND:-/watch}" LANE_WORKDIR="${LANE_WORKDIR:-card}" \
+  GH_DEPS_DIR="${GH_DEPS_DIR:-}" GH_API_FAIL="${GH_API_FAIL:-0}" \
   bash "$SPAWN" "$@"
   return $?
 }
@@ -314,8 +327,8 @@ if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q '^pick: #12 ' && printf '%s' "$
 else
   flunk "dry-run pick" "rc=$RC out=[$OUT]"
 fi
-if not_grepped "claude " && not_grepped "worktree.sh new" && not_grepped "gh "; then
-  pass "dry-run polls the board but launches/writes/claims nothing"
+if not_grepped "claude " && not_grepped "worktree.sh new" && not_grepped "gh issue"; then
+  pass "dry-run polls the board (and reads what cards wait on) but launches/writes/claims nothing"
 else
   flunk "dry-run should launch nothing" "$(cat "$TESTLOG")"
 fi
@@ -894,6 +907,136 @@ else
   flunk "lane filter on the Waiting queue" "$(cat "$TESTLOG")"
 fi
 unset BOARD_QUEUE_FILE
+
+# ============================================================================
+echo "31. A lane's command and workdir: LANE_COMMAND=/triage LANE_WORKDIR=root runs the tick"
+echo "    in the project root with no worktree — the triage lane"
+# ============================================================================
+fresh_state
+board_list $'400\tP0\tbuilder\t-\tBuild card' \
+           $'403\tP2\t-\t-\tUnlabeled card'
+OUT="$(LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #403 ' && printf '%s' "$OUT" | grep -q '^command: /triage' \
+   && printf '%s' "$OUT" | grep -q '/triage 403' && printf '%s' "$OUT" | grep -q "^workdir: $FAKE_ROOT (no worktree)"; then
+  pass "dry-run: names the command, the pick, and the project root as the workdir"
+else
+  flunk "triage dry-run" "out=[$OUT]"
+fi
+fresh_state
+board_list $'403\tP2\t-\t-\tUnlabeled card'
+board_show '{"number":403,"state":"OPEN","status":"In progress","labels":["agent: ui"]}'
+LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>&1 || true
+if grepped "/triage 403" && grepped "[cwd=$FAKE_ROOT]" && not_grepped "worktree.sh new"; then
+  pass "--once: the triage command runs in the project root and no worktree is created"
+else
+  flunk "triage launch" "$(cat "$TESTLOG")"
+fi
+fresh_state
+board_list $'404\tP2\t-\t-\tUnlabeled, closed by the time the tick ends'
+board_show '{"number":404,"state":"CLOSED","status":"Done","labels":[]}'
+LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>"$TMP/root.err" || true
+if not_grepped "worktree.sh remove" && grep -q "no worktree to remove for #404" "$TMP/root.err"; then
+  pass "a closed card in a root-workdir lane removes no worktree"
+else
+  flunk "root workdir remove" "$(cat "$TESTLOG") $(cat "$TMP/root.err")"
+fi
+fresh_state
+board_list $'403\tP2\t-\t-\tUnlabeled card'
+LANE_WORKDIR=elsewhere run --dry-run >/dev/null 2>"$TMP/bad.err"; RC=$?
+if [ "$RC" = 64 ] && grep -q "LANE_WORKDIR must be" "$TMP/bad.err"; then pass "a bad LANE_WORKDIR is refused at startup (exit 64)"; else flunk "bad LANE_WORKDIR" "rc=$RC $(cat "$TMP/bad.err")"; fi
+fresh_state
+board_list $'403\tP2\t-\t-\tUnlabeled card'
+LANE_COMMAND=triage run --dry-run >/dev/null 2>"$TMP/bad2.err"; RC=$?
+if [ "$RC" = 64 ] && grep -q "LANE_COMMAND must be a slash command" "$TMP/bad2.err"; then pass "a LANE_COMMAND without the slash is refused at startup (exit 64)"; else flunk "bad LANE_COMMAND" "rc=$RC $(cat "$TMP/bad2.err")"; fi
+fresh_state
+board_list $'400\tP0\tbuilder\t-\tBuild card'
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^command: /watch' && printf '%s' "$OUT" | grep -q "^worktree: $WORKTREE_BASE/card-400"; then pass "defaults unchanged: /watch in a card worktree"; else flunk "defaults" "out=[$OUT]"; fi
+
+# ============================================================================
+echo "32. Dependencies: a card GitHub says is blocked by an OPEN issue waits, whatever its"
+echo "    priority; the blocker is picked instead; one FYI comment per blocker set; picked"
+echo "    the poll after the blocker closes; a failed lookup fails CLOSED"
+# ============================================================================
+deps_board() {
+  board_list $'500\tP0\tbuilder\t-\tThe dependent card (P0, but waits)' \
+             $'501\tP1\tbuilder\t-\tThe prerequisite'
+  board_show '{"number":501,"state":"OPEN","status":"In progress","labels":[]}'
+  GH_DEPS_DIR="$STATE/deps"; mkdir -p "$GH_DEPS_DIR"
+  echo '[{"number":501,"state":"open"},{"number":502,"state":"closed"}]' > "$GH_DEPS_DIR/500.json"
+}
+fresh_state; deps_board
+OUT="$(run --dry-run 2>"$TMP/deps.err")"
+if printf '%s' "$OUT" | grep -q '^pick: #501 ' && grep -q "#500 skipped: waiting on open issue(s) 501" "$TMP/deps.err"; then
+  pass "dry-run: the P0 card waits on #501 (its closed blocker #502 does not count); #501 is picked"
+else
+  flunk "deps dry-run" "out=[$OUT] err=[$(cat "$TMP/deps.err")]"
+fi
+if not_grepped "gh issue comment"; then pass "dry-run posts no waiting comment"; else flunk "dry-run commented" "$(cat "$TESTLOG")"; fi
+
+fresh_state; deps_board
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+WATCHER_MAX_POLLS=2 run >/dev/null 2>&1 || true
+comments="$(grep -c "gh issue comment 500 --body 🤖 FYI: this card waits on \[#501\](https://github.com/owner/proj/issues/501)" "$TESTLOG")"
+if [ "$comments" = 1 ] && [ "$(cat "$STATE/waiting/500" 2>/dev/null)" = "501" ]; then
+  pass "two polls, one FYI comment on #500 naming the blocker as a link; the marker holds the blocker list"
+else
+  flunk "waiting comment" "count=$comments $(cat "$TESTLOG")"
+fi
+if grepped "/watch 501" && not_grepped "/watch 500"; then pass "#501 launched, #500 never"; else flunk "deps launch" "$(cat "$TESTLOG")"; fi
+# the blocker set changes → one more comment, for the new set
+echo '[{"number":503,"state":"open"}]' > "$GH_DEPS_DIR/500.json"
+run --once >/dev/null 2>&1 || true
+if grepped "gh issue comment 500 --body 🤖 FYI: this card waits on [#503]" && [ "$(cat "$STATE/waiting/500")" = "503" ]; then
+  pass "a changed blocker set gets one new comment"
+else
+  flunk "changed blocker set" "$(cat "$TESTLOG")"
+fi
+# the blocker closes → picked, marker gone
+echo '[{"number":503,"state":"closed"}]' > "$GH_DEPS_DIR/500.json"
+board_show '{"number":500,"state":"OPEN","status":"In progress","labels":[]}'
+run --once >/dev/null 2>&1 || true
+if grepped "/watch 500" && [ ! -f "$STATE/waiting/500" ]; then pass "once every blocker is closed the card is picked and its waiting marker is cleared"; else flunk "unblocked pick" "$(cat "$TESTLOG")"; fi
+
+fresh_state; deps_board
+OUT="$(GH_API_FAIL=1 run --dry-run 2>"$TMP/deps2.err")"; RC=$?
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'nothing claimable' && grep -q "#500 skipped: could not read what it is blocked by" "$TMP/deps2.err"; then
+  pass "a failed dependency lookup skips the card for this poll (fail closed), never launches it"
+else
+  flunk "deps lookup failure" "rc=$RC out=[$OUT] err=[$(cat "$TMP/deps2.err")]"
+fi
+# a Waiting-stage row goes through the same check
+fresh_state
+board_list ""
+BOARD_QUEUE_FILE="$STATE/board-queue.tsv"
+printf '510\tP0\tbuilder\t-\tWaiting\tQueued, blocked\n511\tP1\tbuilder\t-\tWaiting\tQueued, free\n' > "$BOARD_QUEUE_FILE"
+board_show '{"number":511,"state":"OPEN","status":"In progress","labels":[]}'
+GH_DEPS_DIR="$STATE/deps"; mkdir -p "$GH_DEPS_DIR"; echo '[{"number":511,"state":"open"}]' > "$GH_DEPS_DIR/510.json"
+run --once >/dev/null 2>&1 || true
+if grepped "board.py move 511 In progress" && not_grepped "/watch 510"; then pass "a Waiting-stage card that waits on another is skipped the same way"; else flunk "queue deps" "$(cat "$TESTLOG")"; fi
+unset BOARD_QUEUE_FILE GH_DEPS_DIR
+
+# ============================================================================
+echo "33. A tick that relabels the card for ANOTHER lane (triage, or /watch routing a design"
+echo "    card) is a success for this lane: attempts reset, nothing parked"
+# ============================================================================
+fresh_state
+board_list $'600\tP2\t-\t-\tUnlabeled card'
+board_show '{"number":600,"state":"OPEN","status":"In progress","labels":["agent: ui"]}'
+mkdir -p "$STATE/attempts"; echo 1 > "$STATE/attempts/600"
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>"$TMP/left.err" || true
+if [ ! -f "$STATE/attempts/600" ] && grep -q "relabeled the card for another lane (agent 'ui')" "$TMP/left.err" && not_grepped "board.py move 600"; then
+  pass "card left In progress but now carries another lane's label → attempts reset, not parked"
+else
+  flunk "left-lane success" "attempts=$(cat "$STATE/attempts/600" 2>/dev/null) err=[$(cat "$TMP/left.err")] $(cat "$TESTLOG")"
+fi
+fresh_state
+board_list $'600\tP2\t-\t-\tUnlabeled card'
+board_show '{"number":600,"state":"OPEN","status":"In progress","labels":[]}'
+mkdir -p "$STATE/attempts"; echo 1 > "$STATE/attempts/600"
+LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>&1 || true
+if grepped "board.py move 600 Stuck - Needs help"; then pass "…but a tick that leaves it unlabeled and In progress is still an attempt: parked at 2"; else flunk "unlabeled still counts" "$(cat "$TESTLOG")"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

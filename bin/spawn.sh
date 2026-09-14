@@ -29,6 +29,17 @@
 #                    two LANES that run side by side; give them complementary lists so no
 #                    card can ever belong to both, and the per-instance pidfile stays the
 #                    only lock the design needs. See docs/how-it-works.md, "Lanes".
+#   LANE_COMMAND     optional; the slash command this lane's tick runs (default `/watch`).
+#                    A triage lane runs `/triage`: it labels an unlabeled card and records
+#                    what the card waits on, then stops — see commands/triage.md.
+#   LANE_WORKDIR     optional; `card` (default) runs the tick in a worktree made for the
+#                    card, `root` runs it in PROJECT_ROOT with no worktree at all — for a
+#                    lane whose tick only touches the board, never the code.
+#
+# A card that GitHub says is blocked by an open issue (the issue's "Relationships" field,
+# or what /triage recorded from the card's own words) is skipped by every lane until the
+# blocker closes, so Steve can hand over a batch of cards in one go and the prerequisite
+# is worked first. One FYI comment per card says what it waits on.
 #
 # Every external command is overridable so this can be tested with stubs, never the network:
 #   WATCHER_PROJECT    path to the project file                  (default: none — required
@@ -93,6 +104,10 @@ TICK_MAX_TURNS="${TICK_MAX_TURNS:-400}"
 TICK_MAX_BUDGET_USD="${TICK_MAX_BUDGET_USD:-15}"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"
 LANE_AGENTS="${LANE_AGENTS:-}"
+LANE_COMMAND="${LANE_COMMAND:-/watch}"
+LANE_WORKDIR="${LANE_WORKDIR:-card}"
+case "$LANE_WORKDIR" in card|root) ;; *) echo "spawn.sh: LANE_WORKDIR must be 'card' or 'root', not '$LANE_WORKDIR'" >&2; exit 64 ;; esac
+case "$LANE_COMMAND" in /*) ;; *) echo "spawn.sh: LANE_COMMAND must be a slash command, not '$LANE_COMMAND'" >&2; exit 64 ;; esac
 
 # ../<repo>-worktrees, same derivation as worktree.sh's own MAIN/HOME_DIR.
 WORKTREE_BASE="$(dirname "$WATCHER_ROOT")/$(basename "$WATCHER_ROOT")-worktrees"
@@ -220,11 +235,52 @@ lane_takes() {
   [ "$listed" != "$negate" ]
 }
 
+# open_blockers <n> — the numbers of the OPEN issues GitHub says #n is blocked by (the
+# issue's "Relationships" field; /triage records them from a card's own words), space-
+# separated, on stdout. Fails closed: if the lookup itself fails, prints nothing and
+# returns 1, and the caller skips the card for this poll rather than launching a card
+# that may be waiting on another — a transient outage costs one minute, a wrong launch
+# costs a tick. No lookup at all (returns 0, prints nothing) when PROJECT_REPO is unknown.
+open_blockers() {
+  local n="$1" out
+  [ -n "${PROJECT_REPO:-}" ] || return 0
+  out="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$n/dependencies/blocked_by" 2>/dev/null)" || return 1
+  python3 -c '
+import json, sys
+try:
+    items = json.loads(sys.argv[1] or "[]")
+except Exception:
+    sys.exit(1)
+print(" ".join(str(i["number"]) for i in items if isinstance(i, dict) and i.get("state") != "closed" and "number" in i))
+' "$out" || return 1
+}
+
+# note_waiting <n> <blockers> — the one FYI comment per card saying what it waits on. The
+# marker under $WATCHER_STATE/waiting/<n> holds the blocker list it was posted for, so a
+# card whose blockers change gets one more comment, and a card seen waiting on the same
+# ones poll after poll gets none. Written only when the comment lands. Never in --dry-run.
+note_waiting() {
+  local n="$1" blockers="$2" links b marker
+  marker="$WATCHER_STATE/waiting/$n"
+  [ "${DRY_RUN:-0}" != 1 ] || return 0
+  if [ -f "$marker" ] && [ "$(cat "$marker" 2>/dev/null)" = "$blockers" ]; then return 0; fi
+  mkdir -p "$WATCHER_STATE/waiting"
+  links=""
+  for b in $blockers; do links="${links:+$links, }[#$b](https://github.com/$PROJECT_REPO/issues/$b)"; done
+  if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card waits on $links, so I am not starting it yet.
+- I start it on my own once every card it waits on is closed.
+- Nothing for Steve to do, unless one of those cards is not on its way."; then
+    printf '%s' "$blockers" > "$marker"
+  else
+    log "waiting comment failed for #$n; retried on a later poll"
+  fi
+}
+
 # --- section 1, step 3: the pick ---------------------------------------------------------
-# First row whose flags do not include in-flight and whose attempts/<n> is below 2. Rows
-# are already P0-first (board.py). blocked/steve-decision are NOT filtered here — the
-# tick's own contract parks those in Stuck on its first turn (one source of truth for
-# routing lives in watch.md, not here).
+# First row whose flags do not include in-flight, whose attempts/<n> is below 2, and that
+# GitHub does not say is blocked by an open issue. Rows are already P0-first (board.py).
+# blocked/steve-decision are NOT filtered here — the tick's own contract parks those in
+# Stuck on its first turn (one source of truth for routing lives in watch.md, not here).
 pick_card() {
   ISSUE=""; PRIORITY=""; AGENT=""; TITLE=""
   local r_issue r_priority r_agent r_flags r_title attempts attn parked_ok parked_tried
@@ -291,6 +347,22 @@ pick_card() {
       fi
       continue
     fi
+
+    # Dependencies: a card blocked by an open issue waits, whatever its priority — the
+    # blocker is the card to work first, and if it is on this same board it is picked by
+    # this same loop a few rows down. Checked after the attempts safety net so a card
+    # that already failed twice is still parked, blocked or not.
+    local blockers
+    if ! blockers="$(open_blockers "$r_issue")"; then
+      log "#$r_issue skipped: could not read what it is blocked by (gh api failed); trying again next poll"
+      continue
+    fi
+    if [ -n "$blockers" ]; then
+      log "#$r_issue skipped: waiting on open issue(s) $blockers"
+      note_waiting "$r_issue" "$blockers"
+      continue
+    fi
+    [ "${DRY_RUN:-0}" = 1 ] || rm -f "$WATCHER_STATE/waiting/$r_issue"
     ISSUE="$r_issue"; PRIORITY="$r_priority"; AGENT="$r_agent"; TITLE="$r_title"
     return 0
   done <<< "${1-$ROWS}"
@@ -410,7 +482,7 @@ Reply A, B or C on this card, then move it.
 print_claude_cmd() {
   local n="$1" dir="$2" ts="$3"
   cat <<EOF
-(cd "$dir" && $WATCHER_CLAUDE -p "/watch $n" \\
+(cd "$dir" && $WATCHER_CLAUDE -p "$LANE_COMMAND $n" \\
   --dangerously-skip-permissions \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
   --output-format json --no-session-persistence \\
@@ -428,10 +500,12 @@ do_dry_run() {
     exit 0
   fi
   local dir="$WORKTREE_BASE/card-$ISSUE" ts
+  [ "$LANE_WORKDIR" = root ] && dir="$WATCHER_ROOT"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   echo "lane: ${LANE_AGENTS:-every card (no LANE_AGENTS)}"
+  echo "command: $LANE_COMMAND"
   echo "pick: #$ISSUE ($PRIORITY) $TITLE"
-  echo "worktree: $dir"
+  if [ "$LANE_WORKDIR" = root ]; then echo "workdir: $dir (no worktree)"; else echo "worktree: $dir"; fi
   echo "claude command:"
   print_claude_cmd "$ISSUE" "$dir" "$ts"
 }
@@ -491,7 +565,7 @@ launch_tick() {
   set -m
   local launch_pwd="$PWD"
   cd "$dir"
-  "$WATCHER_CLAUDE" -p "/watch $n" \
+  "$WATCHER_CLAUDE" -p "$LANE_COMMAND $n" \
       --dangerously-skip-permissions \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \
       --output-format json --no-session-persistence \
@@ -624,6 +698,19 @@ try:
     d=json.loads(sys.argv[1]); print("yes" if d.get("status")=="In progress" else "no")
 except Exception:
     print("no")' "$show")"
+  # The card's agent label now, as board.py's `list` would print it (`-` for none). A
+  # tick that relabels a card for another lane — /triage always, /watch when it routes a
+  # design card — leaves it In progress on purpose, and that is a success for THIS lane,
+  # not a no-progress attempt: the label keeps this lane from ever picking it again, and
+  # the other lane starts its own count.
+  local agent_now left_lane=no
+  agent_now="$(python3 -c 'import json,sys
+try:
+    d=json.loads(sys.argv[1]); found=[l.split(": ",1)[1] for l in d.get("labels",[]) if l.startswith("agent: ")]
+    print(found[0] if len(found)==1 else "-")
+except Exception:
+    print("-")' "$show")"
+  if [ "$is_in_progress" = yes ] && ! lane_takes "$agent_now"; then left_lane=yes; fi
 
   # Only ever sweeps the card THIS run holds — never a claim it did not make.
   if [ "$has_in_flight" = yes ] && [ "$(cat "$CURRENTFILE" 2>/dev/null || true)" = "$n" ]; then
@@ -643,14 +730,18 @@ except Exception:
   fi
 
   attn="$WATCHER_STATE/attempts/$n"
-  if [ "$subtype" = "success" ] && [ "$is_in_progress" != yes ]; then
+  if [ "$subtype" = "success" ] && { [ "$is_in_progress" != yes ] || [ "$left_lane" = yes ]; }; then
     # The tick succeeded and moved the card out of In progress (Done, In review, Stuck by
     # its own contract) — reset rather than increment, so a card that comes back to
     # In progress later (a fresh pass, a re-open) starts its two-attempt budget over
     # instead of inheriting a count from a previous, unrelated success (review, card #65
     # fold-in).
     rm -f "$attn"
-    log "tick #$n succeeded and left In progress: attempts/$n reset"
+    if [ "$left_lane" = yes ]; then
+      log "tick #$n succeeded and relabeled the card for another lane (agent '$agent_now'): attempts/$n reset"
+    else
+      log "tick #$n succeeded and left In progress: attempts/$n reset"
+    fi
   else
     attempts="$(bump_attempts "$n")"
     if [ "$attempts" -ge 2 ] && [ "$is_in_progress" = yes ]; then
@@ -663,7 +754,9 @@ except Exception:
     # `Closes #n` does it — so the "shipped" post has to come from here. board.py checks
     # the card's PR and posts "closed without a merge" instead when there is none.
     $WATCHER_BOARD notify "$n" shipped || log "discord notify failed for #$n"
-    if $WATCHER_WORKTREE remove "card-$n"; then
+    if [ "$LANE_WORKDIR" = root ]; then
+      log "no worktree to remove for #$n (LANE_WORKDIR=root)"
+    elif $WATCHER_WORKTREE remove "card-$n"; then
       log "worktree removed for #$n (issue closed)"
     else
       log "worktree remove refused for #$n — leaving it (unshipped work?)"
@@ -703,7 +796,7 @@ reconcile_stale_current() {
     return 0
   fi
   log "reconcile: found stale $CURRENTFILE, card #$n"
-  if pgrep -f "watch $n --dangerously-skip-permissions" >/dev/null 2>&1; then
+  if pgrep -f "${LANE_COMMAND#/} $n --dangerously-skip-permissions" >/dev/null 2>&1; then
     log "reconcile: a tick process for #$n still appears to be running; leaving it and the board alone"
     return 0
   fi
@@ -792,7 +885,11 @@ tick_once() {
     fi
   fi
 
-  if ! prepare_worktree "$ISSUE"; then
+  if [ "$LANE_WORKDIR" = root ]; then
+    # This lane's tick only touches the board (a triage): no worktree, run it in the
+    # project's main checkout. Nothing there is written by such a tick.
+    WT_DIR="$WATCHER_ROOT"
+  elif ! prepare_worktree "$ISSUE"; then
     log "aborting this poll for #$ISSUE: worktree not ready"
     return 1
   fi
@@ -808,7 +905,7 @@ tick_once() {
 run_daemon() {
   check_singleton
   trap 'rm -f "$PIDFILE"' EXIT
-  mkdir -p "$WATCHER_STATE/attempts" "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok" "$WATCHER_LOGS"
+  mkdir -p "$WATCHER_STATE/attempts" "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok" "$WATCHER_STATE/waiting" "$WATCHER_LOGS"
   # No standalone reconcile_stale_current call here: tick_once runs it at the top of every
   # iteration (including this loop's first), so a separate call before the loop would only
   # duplicate the very first poll's reconciliation.
@@ -831,7 +928,7 @@ run_daemon() {
 
 main() {
   parse_args "$@"
-  mkdir -p "$WATCHER_STATE/attempts" "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok" "$WATCHER_LOGS"
+  mkdir -p "$WATCHER_STATE/attempts" "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok" "$WATCHER_STATE/waiting" "$WATCHER_LOGS"
 
   if [ "$DRY_RUN" = 1 ]; then
     do_dry_run

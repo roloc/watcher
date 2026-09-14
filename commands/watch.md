@@ -69,9 +69,12 @@ names one; otherwise you are the builder. Build and test locally before opening 
 Run `reviewer` once on the branch when the change touches source or scripts; fix what it
 marks blocking, take or leave the nits. Docs-only changes get no review.
 
-**Route a design card before building it.** A card with no `agent:` label is build work
-by default, but Steve writes the ask in plain words and often skips the label. If the
-project has a design-shaped agent (an `agent: designer` or `agent: architect` label on the
+**Route a design card before building it.** In a project with a **triage lane**
+(`LANE_COMMAND=/triage` — see `how-it-works.md`, "Lanes"; riffmap has one) an unlabeled
+card is labeled within a minute of the hand-off and never reaches you, so the rest of
+this section only applies to a project without one. There, a card with no `agent:` label
+is build work by default, but Steve writes the ask in plain words and often skips the
+label. If the project has a design-shaped agent (an `agent: designer` or `agent: architect` label on the
 repo — `gh label list`), read the card as a designer would and route it when:
 
 - it asks for **options, examples, mockups, or a brief** ("show me some ways", "think of a

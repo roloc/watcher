@@ -10,15 +10,27 @@
 - **Done** — shipped.
 - **Stuck - Needs help** — the bots need you. Read the last comment on the card.
 
-## Two lanes
+## Three lanes
 
 - Design cards and build cards run **side by side**, one of each at a time.
 - The label decides the lane: `agent: architect` or `agent: designer` is the design lane.
-- Every other card, labeled or not, is the build lane. Two builds never run at once.
+  Every other label is the build lane. Two builds never run at once.
+- **No label needed.** A card with no `agent:` label is read by the triage lane within a
+  minute of you moving it to In progress, whatever the other two are doing. It adds the
+  label, says why in a comment, and the right lane takes it from there. Change the label
+  if you disagree; the card moves lanes with it.
 - A card in one lane never waits on the other. It never touches the other's branch either.
-- No label needed: a card that asks for options, examples or mockups is routed to the
-  design lane by the first bot that reads it. A bug or a removal is built as is.
-- To move a card between lanes yourself, change its `agent:` label.
+
+## Cards that wait on other cards
+
+- Move several cards over at once; the bots work the prerequisite first.
+- Say it in the card, in words: "after #291", "once the radar redesign lands", "depends
+  on". The triage bot records it as the issue's **Relationships** (blocked by). You can
+  also set that field yourself on the issue.
+- A card with an open "blocked by" waits, whatever its priority, and gets one comment
+  saying what it waits on. The minute the last one closes, it starts.
+- A card that already has an agent label is not read by the triage bot, so its
+  dependencies are yours to set on the issue.
 
 ## When a card lands in Stuck
 
@@ -42,6 +54,8 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 |---|---|---|
 | 🤖 Watcher picked this up | a tick started on the card | nothing |
 | 🤖 **Needs Steve:** | a decision or an answer is needed | pick A, B or C, move the card |
+| 🤖 **FYI:** I labeled this for the … lane | the triage bot picked the lane | nothing, unless you disagree — then change the label |
+| 🤖 **FYI:** this card waits on … | it is blocked by an open card; it starts when that closes | nothing, unless that card is not on its way |
 | 🤖 **FYI:** | information only | nothing |
 | 🤖 Watcher: the run ended without finishing | the tick died or ran out of budget; the card will be retried once | nothing, unless it happens twice |
 | 🤖 Watcher: a run died while holding this card | cleanup after a crash | nothing |
@@ -67,7 +81,7 @@ user mention (`<@your-id>`) or `@here`.
 ## Deploy a new watcher version
 
 - One command, as root on the box: `/opt/watcher/deploy/rollout.sh riffmap`
-- It covers both lanes. Each lane waits for its own running tick to finish, then swaps.
+- It covers every lane. Each lane waits for its own running tick to finish, then swaps.
   It never kills one.
 - Add a branch name at the end to deploy a branch before it merges.
 
@@ -76,13 +90,14 @@ user mention (`<@your-id>`) or `@here`.
 <details><summary>Commands (on the box)</summary>
 
 ```
-# pause / resume one lane (the design lane is riffmap-design; pause both to pause riffmap)
+# pause / resume one lane (design is riffmap-design, triage is riffmap-triage; pause all three to pause riffmap)
 touch ~watcher/.local/state/watcher/riffmap/PAUSE
 rm    ~watcher/.local/state/watcher/riffmap/PAUSE
 
 # what is a lane doing right now
 journalctl -u watcher@riffmap -f
 journalctl -u watcher@riffmap-design -f
+journalctl -u watcher@riffmap-triage -f
 
 # what did the last tick say and cost
 ls -t ~watcher/.local/state/watcher/riffmap/logs/ | head
