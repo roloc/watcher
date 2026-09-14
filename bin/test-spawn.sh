@@ -226,6 +226,11 @@ case "$args" in
     n="$(printf '%s' "$args" | sed -E 's#.*/issues/([0-9]+)/dependencies/blocked_by.*#\1#')"
     if [ -n "${GH_DEPS_DIR:-}" ] && [ -f "$GH_DEPS_DIR/$n.json" ]; then cat "$GH_DEPS_DIR/$n.json"; else echo "[]"; fi
     ;;
+  "pr list "*)
+    # The sweeper's open-PR lookup (case 3b): answers with $GH_PR_LIST_FILE when a test set
+    # one; every other test gets nothing, which spawn.sh reads as "no PR".
+    if [ -n "${GH_PR_LIST_FILE:-}" ] && [ -f "$GH_PR_LIST_FILE" ]; then cat "$GH_PR_LIST_FILE"; fi
+    ;;
 esac
 exit 0
 STUB
@@ -297,6 +302,7 @@ run() {
   CLAUDE_UNTRUSTED_KEY="${CLAUDE_UNTRUSTED_KEY:-}" \
   CLAUDE_PROBE_FAIL_OTHER="${CLAUDE_PROBE_FAIL_OTHER:-}" \
   WORKTREE_NEW_FAIL="${WORKTREE_NEW_FAIL:-0}" \
+  GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
   WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
@@ -380,6 +386,71 @@ if [ -n "$released_line" ] && printf '%s' "$released_line" | grep -q 'error_duri
 else
   flunk "board.py notify 30 released" "$released_line"
 fi
+
+# ============================================================================
+echo "3b. --once: the tick ended cleanly with its PR OPEN, in-flight still on the card → released, and the comment names the PR, not a death"
+# riffmap#305 (September 14, 2026): the tick opened its PR, then ended its turn "waiting on
+# CI" for a background notification a headless run never gets. The card is released and
+# retried exactly as for a died run — but Steve must read "PR up, merge pending", not
+# "the run ended without finishing".
+fresh_state
+board_list $'31\tP1\tui\t-\tCard thirty-one'
+board_show '{"number":31,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+GH_PR_LIST_FILE="$STATE/prs.json"
+printf '%s' '[{"number":52,"url":"https://github.com/owner/proj/pull/52","body":"## Summary\n\n- the change\n\nCloses #31\n"}]' > "$GH_PR_LIST_FILE"
+CLAUDE_SUBTYPE=success CLAUDE_RC=0 CLAUDE_COST=1.50 CLAUDE_TURNS=24 CLAUDE_DENIALS=1
+run --once >/dev/null
+if grep -q 'gh pr list --state open --search #31 in:body.*\[GH_REPO=owner/proj\]' "$TESTLOG"; then pass "the sweeper looks for the card's open PR by its Closes line, repo-scoped"; else flunk "pr list lookup" "$(cat "$TESTLOG")"; fi
+if grepped "board.py unclaim 31"; then pass "released all the same: the card goes back to In progress for the next poll to merge"; else flunk "unclaim not called" "$(cat "$TESTLOG")"; fi
+comment_line="$(grep 'gh issue comment 31' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'PR #52 is up' \
+   && printf '%s' "$comment_line" | grep -q 'pull/52' \
+   && printf '%s' "$comment_line" | grep -q 'merges once the checks are green' \
+   && ! printf '%s' "$comment_line" | grep -q 'without finishing' \
+   && ! printf '%s' "$comment_line" | grep -q 'card-31-'; then
+  pass "sweeper comment: 'PR #52 is up', links it, promises the merge, no 'without finishing', no log path"
+else
+  flunk "sweeper comment with an open PR" "$comment_line"
+fi
+released_line="$(grep 'board.py notify 31 released' "$TESTLOG" || true)"
+if printf '%s' "$released_line" | grep -q 'PR #52 is up' && ! printf '%s' "$released_line" | grep -q 'without finishing'; then
+  pass "Discord: 'released' names the PR, not a death"
+else
+  flunk "board.py notify 31 released" "$released_line"
+fi
+[ "$(cat "$STATE/attempts/31" 2>/dev/null)" = 1 ] && pass "attempts/31 = 1: still one of the two tries (a second such exit parks it)" || flunk "attempts/31" "$(cat "$STATE/attempts/31" 2>/dev/null)"
+
+echo "3c. …but a PR whose Closes line names ANOTHER card is not this card's → the plain died wording"
+fresh_state
+board_list $'32\tP1\tui\t-\tCard thirty-two'
+board_show '{"number":32,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+GH_PR_LIST_FILE="$STATE/prs.json"
+printf '%s' '[{"number":53,"url":"https://github.com/owner/proj/pull/53","body":"Closes #320\n\nSee also #32."}]' > "$GH_PR_LIST_FILE"
+CLAUDE_SUBTYPE=success CLAUDE_RC=0 CLAUDE_COST=0.10 CLAUDE_TURNS=5 CLAUDE_DENIALS=0
+run --once >/dev/null
+comment_line="$(grep 'gh issue comment 32' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'without finishing' && ! printf '%s' "$comment_line" | grep -q 'PR #53'; then
+  pass "a mention is not a Closes line: #320's PR and a bare '#32' do not claim the card"
+else
+  flunk "sweeper comment should be the died wording" "$comment_line"
+fi
+unset GH_PR_LIST_FILE
+
+echo "3d. …and the LINKED form the house rule mandates — Closes [#33](…/issues/33) — claims the card"
+fresh_state
+board_list $'33\tP1\tui\t-\tCard thirty-three'
+board_show '{"number":33,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+GH_PR_LIST_FILE="$STATE/prs.json"
+printf '%s' '[{"number":54,"url":"https://github.com/owner/proj/pull/54","body":"Resolves [#330](https://github.com/owner/proj/issues/330).\n\nCloses [#33](https://github.com/owner/proj/issues/33)."}]' > "$GH_PR_LIST_FILE"
+CLAUDE_SUBTYPE=success CLAUDE_RC=0 CLAUDE_COST=0.10 CLAUDE_TURNS=5 CLAUDE_DENIALS=0
+run --once >/dev/null
+comment_line="$(grep 'gh issue comment 33' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'PR #54 is up' && ! printf '%s' "$comment_line" | grep -q 'without finishing'; then
+  pass "a Markdown-linked Closes line is found; the linked #330 beside it is not mistaken for #33"
+else
+  flunk "sweeper comment with a linked Closes line" "$comment_line"
+fi
+unset GH_PR_LIST_FILE
 
 # ============================================================================
 echo "4. Second attempt on the same card (attempts file reaches 2, card still In progress) → Stuck move + comment"

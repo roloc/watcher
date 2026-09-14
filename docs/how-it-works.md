@@ -183,6 +183,7 @@ repeats it. Every post names the card, links to it, and links the PR when one ex
 | **a move to Stuck** | the tick (comment first, then move) or the spawner's park | 🚨 **Needs Steve:** the ask, quoted from the card, red; `DISCORD_MENTION` pings someone |
 | the card closed | the spawner, at the tick's exit | ✅ `shipped` with the merged PR, or 🗂️ `closed without a merge` |
 | a run died holding the card | the spawner's sweeper or reconciliation | ⚠️ `the run ended without finishing`; the next poll may retry |
+| a run ended with the card's PR open, unmerged | the spawner's sweeper | ⚠️ `PR #52 is up, but the run ended before merging it`; the next poll merges it once green |
 
 Nothing is posted per poll, per tick, or for a quiet tick; `Parked` as a stage is silent
 because the Stuck alert already covered it. A post that fails is one line on stderr and

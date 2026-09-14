@@ -635,9 +635,35 @@ print(eval(sys.argv[2]))
 ' "$1" "$2" 2>/dev/null || true
 }
 
+# The card's OPEN pull request, if the tick opened one: "<number> <url>", or nothing. Found
+# by the closing keyword in the body (`Closes #<n>` is what the merge acts on) rather than
+# by branch name — worktree.sh names the branch card-<n>, but a tick may rename it
+# (riffmap#305 shipped from card-305-overview-window, September 14, 2026). Any failure of
+# the lookup reads as "no PR", which falls back to the plainer sweeper wording below.
+open_pr_for() {
+  local n="$1" out
+  out="$($WATCHER_GH pr list --state open --search "#$n in:body" --json number,url,body --limit 30 2>/dev/null || true)"
+  [ -n "$out" ] || return 0
+  python3 -c 'import json, re, sys
+n = sys.argv[1]
+try:
+    prs = json.loads(sys.argv[2])
+except Exception:
+    sys.exit(0)
+# Bare `Closes #31` and the linked form `Closes [#31](https://.../issues/31)` that the
+# riffmap house rule mandates (always link board cards, never a bare #nnn) both count.
+# (This is inside a single-quoted bash string: no apostrophes in here.)
+pat = re.compile(r"\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:? +\[?#%s\b" % re.escape(n), re.I)
+for p in prs:
+    if pat.search(p.get("body") or ""):
+        print(p["number"], p["url"])
+        break
+' "$n" "$out" 2>/dev/null || true
+}
+
 handle_exit() {
   local n="$1" json="$2" rc="$3"
-  local subtype total_cost num_turns denials elapsed_min show has_in_flight is_closed is_in_progress attn attempts
+  local subtype total_cost num_turns denials elapsed_min show has_in_flight is_closed is_in_progress attn attempts pr
 
   subtype="$(json_field "$json" 'd.get("subtype","unknown")')"; subtype="${subtype:-unknown}"
   total_cost="$(json_field "$json" 'd.get("total_cost_usd","")')"
@@ -715,18 +741,39 @@ except Exception:
   # Only ever sweeps the card THIS run holds — never a claim it did not make.
   if [ "$has_in_flight" = yes ] && [ "$(cat "$CURRENTFILE" 2>/dev/null || true)" = "$n" ]; then
     $WATCHER_BOARD unclaim "$n" || log "unclaim failed for #$n"
-    # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve here — the card is
-    # released and the next poll may retry it; two of these in a row become a park.
-    $WATCHER_GH issue comment "$n" --body "🤖 FYI: the run ended without finishing this card. I released it; the next poll may retry once.
+    # Two exits look identical from here — the tick's process is gone, the card still
+    # in-flight — and Steve reads them very differently. A run that DIED holding the card is
+    # the failure the second wording below was written for. A run that opened the card's PR
+    # and then ended its turn before merging has done the work: riffmap#305, September 14,
+    # 2026, ended with "waiting on CI — I'll be notified when the background check
+    # finishes", a notification a headless run never gets, and the next tick found the PR
+    # green and merged it in 18 seconds. The release and the retry are the same either way
+    # (the card is In progress again, so pick_card takes it back); only the words differ.
+    pr="$(open_pr_for "$n")"
+    if [ -n "$pr" ]; then
+      # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve; the PR is the
+      # thing to look at, so it is the link, and no log path sits above the fold.
+      $WATCHER_GH issue comment "$n" --body "🤖 FYI: PR #${pr%% *} is up for this card, but the run ended before merging it. I released the card; the next poll picks it up and merges once the checks are green.
+- PR: ${pr#* }
+- Exit: ${rc}/${subtype} after ${elapsed_min} min
+- Agent cost: \$${total_cost:-0}" \
+        || log "sweeper comment failed for #$n"
+      $WATCHER_BOARD notify "$n" released "PR #${pr%% *} is up, but the run ended after ${elapsed_min} min before merging it. I released the card; the next poll merges it once the checks are green." \
+        || log "discord notify failed for #$n"
+    else
+      # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve here — the card is
+      # released and the next poll may retry it; two of these in a row become a park.
+      $WATCHER_GH issue comment "$n" --body "🤖 FYI: the run ended without finishing this card. I released it; the next poll may retry once.
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
 - ${denials:-0} permission denials
 - Agent cost: \$${total_cost:-0}
 - Log: $(basename "$json")" \
-      || log "sweeper comment failed for #$n"
-    # Discord, if configured (board.py notify is a no-op otherwise). A retry is not an
-    # alert — the park, if it comes, is — but a died run is rare enough to be worth a line.
-    $WATCHER_BOARD notify "$n" released "The run ended after ${elapsed_min} min without finishing (${subtype}). I released the card; the next poll may retry once." \
-      || log "discord notify failed for #$n"
+        || log "sweeper comment failed for #$n"
+      # Discord, if configured (board.py notify is a no-op otherwise). A retry is not an
+      # alert — the park, if it comes, is — but a died run is rare enough to be worth a line.
+      $WATCHER_BOARD notify "$n" released "The run ended after ${elapsed_min} min without finishing (${subtype}). I released the card; the next poll may retry once." \
+        || log "discord notify failed for #$n"
+    fi
   fi
 
   attn="$WATCHER_STATE/attempts/$n"

@@ -116,7 +116,12 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   `gh pr merge --squash --delete-branch`. **You do the merging.** **Never end your turn to
   wait** — not for CI, not for a subagent, not for anything: headless, ending the turn ends
   the process, the PR stays open, the card stays in-flight and the work is lost (three cards
-  on the first night, watcher#4). Subagents run in the foreground only. `main` requires 0
+  on the first night, watcher#4). **Backgrounding the wait is the same mistake**: a
+  `gh pr checks --watch` or `gh run watch` started as a background task, followed by ending
+  the turn "to be notified when it finishes", never gets that notification — the process is
+  gone — and the spawner has to release the card and spend a second tick merging a PR that
+  was already green (riffmap#305, September 14, 2026). Run the wait in the foreground and
+  keep the turn. Subagents run in the foreground only. `main` requires 0
   approvals; CI is the required check; `reviewer` is the only other gate and runs once. If
   you changed code after its pass and the change is more than the fix it asked for, run it
   once more on that fix only.
