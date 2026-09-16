@@ -44,7 +44,14 @@ carries the short table. Read those, then pick the ONE agent whose remit the car
 - **Otherwise build-shaped, by area.** A bug, a removal, a wrong calculation, or a change
   to an already approved design is build work: the agent whose files it names or implies
   (the web app, the rendered page, the prompts, the core code…). When nothing fits
-  better, the project's general builder.
+  better, the project's general builder. **The screen picks the agent, not the words**:
+  "chart", "graph", "D3", "ring" or "map" do not decide it — a chart on a page of the web
+  app belongs to the web agent (riffmap: `ui`, whose self-check is screenshots), a chart
+  on the rendered meeting page to the renderer (riffmap: `renderer`, whose self-check is
+  a byte-exact render). Read where the screenshot was taken. (riffmap
+  [#359](https://github.com/roloc/riffmap/issues/359), September 16, 2026: a broken
+  ring on the portal's overview was labeled `renderer` because the card said "graph";
+  that persona never runs the portal's shots, and the fix shipped unseen.)
 - A card that is both ("the display is bad *and* the link is broken") goes to design;
   the designer's card spins off the build card.
 - **Never** `evaluator`, `reviewer` or `scribe` unless the card asks for exactly a

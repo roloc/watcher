@@ -479,13 +479,20 @@ Reply A, B or C on this card, then move it.
 
 # The exact claude command from section 1 step 5, flags verbatim — shared by the real
 # launch and --dry-run so they can never drift apart.
+#
+# No `--no-session-persistence`: the tick's full transcript (every tool call, every file it
+# read, every picture it looked at) is kept under the tick user's `~/.claude/projects/<cwd>/
+# <session>.jsonl`, keyed by the worktree path. `$WATCHER_LOGS/card-<n>-<ts>.json` holds only
+# the result block, which is not enough for a post-mortem — riffmap #359 (September 16,
+# 2026) shipped a wrong fix and nobody could tell afterwards whether the tick had opened the
+# card's screenshot. Disk is cheap; `claude`'s own cleanup (cleanupPeriodDays) ages them out.
 print_claude_cmd() {
   local n="$1" dir="$2" ts="$3"
   cat <<EOF
 (cd "$dir" && $WATCHER_CLAUDE -p "$LANE_COMMAND $n" \\
   --dangerously-skip-permissions \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
-  --output-format json --no-session-persistence \\
+  --output-format json \\
   > "$WATCHER_LOGS/card-$n-$ts.json" 2> "$WATCHER_LOGS/card-$n-$ts.stderr")
 EOF
 }
@@ -568,7 +575,7 @@ launch_tick() {
   "$WATCHER_CLAUDE" -p "$LANE_COMMAND $n" \
       --dangerously-skip-permissions \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \
-      --output-format json --no-session-persistence \
+      --output-format json \
       > "$out" 2> "$err" &
   local tick_pid=$!
   # Deliberately NOT disowned: `wait "$tick_pid"` below is how this function learns the

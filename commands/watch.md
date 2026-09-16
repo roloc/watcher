@@ -69,6 +69,35 @@ names one; otherwise you are the builder. Build and test locally before opening 
 Run `reviewer` once on the branch when the change touches source or scripts; fix what it
 marks blocking, take or leave the nits. Docs-only changes get no review.
 
+**Look at what the card shows before you decide what is wrong.** A card that carries a
+picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
+a card whose evidence is the picture, not the sentence under it. Fetch it and look at it
+first: `curl -sL -H "Authorization: token $(gh auth token)" -o /tmp/card-<n>-1.png <url>`,
+then `Read` the file — the Read tool shows you a PNG. Say in one sentence what the picture
+shows, and check that against the code before you accept the card's own explanation of
+the cause: Steve's diagnosis is a hypothesis, the picture and the code are the evidence.
+If they disagree, say so on the card and go to Stuck (§4) with what you saw — never build
+the fix for the wrong cause. (riffmap [#359](https://github.com/roloc/riffmap/issues/359),
+September 16, 2026: the card said "too many topics"; the screenshot showed every arc as a
+dashed outline, the portal's designed "behind the pipeline" state the morning after a
+pipeline bump. The tick built a cap on topic count, and the ring came out worse.)
+
+**Build the rule the card names, or say why not.** When Steve states a rule ("only topics
+over five minutes"), that rule is the spec. Build it, or put the reason you did not in the
+PR body and on the card — never substitute your own rule silently. Not knowing what a
+chart should show past the state its mockup drew is a `designer` card, not a guess.
+
+**A change to a screen ships with its picture.** Any PR that touches what a user sees (the
+project's web app — riffmap's `web/src/**` — or a rendered page template) runs the
+project's screenshot script (riffmap: `cd web && npm run shots`) and you `Read` the PNGs
+for every route you touched, before and after, both widths and both themes where the
+script makes them. The PR body links the before and the after (the project's hosted
+preview URLs where it has them) and says in one sentence what the chart now tells a
+reader. If that sentence is "most of it is in one grey bucket", you have not fixed a
+chart, you have removed one: stop, and file the designer card instead. The `reviewer`
+treats a screen change with no picture as blocking. Tests, lint and a green build are
+not a look — they passed on [#359](https://github.com/roloc/riffmap/issues/359).
+
 **Route a design card before building it.** In a project with a **triage lane**
 (`LANE_COMMAND=/triage` — see `how-it-works.md`, "Lanes"; riffmap has one) an unlabeled
 card is labeled within a minute of the hand-off and never reaches you, so the rest of
