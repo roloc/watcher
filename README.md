@@ -77,6 +77,8 @@ way — follows `docs/talking-to-steve.md`:
 - **Bullets, not paragraphs.** At most 8 above the fold, one fact each.
 - **One question**, ending in `?`, with lettered options. Recommended option first.
 - **How to answer**, always: reply A, B or C on the card, move it back to In progress.
+- **Links he has to open** (a mockup, a screenshot, the PR) **go right above the question**,
+  as a `Look:` list — the fold is collapsed on his phone.
 - **Paths, logs and code go under `<details>`**, never above the fold.
 
 He answers by replying on the card and moving it. Moving a parked card back to

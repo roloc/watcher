@@ -34,12 +34,19 @@ comment, a log line). Those can be as dense as they need to be.
    summary format" not "the `MeetingMap` contract".
 8. **Details go under a fold.** Everything an engineer would want (paths, diffs, logs, the
    exact error) goes at the bottom inside `<details><summary>Details</summary> … </details>`.
-9. **American English**, dates like *September 7, 2026*. Never *favour*, *optimise*,
-   *behaviour*.
-10. **Never write "needs input".** Say what input. Never restate the card title as the ask.
+   A link is not a detail — see the next rule.
+9. **Links he has to open go right above the question.** A hosted mockup, a screenshot, a
+   live page, the PR that shows the thing: a `**Look:**` list between the bullets and the
+   question, one link per line, what it is in plain words and then the URL. The fold is
+   collapsed on the phone app, and Steve reviews on his phone, so a link under it is a
+   link he never sees. A repo path is not a link; it stays under the fold.
+10. **American English**, dates like *September 7, 2026*. Never *favour*, *optimise*,
+    *behaviour*.
+11. **Never write "needs input".** Say what input. Never restate the card title as the ask.
 
 A good test: could Steve answer with a single letter, from the first screen, without opening
-the details? If not, rewrite.
+the details? If the answer needs him to look at something, is the link to it on that first
+screen? If not, rewrite.
 
 ## Templates
 
@@ -51,6 +58,10 @@ the details? If not, rewrite.
 - Card: <what the card asked for, in plain words>
 - Done so far: <what you tried>
 - Blocker: <what stops you, in plain words>
+
+**Look:** (only when there is something to open — a mockup, a screenshot, a live page)
+- <what it is, in plain words>: https://…
+- The PR: https://…
 
 **Question: <the one question>?**
 - **A. <option>** (recommended) — <why, in one line>

@@ -179,6 +179,10 @@ shape:
 - Done so far: <what you tried>
 - Blocker: <what stops you, in plain words>
 
+**Look:** (only when there is something to open — a mockup, a screenshot, a live page)
+- <what it is, in plain words>: https://…
+- The PR: https://…
+
 **Question: <the one question>?**
 - **A. <option>** (recommended) — <why, in one line>
 - **B. <option>** — <why not, in one line>
@@ -203,6 +207,12 @@ The rules behind the shape (full version in `talking-to-steve.md`):
 - **Exactly one question**, ending in `?`. Recommended option first, marked `(recommended)`.
 - **No paths, commands, code, or unexpanded acronyms above the fold.** Say "the build",
   not the check's name. Everything an engineer wants goes under `<details>`.
+- **Links he has to open go right above the question, never under the fold.** A hosted
+  mockup, a screenshot, a live page, the PR: a `**Look:**` list, one per line, what it is
+  in plain words and then the URL. A link is not a path — a path is dead text on a phone,
+  a link is one tap. The `<details>` fold is collapsed on the phone app, so a link in there
+  is a link Steve never sees (riffmap cards #342 and #349, September 16, 2026: two design
+  approvals stalled because the mockup links were under the fold).
 - **Say how to answer.** The last line above the fold is always the reply-and-move line.
 - A reviewer finding headed to Steve arrives with its own `For Steve` block; paste it in.
 
