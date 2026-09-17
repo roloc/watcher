@@ -116,8 +116,12 @@ lane and stops — one short tick, counted as a success the same way.
 
 The one thing concurrency adds for a tick is that **`main` can move under it**: the other
 lane merges its own PRs. `/watch` merges `origin/main` into the branch before merging and
-re-runs CI if that changed anything; a real conflict is a Stuck card, never a hand-resolved
-merge. Design PRs live in `docs/` and build PRs in the source tree, so it should be rare.
+re-runs CI if that changed anything. A conflict where both sides only added — two entries
+appended to the same list, two sections at the end of the same doc — the tick resolves
+itself by keeping both, main's first, and lets CI judge the result; a conflict where a side
+rewrote or removed something the other side touched is a Stuck card, never a hand-resolved
+merge. Design PRs live in `docs/` and build PRs in the source tree, so either should be
+rare; the additive kind is the one that does happen (riffmap#349, September 17, 2026).
 
 **Two attempts, then Steve.** That rule is enforced by the spawner, not by the tick. A tick
 that keeps retrying the same failing thing inside one run is wasting the budget; go to Stuck

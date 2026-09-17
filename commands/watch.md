@@ -156,11 +156,28 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   once more on that fix only.
 - **`main` may move under you** while you work — the other lane merges its own PRs, and so
   does Steve. Before merging, and again if the merge is refused as not mergeable:
-  `git fetch origin && git merge origin/main`. If git merges it cleanly, push, wait for CI
-  again, then merge. If it leaves conflict markers, `git merge --abort` and go to **Stuck**
-  (§4) with the conflicting files under the fold. Never resolve a conflict by hand: the
-  other change was reviewed and merged on its own terms, and deciding what wins is not a
-  builder's call.
+  `git fetch origin && git -c merge.conflictStyle=diff3 merge origin/main`. If git merges
+  it cleanly, push, wait for CI again, then merge. If it leaves conflict markers, read
+  every hunk — `diff3` shows three blocks: yours, the base both branches started from, and
+  main's — and sort the conflict into one of two kinds:
+  - **Additive: both sides added, nobody rewrote.** In every hunk each side is the base
+    text plus new lines, and anything a side did change in the base text the other side
+    changed the same way (the seam of a list: a period that became a semicolon on both
+    sides so each could append after it). The two additions are different things — two
+    entries in a list of mockups, two sections at the end of a doc, two test cases — not
+    two versions of one thing. Resolve it yourself: the base text, then main's addition,
+    then yours; delete the markers; commit the merge; push; wait for CI; merge. Leave one
+    comment on the PR: `🤖 FYI: merged main; kept both sides of an additive conflict in
+    <file>.` If CI is red on the merge commit, that is **Stuck** (§4), not a second try.
+  - **Anything else** — a side rewrote or deleted lines the other side kept or changed
+    differently, the same entry written two ways, a rename against an edit, or you are not
+    sure — `git merge --abort` and go to **Stuck** (§4) with the conflicting files and
+    which of these it was under the fold. The other change was reviewed and merged on its
+    own terms, and deciding what wins is not a builder's call.
+
+  Once per tick: if `main` moves again and conflicts again after your resolution, that is
+  Stuck too. (riffmap#349, September 17, 2026: a four-line list conflict, both sides
+  appending a mockup entry, went to Steve as a decision and cost a day's round trip.)
 - Docs-only changes go through a PR the same way; they get no `reviewer` pass.
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
