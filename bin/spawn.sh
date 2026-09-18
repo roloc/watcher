@@ -425,6 +425,9 @@ park_stuck() {
   local n="$1" detail="$2"
   local tried="$WATCHER_STATE/parked/$n" ok="$WATCHER_STATE/parked-ok/$n"
   mkdir -p "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok"
+  # A card that reaches Stuck starts over when Steve sends it back: sweep_in_review's
+  # "already had its one turn" marker must not outlive the park.
+  rm -f "$WATCHER_STATE/inreview/$n.requeued"
 
   if [ ! -f "$ok" ]; then
     # `--why` is the ask in the Discord alert board.py posts for a move to Stuck (the
@@ -650,17 +653,20 @@ print(eval(sys.argv[2]))
 # by the closing keyword in the body (`Closes #<n>` is what the merge acts on) rather than
 # by branch name — worktree.sh names the branch card-<n>, but a tick may rename it
 # (riffmap#305 shipped from card-305-overview-window, September 14, 2026). Any failure of
-# the lookup reads as "no PR", which falls back to the plainer sweeper wording below.
+# the lookup RETURNS 1 with nothing printed: handle_exit reads that as "no PR" (it only
+# picks the sweeper's wording), sweep_in_review skips the card for the poll — it must never
+# read an outage as "this card has no PR" and park a card whose PR is up (the same
+# fail-closed rule as open_blockers).
 open_pr_for() {
   local n="$1" out
-  out="$($WATCHER_GH pr list --state open --search "#$n in:body" --json number,url,body --limit 30 2>/dev/null || true)"
-  [ -n "$out" ] || return 0
+  out="$($WATCHER_GH pr list --state open --search "#$n in:body" --json number,url,body --limit 30 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
   python3 -c 'import json, re, sys
 n = sys.argv[1]
 try:
     prs = json.loads(sys.argv[2])
 except Exception:
-    sys.exit(0)
+    sys.exit(3)
 # Bare `Closes #31` and the linked form `Closes [#31](https://.../issues/31)` that the
 # riffmap house rule mandates (always link board cards, never a bare #nnn) both count.
 # (This is inside a single-quoted bash string: no apostrophes in here.)
@@ -669,7 +675,7 @@ for p in prs:
     if pat.search(p.get("body") or ""):
         print(p["number"], p["url"])
         break
-' "$n" "$out" 2>/dev/null || true
+' "$n" "$out" 2>/dev/null || return 1
 }
 
 handle_exit() {
@@ -735,6 +741,15 @@ try:
     d=json.loads(sys.argv[1]); print("yes" if d.get("status")=="In progress" else "no")
 except Exception:
     print("no")' "$show")"
+  # The tick parked the card itself (its own Stuck exit, invisible to park_stuck): same
+  # rule as there — Steve's answer starts the card over, so sweep_in_review's one-turn
+  # marker goes. Without this a card re-queued once, parked, answered and finished days
+  # later would be parked again within a minute of reaching In review, with a comment
+  # about a re-queue long past (review of watcher#19).
+  if python3 -c 'import json,sys
+sys.exit(0 if json.loads(sys.argv[1]).get("status")=="Stuck - Needs help" else 1)' "$show" 2>/dev/null; then
+    rm -f "$WATCHER_STATE/inreview/$n.requeued"
+  fi
   # The card's agent label now, as board.py's `list` would print it (`-` for none). A
   # tick that relabels a card for another lane — /triage always, /watch when it routes a
   # design card — leaves it In progress on purpose, and that is a success for THIS lane,
@@ -760,7 +775,7 @@ except Exception:
     # finishes", a notification a headless run never gets, and the next tick found the PR
     # green and merged it in 18 seconds. The release and the retry are the same either way
     # (the card is In progress again, so pick_card takes it back); only the words differ.
-    pr="$(open_pr_for "$n")"
+    pr="$(open_pr_for "$n" || true)"
     if [ -n "$pr" ]; then
       # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve; the PR is the
       # thing to look at, so it is the link, and no log path sits above the fold.
@@ -932,6 +947,7 @@ sweep_in_review() {
   now="$(date +%s)"
 
   local present=" " r_issue r_priority r_agent r_flags r_stage r_title
+  # (No five-column shift as in pick_card: only the first four fields are read here.)
   while IFS=$'\t' read -r r_issue r_priority r_agent r_flags r_stage r_title; do
     [ -z "$r_issue" ] && continue
     present="$present$r_issue "
@@ -944,12 +960,16 @@ sweep_in_review() {
     since="$(cat "$seen" 2>/dev/null || echo "$now")"
     case "$since" in ''|*[!0-9]*) since="$now" ;; esac
     age=$((now - since))
-    pr="$(open_pr_for "$r_issue")"
+    if ! pr="$(open_pr_for "$r_issue")"; then
+      log "#$r_issue: PR lookup failed; not sweeping it this poll"
+      continue
+    fi
     pr_num="${pr%% *}"; pr_url="${pr#* }"
 
-    local body="" why="" target=""
+    local body="" why="" target="" kind=""
     if [ -z "$pr" ]; then
       [ "$age" -ge "$INREVIEW_NO_PR_GRACE_SEC" ] || continue
+      kind=no-pr
       target="Stuck - Needs help"
       why="This card is in In review but has no pull request, so nobody is working it."
       body="🤖 **Needs Steve: this card is in In review but has no pull request, so nobody is working it.**
@@ -964,6 +984,7 @@ sweep_in_review() {
 
 Move the card; no reply needed."
     elif [ -f "$requeued" ]; then
+      kind=second-visit
       target="Stuck - Needs help"
       why="This card's PR came back to In review after a second try. It needs you."
       body="🤖 **Needs Steve: this card's PR is still not merged after a second try.**
@@ -979,13 +1000,16 @@ Move the card; no reply needed."
 Reply if you chose B, then move the card."
     else
       [ "$age" -ge "$INREVIEW_STALE_SEC" ] || continue
+      kind=requeue
       target="In progress"
       body="🤖 FYI: PR #$pr_num has been waiting in In review, so I sent this card back to **In progress**. The next tick finishes it (merge main, review, merge) or parks it in Stuck with the question. Nothing for you to do."
     fi
 
-    if [ ! -f "$said" ]; then
+    # .said names WHICH comment went out: a no-PR comment whose move kept failing must not
+    # silence the different comment a later state of the same card calls for.
+    if [ "$(cat "$said" 2>/dev/null || true)" != "$kind" ]; then
       if $WATCHER_GH issue comment "$r_issue" --body "$body"; then
-        : > "$said"
+        echo "$kind" > "$said"
       else
         log "#$r_issue: In review sweep comment failed; retrying next poll, not moving without it"
         continue

@@ -83,9 +83,12 @@ hand with no PR. So every poll, after the board read and before the pick, `spawn
 
 An `in-flight` card is skipped. Comment first, move second, and the move is retried every
 poll until it lands; the comment is not repeated. State is `inreview/<n>.seen|.said|.requeued`
-under the lane's state directory; `.requeued` is cleared when the card is parked (Steve's
-answer starts it over) or closes. A failed In review read never stops In progress from
-being served.
+under the lane's state directory; `.requeued` is cleared whenever the card reaches Stuck —
+parked by the sweep, by `park_stuck`, or by the tick itself (`handle_exit` reads the status
+back) — because Steve's answer starts it over, and when it closes. A re-queued card is
+picked on the following poll, not the same one. Everything fails closed: a PR lookup that
+errors is not "no PR" and the card is left alone for that poll, and a failed In review read
+never stops In progress from being served. Both limits are env knobs a project file may set.
 
 ## Lanes
 

@@ -236,7 +236,10 @@ case "$args" in
   "pr list "*)
     # The sweeper's open-PR lookup (case 3b): answers with $GH_PR_LIST_FILE when a test set
     # one; every other test gets nothing, which spawn.sh reads as "no PR".
-    if [ -n "${GH_PR_LIST_FILE:-}" ] && [ -f "$GH_PR_LIST_FILE" ]; then cat "$GH_PR_LIST_FILE"; fi
+    # No file → `[]`, what the real gh prints for no matches; $GH_PR_LIST_FAIL=1 → an outage
+    # (non-zero, nothing on stdout), which the In review sweep must never read as "no PR".
+    if [ "${GH_PR_LIST_FAIL:-0}" = 1 ]; then echo "gh: HTTP 502 (simulated)" >&2; exit 1; fi
+    if [ -n "${GH_PR_LIST_FILE:-}" ] && [ -f "$GH_PR_LIST_FILE" ]; then cat "$GH_PR_LIST_FILE"; else echo "[]"; fi
     ;;
 esac
 exit 0
@@ -311,7 +314,7 @@ run() {
   CLAUDE_UNTRUSTED_KEY="${CLAUDE_UNTRUSTED_KEY:-}" \
   CLAUDE_PROBE_FAIL_OTHER="${CLAUDE_PROBE_FAIL_OTHER:-}" \
   WORKTREE_NEW_FAIL="${WORKTREE_NEW_FAIL:-0}" \
-  GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" \
+  GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" GH_PR_LIST_FAIL="${GH_PR_LIST_FAIL:-0}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
   WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
@@ -1155,6 +1158,22 @@ GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 BOARD_MOVE_FAIL=1 run --once >/dev
 [ "$(grep -c 'gh issue comment 700' "$TESTLOG")" = 1 ] && [ "$(grep -c 'board.py move 700 Stuck' "$TESTLOG")" = 2 ] \
   && pass "a failing move is retried every poll; the comment goes out once" || flunk "retry/comment counts" "$(cat "$TESTLOG")"
 BOARD_MOVE_FAIL=0
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tgh is down'
+GH_PR_LIST_FAIL=1 INREVIEW_NO_PR_GRACE_SEC=0 run --once >/dev/null 2>&1
+if not_grepped "board.py move 700" && not_grepped "gh issue comment 700"; then pass "a failed PR lookup is not 'no PR': the card is left alone for the poll (fails closed)"; else flunk "parked on a gh outage" "$(cat "$TESTLOG")"; fi
+GH_PR_LIST_FAIL=0
+
+fresh_state; board_review ""; mkdir -p "$STATE/inreview"; : > "$STATE/inreview/703.requeued"
+board_list $'703\tP1\tbuilder\t-\tRe-queued, then the tick parks it itself'
+board_show '{"number":703,"state":"OPEN","status":"Stuck - Needs help","labels":[]}'
+run --once >/dev/null 2>&1
+[ ! -f "$STATE/inreview/703.requeued" ] && pass "a tick that parks a re-queued card itself clears the one-turn marker (Steve's answer starts it over)" || flunk "requeued marker survived the tick's own park"
+
+fresh_state; board_review ""; mkdir -p "$STATE/inreview" "$STATE/attempts"; : > "$STATE/inreview/704.requeued"; echo 2 > "$STATE/attempts/704"
+board_list $'704\tP1\tbuilder\t-\tRe-queued, then parked by the spawner'
+run --once >/dev/null 2>&1
+[ ! -f "$STATE/inreview/704.requeued" ] && pass "park_stuck clears it too" || flunk "requeued marker survived park_stuck"
 
 fresh_state; board_list ""; board_review $'700\tP1\tdesigner\t-\tAnother lane\'s card' $'701\tP1\tbuilder\tin-flight\tA tick is on it'
 GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 LANE_AGENTS='!architect,designer,-' run --once >/dev/null 2>&1
