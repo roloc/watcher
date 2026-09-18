@@ -6,7 +6,7 @@
 
 - **Ready** — yours. The bots never touch it.
 - **In progress** — move a card here to hand it to the bots.
-- **In review** — the bot's PR is green but did not merge. Merge it yourself or ask why.
+- **In review** — the bot's PR is finished and green but the merge did not go through. Nothing for you to do: after two hours the bots try once more, and if that fails the card comes to you in **Stuck** with the question. A card you drop here by hand, with no PR, is moved to **Stuck** within about ten minutes asking where you meant to put it.
 - **Done** — shipped.
 - **Stuck - Needs help** — the bots need you. Read the last comment on the card.
 
@@ -67,7 +67,7 @@ Discord repeats the board; the card is always the record. Every message links to
 | Message starts with | Meaning | You need to do |
 |---|---|---|
 | 🚨 **Needs Steve:** | a card is in Stuck; the ask is in the message | open the card, pick A, B or C, move it back to In progress |
-| 📋 #n → **In review** | the PR is green but did not merge | merge it, or ask why |
+| 📋 #n → **In review** | the PR is green but did not merge | nothing; the bots retry in two hours, then ask you in Stuck |
 | 📋 #n → *(any other column)* | the card changed column | nothing |
 | 🔧 #n → **Building** (or any stage) | the bot crossed into that step | nothing |
 | ✅ #n shipped | merged and closed; the PR is linked | nothing |

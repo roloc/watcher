@@ -29,7 +29,7 @@ Columns, in order: `Backlog | Ready | In progress | In review | Done | Stuck - N
 |---|---|---|
 | Backlog, Ready | Steve | not the watcher's business; never pull from them |
 | **In progress** | Steve (or Steve moving a Stuck card back) | **the watcher's only input.** A card here is a hand-off to the bots |
-| In review | the tick | PR is green and waiting on a merge that did not happen; not a failure |
+| In review | the tick | the work is finished, reviewed and green, and only the merge did not happen. Not a resting place: the spawner sweeps it every poll (see "The In review sweep") |
 | Done | the merge (`Closes #n`) | shipped |
 | **Stuck - Needs help** | the tick or the spawner | the bots need Steve. The comment on the card says what, in the format in `docs/talking-to-steve.md` |
 
@@ -65,6 +65,27 @@ Labels and fields the bots read:
    with a comment. A closed card gets its worktree removed.
 7. **Sleep:** 60 seconds after a normal poll, 10 minutes after a failed tick, 5 minutes
    after a board outage.
+
+## The In review sweep
+
+The spawner's input is In progress, so In review used to be a column nothing read: a card
+there waited for Steve to notice it, and the Discord line for the move is an ordinary 📋
+post, not an alert. Two riffmap cards sat there for most of a day on September 17, 2026
+(watcher#18) — one whose tick ran out of budget before its review, one dropped there by
+hand with no PR. So every poll, after the board read and before the pick, `spawn.sh`'s
+`sweep_in_review` lists In review and, for the cards that are this lane's by label:
+
+| The card has | For | The spawner |
+|---|---|---|
+| no open PR | 10 minutes (`INREVIEW_NO_PR_GRACE_SEC`; covers a merge that is still closing the card) | comments the ask, moves it to **Stuck** |
+| an open PR | 2 hours (`INREVIEW_STALE_SEC`) | comments an FYI, moves it back to **In progress** — once. A tick finishes the PR |
+| an open PR, and already had that turn | — | comments the ask with the PR link, moves it to **Stuck** |
+
+An `in-flight` card is skipped. Comment first, move second, and the move is retried every
+poll until it lands; the comment is not repeated. State is `inreview/<n>.seen|.said|.requeued`
+under the lane's state directory; `.requeued` is cleared when the card is parked (Steve's
+answer starts it over) or closes. A failed In review read never stops In progress from
+being served.
 
 ## Lanes
 

@@ -182,10 +182,26 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
   force-push, never merge red, never push `main` directly, never touch a project's secrets.
-- If the PR is green but the merge did not happen, that is **not** a failure: move the card
-  to **In review**, comment `🤖 FYI: PR #<pr> is green and waiting on a merge.`, and finish
-  the tick cleanly. If CI is red twice, or `reviewer` found something blocking that you
-  disagree with, that is **Stuck** (§4) — never In review.
+- **In review means exactly one thing: the work is finished and only the merge is missing.**
+  The PR is green, `reviewer` ran (or the change is docs-only), every item in the card's
+  Verification is met, and the merge itself did not go through. Then: move the card to
+  **In review**, comment `🤖 FYI: PR #<pr> is green and waiting on a merge.`, and finish the
+  tick cleanly. The spawner sends it back to In progress after two hours for one more try
+  and parks it in Stuck after that, so it does not rest there.
+- **Anything less than finished is Stuck (§4), never In review** — nobody reads In review
+  as a queue, and "next tick needs to…" written on an In review card is a note to no one.
+  That covers: CI red twice; a blocking `reviewer` finding you disagree with; **`reviewer`
+  has not run**; **a Verification item you cannot do from this box** (a file that is not
+  here, a machine you cannot reach) — say which, and ask whether to merge without it; and
+  **running low on turns or budget**. Past roughly three quarters of either cap, stop
+  starting new work: what is left is for leaving the board true — the Stuck comment and
+  the move are part of the card, not extra. (riffmap#378, September 17, 2026: a tick ran
+  out of budget before its review, left the card In review for "the next tick", and it sat
+  for a day while `main` moved three merges and the PR went from green to conflicting.)
+- **A card that arrives with its PR already open** (the branch has commits, `gh pr list`
+  shows it) came back from In review or from Stuck. Read the last comments on the card and
+  the PR, then finish that PR — merge `origin/main`, fix what the comments name, run
+  `reviewer` if it never ran, merge. Do not start over and do not open a second PR.
 
 ## 4. Stuck — the important half
 
@@ -271,7 +287,7 @@ posts are the updates Steve asked for.
 ## 5. Always leave the board true
 
 Every tick ends with the card in exactly one of: **Done** (merged — the `Closes #n` does
-this), **In review** (PR up, waiting on a merge), **Stuck - Needs help**, or still
+this), **In review** (finished, reviewed, green — only the merge is missing; §3), **Stuck - Needs help**, or still
 **In progress** if you got nowhere — or if you routed it to another lane (§2), which is
 the one In progress exit that is not a failure.
 

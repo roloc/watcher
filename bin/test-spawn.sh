@@ -62,6 +62,13 @@ case "$1" in
       echo "board.py: no 'Status' option 'In progress'" >&2
       exit 1
     fi
+    # The In review sweep's poll answers from its own file ($BOARD_REVIEW_FILE, empty when
+    # a test set none) — never from the In progress rows.
+    if [ "${2:-}" = "In review" ]; then
+      if [ "${BOARD_REVIEW_FAIL:-0}" = 1 ]; then echo "board.py: transient API error" >&2; exit 1; fi
+      cat "${BOARD_REVIEW_FILE:-/dev/null}"
+      exit 0
+    fi
     cat "$BOARD_LIST_FILE"
     ;;
   queue)
@@ -288,6 +295,8 @@ run() {
   TEST_LOG="$TESTLOG" \
   BOARD_LIST_FILE="${BOARD_LIST_FILE:-/dev/null}" BOARD_LIST_FAIL="${BOARD_LIST_FAIL:-0}" \
   BOARD_QUEUE_FILE="${BOARD_QUEUE_FILE:-/dev/null}" \
+  BOARD_REVIEW_FILE="${BOARD_REVIEW_FILE:-/dev/null}" BOARD_REVIEW_FAIL="${BOARD_REVIEW_FAIL:-0}" \
+  INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-}" INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-}" \
   BOARD_SHOW_FILE="${BOARD_SHOW_FILE:-/dev/null}" BOARD_SHOW_FAIL="${BOARD_SHOW_FAIL:-0}" \
   BOARD_MOVE_FAIL="${BOARD_MOVE_FAIL:-0}" \
   BOARD_MOVE_FAIL_COUNT="${BOARD_MOVE_FAIL_COUNT:-}" BOARD_MOVE_COUNTER_FILE="${BOARD_MOVE_COUNTER_FILE:-}" \
@@ -1108,6 +1117,60 @@ board_show '{"number":600,"state":"OPEN","status":"In progress","labels":[]}'
 mkdir -p "$STATE/attempts"; echo 1 > "$STATE/attempts/600"
 LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>&1 || true
 if grepped "board.py move 600 Stuck - Needs help"; then pass "…but a tick that leaves it unlabeled and In progress is still an attempt: parked at 2"; else flunk "unlabeled still counts" "$(cat "$TESTLOG")"; fi
+
+# ============================================================================
+echo "In review sweep (watcher#18): a column nothing read becomes one the spawner empties"
+board_review() { BOARD_REVIEW_FILE="$STATE/board-review.tsv"; printf '%s\n' "$@" > "$BOARD_REVIEW_FILE"; }
+PRS="$TMP/prs-700.json"
+echo '[{"number":71,"url":"https://github.com/owner/proj/pull/71","body":"Closes #700"}]' > "$PRS"
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tFresh in review'
+GH_PR_LIST_FILE="$PRS" run --once >/dev/null 2>&1
+if not_grepped "board.py move 700" && not_grepped "gh issue comment 700"; then pass "fresh In review card with an open PR → untouched"; else flunk "fresh card was touched" "$(cat "$TESTLOG")"; fi
+[ -f "$STATE/inreview/700.seen" ] && pass "…and its clock started (inreview/700.seen)" || flunk "no .seen marker"
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tNo PR yet'
+GH_PR_LIST_FILE="" run --once >/dev/null 2>&1
+if not_grepped "board.py move 700"; then pass "no PR but inside the grace → untouched (a merge may be closing it)"; else flunk "parked inside the grace" "$(cat "$TESTLOG")"; fi
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tDropped here by hand'
+GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 run --once >/dev/null 2>&1
+if grepped "board.py move 700 Stuck - Needs help"; then pass "In review + no PR past the grace → Stuck"; else flunk "expected a move to Stuck" "$(cat "$TESTLOG")"; fi
+if grep -q 'gh issue comment 700.*Needs Steve: .*no pull request.*Question: .*\*\*A\. .*\*\*B\. .*\*\*C\. ' "$TESTLOG"; then pass "…with the ask first, one question, lettered options (talking-to-steve shape)"; else flunk "Stuck comment shape" "$(cat "$TESTLOG")"; fi
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tStale green PR'
+GH_PR_LIST_FILE="$PRS" INREVIEW_STALE_SEC=0 run --once >/dev/null 2>&1
+if grepped "board.py move 700 In progress" && not_grepped "board.py move 700 Stuck"; then pass "In review + open PR past the stale limit → back to In progress"; else flunk "expected a re-queue" "$(cat "$TESTLOG")"; fi
+if grep -q 'gh issue comment 700.*FYI: PR #71' "$TESTLOG"; then pass "…with an FYI naming the PR"; else flunk "re-queue FYI" "$(cat "$TESTLOG")"; fi
+[ -f "$STATE/inreview/700.requeued" ] && [ ! -f "$STATE/inreview/700.seen" ] && pass "…and the one-turn marker is on file, the clock cleared" || flunk "markers after re-queue" "$(ls "$STATE/inreview")"
+: > "$TESTLOG"
+GH_PR_LIST_FILE="$PRS" run --once >/dev/null 2>&1
+if grepped "board.py move 700 Stuck - Needs help" && not_grepped "board.py move 700 In progress"; then pass "back in In review after its one turn → Stuck, not a second re-queue"; else flunk "expected Stuck on the second visit" "$(cat "$TESTLOG")"; fi
+if grep -q 'gh issue comment 700.*Needs Steve: .*pull/71.*Question: ' "$TESTLOG"; then pass "…and the Stuck comment carries the PR link above the question"; else flunk "second-visit comment" "$(cat "$TESTLOG")"; fi
+[ ! -f "$STATE/inreview/700.requeued" ] && pass "…and parking clears the marker: Steve's answer starts the card over" || flunk "requeued marker survived the park"
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tMove keeps failing'
+GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 BOARD_MOVE_FAIL=1 run --once >/dev/null 2>&1
+GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 BOARD_MOVE_FAIL=1 run --once >/dev/null 2>&1
+[ "$(grep -c 'gh issue comment 700' "$TESTLOG")" = 1 ] && [ "$(grep -c 'board.py move 700 Stuck' "$TESTLOG")" = 2 ] \
+  && pass "a failing move is retried every poll; the comment goes out once" || flunk "retry/comment counts" "$(cat "$TESTLOG")"
+BOARD_MOVE_FAIL=0
+
+fresh_state; board_list ""; board_review $'700\tP1\tdesigner\t-\tAnother lane\'s card' $'701\tP1\tbuilder\tin-flight\tA tick is on it'
+GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 LANE_AGENTS='!architect,designer,-' run --once >/dev/null 2>&1
+if not_grepped "board.py move 70"; then pass "another lane's card and an in-flight card are not swept"; else flunk "swept a card that is not this lane's" "$(cat "$TESTLOG")"; fi
+
+fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tSeen once'
+GH_PR_LIST_FILE="$PRS" run --once >/dev/null 2>&1
+board_review ""
+GH_PR_LIST_FILE="$PRS" run --once >/dev/null 2>&1
+[ ! -f "$STATE/inreview/700.seen" ] && pass "a card that left In review loses its clock" || flunk ".seen survived the card leaving"
+
+fresh_state; board_list $'702\tP1\tbuilder\t-\tOrdinary card'; board_review ""
+board_show '{"number":702,"state":"CLOSED","status":"Done","labels":[]}'
+BOARD_REVIEW_FAIL=1 run --once >/dev/null 2>&1
+if grepped "watch 702"; then pass "a failed In review poll never stops In progress from being served"; else flunk "tick did not launch" "$(cat "$TESTLOG")"; fi
+BOARD_REVIEW_FAIL=0; BOARD_REVIEW_FILE=/dev/null; GH_PR_LIST_FILE=""
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail
