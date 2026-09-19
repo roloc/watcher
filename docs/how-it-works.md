@@ -27,8 +27,9 @@ Columns, in order: `Backlog | Ready | In progress | In review | Done | Stuck - N
 
 | Column | Who moves cards in | Meaning |
 |---|---|---|
-| Backlog, Ready | Steve | not the watcher's business; never pull from them |
-| **In progress** | Steve (or Steve moving a Stuck card back) | **the watcher's only input.** A card here is a hand-off to the bots |
+| Backlog | Steve | not the watcher's business; never pulled from |
+| **Ready** | Steve | **the loop's own queue** when `READY_PULL=1` (riffmap, since September 19, 2026): a lane promotes the top card here to In progress when In progress and Waiting are both dry and the column is under `WIP_MAX`. Without that setting it is Backlog's twin and nothing reads it |
+| **In progress** | Steve, a lane promoting a Ready or Waiting card, or Steve moving a Stuck card back | **what a tick is handed.** A card here is work in flight |
 | In review | the tick | the work is finished, reviewed and green, and only the merge did not happen. Not a resting place: the spawner sweeps it every poll (see "The In review sweep") |
 | Done | the merge (`Closes #n`) | shipped |
 | **Stuck - Needs help** | the tick or the spawner | the bots need Steve. The comment on the card says what, in the format in `docs/talking-to-steve.md` |
@@ -40,18 +41,26 @@ Labels and fields the bots read:
   never share a card (see "Lanes" below). Must be removed on every exit, or the next tick
   skips the card forever.
 - **`agent: <name>`** — exactly one, or none. Names the project subagent that should do the
-  work. `evaluator`, `reviewer` and `scribe` produce a measurement or a document rather
-  than a PR, so the tick routes those to Stuck for a human.
+  work. `evaluator` (a measurement, posted on the card) and `scribe` (a docs-only PR) are
+  worked by the tick like any other card, since September 19, 2026 — a measurement that
+  needs a live, paid model run is the one that still goes to Stuck. `reviewer` produces a
+  verdict on somebody else's change rather than an artifact of its own, so the tick routes
+  that one to Stuck for a human.
 - **`steve-decision`** — a product decision. The tick never does these; straight to Stuck.
 - **`blocked`** — straight to Stuck.
 - **Priority** field `P0`, `P1`, `P2` — `board list` sorts P0 first, then by issue number.
 
 ## Life of a card
 
-1. **Steve moves a card to In progress.**
+1. **The card reaches In progress** — Steve moves it there, or drags it to the Waiting
+   stage, or (with `READY_PULL=1`) a lane promotes it from **Ready** on its own.
 2. **The spawner polls** (`board list "In progress"`) once a minute. It takes the first row
    that is not `in-flight`, has fewer than 2 attempts on file, and is not blocked by an
    open issue (see "Dependencies"). It never claims a card itself.
+   **If nothing there is claimable** it tries the Waiting stage, and then — only with
+   `READY_PULL=1`, and only while the In progress column holds fewer than `WIP_MAX` open
+   cards — the top row of **Ready**, which it moves to In progress before launching, so
+   Status stays truthful and Discord shows the card starting. See "Self-pull" below.
 3. **A worktree** `../<repo>-worktrees/card-<n>` is created (or reused) on branch `card-<n>`.
 4. **The tick starts:** `claude -p "/watch <n>" --dangerously-skip-permissions --max-turns 400
    --max-budget-usd 15`, with a 150 minute watchdog that kills the whole process group.
@@ -166,6 +175,28 @@ records them from the card's own words ("after #291", "once the radar redesign l
 has an agent label is never triaged, so a dependency on one of those is Steve's to set or
 to write into the card before he labels it.
 
+## Self-pull
+
+Without it, the loop cannot start anything: every card waits on Steve's hand reaching
+In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third source.
+
+- **Order is fixed:** In progress, then Waiting, then Ready. A card Steve moved by hand is
+  always served before one the loop chose, whatever the priorities say.
+- **`WIP_MAX` (default 2) is board-wide,** not per lane: it counts every open card in the
+  In progress column, because that column *is* the work in flight. A lane stops promoting
+  when the column is full, whoever filled it. It costs no extra API call — the count comes
+  from the poll already done.
+- **It is a soft cap**, like `in-flight` is a courtesy flag. Three lanes poll on three
+  clocks, and read-then-promote is not a compare-and-set, so lanes polling in the same
+  second can each promote against the same count. The overshoot is bounded by the number
+  of lanes and self-corrects on the next poll.
+- **Failures close.** A board with no Ready column makes `board list Ready` exit 1; that
+  reads as "nothing to pull", never as a poll failure, and In progress is still served.
+  A promote that fails means the tick is **not** launched — a claim on a card the board
+  still calls Ready is a card nobody can see is being worked.
+- **The tick is unaffected.** It is still handed exactly one card and still never pulls
+  from Ready itself; choosing the card is the spawner's job, as it always was.
+
 ## State on disk
 
 `~/.local/state/watcher/<project>/` on the box (`WATCHER_STATE`), one directory per lane
@@ -232,7 +263,8 @@ https://example.com` sends one by hand.
 ## Hard rules for every agent
 
 - One card per tick. One card at a time per lane; the other lane's card is not yours,
-  in flight or not. Never pull from Ready or tidy the board.
+  in flight or not. Never pull from Ready yourself or tidy the board — which card you get
+  is the spawner's decision, including when it takes one from Ready.
 - Never force-push, never merge red, never push `main` directly, never `--admin`, never
   touch a project's secrets, never relax a hard rule to make a card pass.
 - Never wait on an external reviewer. There is none. The reviewer runs in the session and

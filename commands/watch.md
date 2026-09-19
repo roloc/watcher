@@ -217,12 +217,29 @@ gh issue edit <n> --remove-label in-flight
 ```
 
 Go to Stuck when: the card needs a product decision; it is `steve-decision`; its `agent:`
-label is `evaluator`, `reviewer` or `scribe`, whose deliverable is a measurement or a
-document rather than a PR — route those by hand; the card carries `blocked`; **`reviewer`
+label is `reviewer`, whose deliverable is a verdict on somebody else's change rather than
+an artifact of its own — route those by hand; the card carries `blocked`; **`reviewer`
 finds something blocking that you disagree with** — you do not get to overrule the only
 review there is; the work would touch a documented contract the project's `CLAUDE.md`
 says is not a builder's call; the required CI check fails twice for a reason you cannot
 explain; or you have tried the same failing thing twice.
+
+**A measurement or a document is a deliverable, and it is yours** (September 19, 2026).
+A card whose `agent:` is the project's measuring agent (`evaluator`) or its docs agent
+(`scribe`) used to go straight to Stuck, because what it produces is not a code PR. Both
+now run in the tick:
+
+- **A measurement card**: run the project's **offline** harness — the checks its
+  `CLAUDE.md` says cost nothing — and post the numbers on the card as an `🤖 FYI:` comment,
+  before and after, never an adjective. Then close the card if the card asked only for the
+  measurement, or file the follow-on card the numbers call for and link it. **A measurement
+  that needs a live, paid model run is still Stuck** (§4), with what it would cost as the
+  question: the offline checks are free, a live run is Steve's money.
+- **A documentation card**: write it and ship it as an ordinary docs-only PR, which gets
+  no `reviewer` pass and has CI as its gate. That is a normal merge, not an exception.
+
+If the offline harness itself is red before you change anything, that is **Stuck** — you
+are measuring a broken tree and the number would be a lie.
 
 **Never wait on an external reviewer** — there isn't one. `reviewer` runs in this session
 and returns; if it does not, the tick failed and the card gets unclaimed, not parked. A

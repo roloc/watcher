@@ -58,6 +58,10 @@
 #   TICK_MAX_TURNS     --max-turns for the tick                 (default: 400)
 #   TICK_MAX_BUDGET_USD  --max-budget-usd for the tick          (default: 15)
 #   POLL_INTERVAL      daemon poll cadence in SECONDS           (default: 60)
+#   READY_PULL         1 = also pull from the Ready column when nothing
+#                      is claimable in In progress or Waiting   (default: 0, off)
+#   WIP_MAX            with READY_PULL=1, the most cards that may sit In progress
+#                      before this lane stops promoting          (default: 2)
 #   WATCHER_MAX_POLLS  stop the daemon loop after this many polls (tests only)
 #
 # Exported to the tick (so `/watch` can read the watcher's own docs from any worktree):
@@ -103,6 +107,28 @@ TICK_TIMEOUT="${TICK_TIMEOUT:-150}"
 TICK_MAX_TURNS="${TICK_MAX_TURNS:-400}"
 TICK_MAX_BUDGET_USD="${TICK_MAX_BUDGET_USD:-15}"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"
+# Self-pull. Off by default: a project opts in from its env file, because pulling from
+# Ready means the loop starts work nobody handed it, and that is a policy choice, not a
+# default. With it on, Ready is the THIRD place a card can come from, tried only after
+# In progress and Waiting are both dry (see do_poll) — so a card Steve moved by hand is
+# always served first.
+#
+# WIP_MAX is a board-wide budget, not a per-lane one: it counts every open card in the
+# In progress column (ROWS, already fetched — no extra API call), across all lanes,
+# because that column IS the work in flight. A lane stops promoting when the column is
+# full, whoever filled it.
+#
+# It is a SOFT cap, deliberately, for the same reason `in-flight` is a courtesy flag:
+# three lanes poll on three clocks, and a read of the column followed by a promote is not
+# a compare-and-set, so lanes that poll in the same second can each promote against the
+# same count. The overshoot is bounded by the number of lanes (riffmap: 3) and self-
+# corrects on the next poll. A hard cap would need a lock the board cannot give us, and
+# the failure it would prevent — one extra card in flight — is cheaper than the lock.
+READY_PULL="${READY_PULL:-0}"
+WIP_MAX="${WIP_MAX:-2}"
+case "$READY_PULL" in 0|1) ;; *) echo "spawn.sh: READY_PULL must be 0 or 1, not '$READY_PULL'" >&2; exit 64 ;; esac
+case "$WIP_MAX" in ''|*[!0-9]*) echo "spawn.sh: WIP_MAX must be a number, not '$WIP_MAX'" >&2; exit 64 ;; esac
+[ "$WIP_MAX" -ge 1 ] || { echo "spawn.sh: WIP_MAX must be at least 1" >&2; exit 64; }
 # The In review sweep (sweep_in_review): how long a card may sit in In review with no open
 # PR before it is parked, and how long with one before it is sent back to In progress.
 INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-600}"
@@ -182,11 +208,20 @@ poll_board() {
     # The Waiting stage: cards Steve dragged there on the Stage-grouped view. Best-effort —
     # a failure here must not stop In progress from being served, so it only logs.
     QUEUE_ROWS="$($WATCHER_BOARD queue 2>/dev/null)" || { QUEUE_ROWS=""; log "board.py queue failed; serving In progress only"; }
+    # The Ready column, when this lane is allowed to pull from it. Best-effort in exactly
+    # the same way, and for the same reason: a project whose board has no Ready column
+    # makes `list` exit 1, which must read as "nothing to pull", never as a poll failure.
+    if [ "$READY_PULL" = 1 ]; then
+      READY_ROWS="$($WATCHER_BOARD list Ready 2>/dev/null)" || { READY_ROWS=""; log "board.py list Ready failed; not pulling from Ready this poll"; }
+    else
+      READY_ROWS=""
+    fi
     return 0
   else
     BOARD_ERR="$(cat "$errfile" 2>/dev/null)"
     rm -f "$errfile"
     ROWS=""
+    READY_ROWS=""
     return 1
   fi
 }
@@ -278,6 +313,36 @@ note_waiting() {
   else
     log "waiting comment failed for #$n; retried on a later poll"
   fi
+}
+
+# wip_count — how many cards are open in the In progress column right now, counted from
+# ROWS (the poll we already did). Blank lines do not count; an empty ROWS is 0.
+wip_count() {
+  local n=0 line
+  while IFS= read -r line; do
+    case "$line" in "") continue ;; esac
+    n=$((n + 1))
+  done <<< "${ROWS:-}"
+  printf '%s' "$n"
+}
+
+# ready_pull_allowed — may this lane promote a Ready card on this poll? Off unless the
+# project opted in, and only while the In progress column is under WIP_MAX. Logs the
+# reason when it says no, so a quiet loop is never a mystery in journalctl.
+#
+# Callers test READY_ROWS for content FIRST, so this only ever runs when there was really
+# something to promote: otherwise an empty Ready column plus a full In progress column
+# would log "not pulling from Ready" once a minute, per lane, forever — a line that says
+# the cap is holding work back when nothing is waiting on it.
+ready_pull_allowed() {
+  [ "$READY_PULL" = 1 ] || return 1
+  local wip
+  wip="$(wip_count)"
+  if [ "$wip" -ge "$WIP_MAX" ]; then
+    log "not pulling from Ready: $wip card(s) already In progress, WIP_MAX=$WIP_MAX"
+    return 1
+  fi
+  return 0
 }
 
 # --- section 1, step 3: the pick ---------------------------------------------------------
@@ -509,16 +574,27 @@ do_dry_run() {
     echo "dry-run: board.py failed: $BOARD_ERR" >&2
     exit 1
   fi
-  if ! pick_card "$ROWS" && ! { [ -n "${QUEUE_ROWS:-}" ] && pick_card "$QUEUE_ROWS"; }; then
-    echo "dry-run: nothing claimable in In progress or Waiting"
-    exit 0
+  PROMOTE_FROM=""
+  if ! pick_card "$ROWS"; then
+    if [ -n "${QUEUE_ROWS:-}" ] && pick_card "$QUEUE_ROWS"; then
+      PROMOTE_FROM="Waiting"
+    elif [ -n "${READY_ROWS:-}" ] && ready_pull_allowed && pick_card "$READY_ROWS"; then
+      PROMOTE_FROM="Ready"
+    else
+      local where="In progress or Waiting"
+      # `if`, not `[ … ] && …`: under `set -e` a bare AND-list whose test fails returns
+      # non-zero and kills the daemon — and READY_PULL=0 is the common case here.
+      if [ "$READY_PULL" = 1 ]; then where="$where or Ready"; fi
+      echo "dry-run: nothing claimable in $where"
+      exit 0
+    fi
   fi
   local dir="$WORKTREE_BASE/card-$ISSUE" ts
   [ "$LANE_WORKDIR" = root ] && dir="$WATCHER_ROOT"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   echo "lane: ${LANE_AGENTS:-every card (no LANE_AGENTS)}"
   echo "command: $LANE_COMMAND"
-  echo "pick: #$ISSUE ($PRIORITY) $TITLE"
+  echo "pick: #$ISSUE ($PRIORITY) $TITLE${PROMOTE_FROM:+ (from $PROMOTE_FROM, would move to In progress first)}"
   if [ "$LANE_WORKDIR" = root ]; then echo "workdir: $dir (no worktree)"; else echo "worktree: $dir"; fi
   echo "claude command:"
   print_claude_cmd "$ISSUE" "$dir" "$ts"
@@ -1062,11 +1138,18 @@ tick_once() {
   sweep_in_review
 
   QUEUED=0
+  PROMOTE_FROM=""
   if ! pick_card "$ROWS"; then
     if [ -n "${QUEUE_ROWS:-}" ] && pick_card "$QUEUE_ROWS"; then
-      QUEUED=1
+      QUEUED=1; PROMOTE_FROM="Waiting"
+    elif [ -n "${READY_ROWS:-}" ] && ready_pull_allowed && pick_card "$READY_ROWS"; then
+      QUEUED=1; PROMOTE_FROM="Ready"
     else
-      log "nothing claimable in In progress or Waiting"
+      local where="In progress or Waiting"
+      # `if`, not `[ … ] && …`: under `set -e` a bare AND-list whose test fails returns
+      # non-zero and kills the daemon — and READY_PULL=0 is the common case here.
+      if [ "$READY_PULL" = 1 ]; then where="$where or Ready"; fi
+      log "nothing claimable in $where"
     fi
   fi
   if [ -z "$ISSUE" ]; then
@@ -1080,9 +1163,9 @@ tick_once() {
     # was dragged from. If the move fails, don't launch — the tick's claim would then
     # sit on a card the board says nobody is working.
     if $WATCHER_BOARD move "$ISSUE" "In progress"; then
-      log "#$ISSUE taken from Waiting → In progress"
+      log "#$ISSUE taken from $PROMOTE_FROM → In progress"
     else
-      log "#$ISSUE: could not move from Waiting to In progress; not launching"
+      log "#$ISSUE: could not move from $PROMOTE_FROM to In progress; not launching"
       return 1
     fi
   fi

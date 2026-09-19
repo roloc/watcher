@@ -69,6 +69,14 @@ case "$1" in
       cat "${BOARD_REVIEW_FILE:-/dev/null}"
       exit 0
     fi
+    # The Ready column (READY_PULL). Its own file, never the In progress rows, and its
+    # own failure switch: a board with no Ready column exits 1 here, which the spawner
+    # must read as "nothing to pull", not as a poll failure.
+    if [ "${2:-}" = "Ready" ]; then
+      if [ "${BOARD_READY_FAIL:-0}" = 1 ]; then echo "board.py: no 'Status' option 'Ready'" >&2; exit 1; fi
+      cat "${BOARD_READY_FILE:-/dev/null}"
+      exit 0
+    fi
     cat "$BOARD_LIST_FILE"
     ;;
   queue)
@@ -285,6 +293,10 @@ board_list() { # board_list <tsv-lines...> -> writes $STATE/board-list.tsv, sets
   BOARD_LIST_FILE="$STATE/board-list.tsv"
   printf '%s\n' "$@" > "$BOARD_LIST_FILE"
 }
+board_ready() { # board_ready <tsv-lines...> -> the Ready column (READY_PULL)
+  BOARD_READY_FILE="$STATE/board-ready.tsv"
+  printf '%s\n' "$@" > "$BOARD_READY_FILE"
+}
 board_show() { # board_show <json> -> writes $STATE/board-show.json
   BOARD_SHOW_FILE="$STATE/board-show.json"
   printf '%s' "$1" > "$BOARD_SHOW_FILE"
@@ -298,6 +310,8 @@ run() {
   TEST_LOG="$TESTLOG" \
   BOARD_LIST_FILE="${BOARD_LIST_FILE:-/dev/null}" BOARD_LIST_FAIL="${BOARD_LIST_FAIL:-0}" \
   BOARD_QUEUE_FILE="${BOARD_QUEUE_FILE:-/dev/null}" \
+  BOARD_READY_FILE="${BOARD_READY_FILE:-/dev/null}" BOARD_READY_FAIL="${BOARD_READY_FAIL:-0}" \
+  READY_PULL="${READY_PULL:-}" WIP_MAX="${WIP_MAX:-}" \
   BOARD_REVIEW_FILE="${BOARD_REVIEW_FILE:-/dev/null}" BOARD_REVIEW_FAIL="${BOARD_REVIEW_FAIL:-0}" \
   INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-}" INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-}" \
   BOARD_SHOW_FILE="${BOARD_SHOW_FILE:-/dev/null}" BOARD_SHOW_FAIL="${BOARD_SHOW_FAIL:-0}" \
@@ -1190,6 +1204,106 @@ board_show '{"number":702,"state":"CLOSED","status":"Done","labels":[]}'
 BOARD_REVIEW_FAIL=1 run --once >/dev/null 2>&1
 if grepped "watch 702"; then pass "a failed In review poll never stops In progress from being served"; else flunk "tick did not launch" "$(cat "$TESTLOG")"; fi
 BOARD_REVIEW_FAIL=0; BOARD_REVIEW_FILE=/dev/null; GH_PR_LIST_FILE=""
+
+# ============================================================================
+echo "Self-pull (READY_PULL): the loop starts a card nobody handed it, under a WIP cap"
+# ============================================================================
+# Ready is the THIRD source, after In progress and Waiting, and only while the In progress
+# column is under WIP_MAX. Off unless the project's env file opts in.
+
+# --- off by default ---------------------------------------------------------------------
+fresh_state; board_list ""; board_ready $'800\tP1\tbuilder\t-\tReady\tA ready card'
+board_show '{"number":800,"state":"OPEN","labels":[],"status":"In progress"}'
+run --once >/dev/null 2>&1 || true
+if not_grepped "/watch 800"; then pass "READY_PULL unset: a Ready card is never pulled"; else flunk "pulled from Ready with READY_PULL off" "$(cat "$TESTLOG")"; fi
+if not_grepped "board.py move 800"; then pass "…and never moved"; else flunk "moved a Ready card with READY_PULL off"; fi
+
+# --- on: nothing elsewhere, so Ready is served ------------------------------------------
+fresh_state; board_list ""; board_ready $'800\tP1\tbuilder\t-\tReady\tA ready card'
+board_show '{"number":800,"state":"OPEN","labels":[],"status":"In progress"}'
+READY_PULL=1 run --once >/dev/null 2>"$TMP/ready.err" || true
+if grepped "board.py move 800 In progress"; then pass "READY_PULL=1: the Ready card is moved to In progress before launch"; else flunk "expected board.py move 800 In progress" "$(cat "$TESTLOG")"; fi
+if grepped "/watch 800"; then pass "…and launched"; else flunk "expected a launch for #800" "$(cat "$TESTLOG")"; fi
+if grep -q "taken from Ready" "$TMP/ready.err"; then pass "…and the log names Ready, not Waiting"; else flunk "log says the wrong source column" "$(cat "$TMP/ready.err")"; fi
+
+# --- In progress is always served first -------------------------------------------------
+fresh_state; board_list $'810\tP1\tbuilder\t-\t-\tHanded over by Steve'
+board_ready $'811\tP0\tbuilder\t-\tReady\tHigher priority, but only Ready'
+board_show '{"number":810,"state":"OPEN","labels":[],"status":"In progress"}'
+READY_PULL=1 run --once >/dev/null 2>&1 || true
+if grepped "/watch 810" && not_grepped "/watch 811"; then pass "a card Steve moved by hand beats a higher-priority Ready card"; else flunk "Ready jumped the queue" "$(cat "$TESTLOG")"; fi
+
+# --- Waiting beats Ready ----------------------------------------------------------------
+fresh_state; board_list ""
+BOARD_QUEUE_FILE="$STATE/board-queue.tsv"
+printf '820\tP1\tbuilder\t-\tWaiting\tDragged to Waiting\n' > "$BOARD_QUEUE_FILE"
+board_ready $'821\tP0\tbuilder\t-\tReady\tOnly Ready'
+board_show '{"number":820,"state":"OPEN","labels":[],"status":"In progress"}'
+READY_PULL=1 run --once >/dev/null 2>&1 || true
+if grepped "/watch 820" && not_grepped "/watch 821"; then pass "Waiting is served before Ready"; else flunk "Ready beat Waiting" "$(cat "$TESTLOG")"; fi
+unset BOARD_QUEUE_FILE
+
+# --- the WIP cap ------------------------------------------------------------------------
+# Two cards already In progress (in-flight, so unclaimable) and WIP_MAX=2 → the column is
+# full; nothing is promoted even though Ready has a claimable card.
+fresh_state; board_list $'830\tP1\tbuilder\tin-flight\t-\tBusy one' $'831\tP1\tbuilder\tin-flight\t-\tBusy two'
+board_ready $'832\tP1\tbuilder\t-\tReady\tWants to start'
+board_show '{"number":832,"state":"OPEN","labels":[],"status":"In progress"}'
+READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>"$TMP/wip.err" || true
+if not_grepped "/watch 832"; then pass "WIP_MAX=2 with 2 cards In progress: no promotion"; else flunk "promoted past the WIP cap" "$(cat "$TESTLOG")"; fi
+if grep -q "WIP_MAX=2" "$TMP/wip.err"; then pass "…and the log says why the loop is quiet"; else flunk "no WIP reason logged" "$(cat "$TMP/wip.err")"; fi
+
+# One card in flight, cap of 2 → there is room, so it promotes.
+fresh_state; board_list $'830\tP1\tbuilder\tin-flight\t-\tBusy one'
+board_ready $'832\tP1\tbuilder\t-\tReady\tWants to start'
+board_show '{"number":832,"state":"OPEN","labels":[],"status":"In progress"}'
+READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>&1 || true
+if grepped "/watch 832"; then pass "WIP_MAX=2 with 1 card In progress: room, so it promotes"; else flunk "did not promote with room under the cap" "$(cat "$TESTLOG")"; fi
+
+# An empty Ready column plus a full In progress column says nothing: the cap is not what
+# is holding anything back, and that line would repeat once a minute, per lane, forever.
+fresh_state; board_list $'833\tP1\tbuilder\tin-flight\t-\tBusy one' $'834\tP1\tbuilder\tin-flight\t-\tBusy two'
+board_ready ""
+READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>"$TMP/quiet.err" || true
+if ! grep -q "not pulling from Ready" "$TMP/quiet.err"; then pass "nothing in Ready: the WIP cap stays quiet"; else flunk "logged a WIP reason with an empty Ready column" "$(cat "$TMP/quiet.err")"; fi
+
+# --- the lane filter applies to Ready exactly as it does to the other two ----------------
+fresh_state; board_list ""; board_ready $'840\tP1\tarchitect\t-\tReady\tDesign work'
+board_show '{"number":840,"state":"OPEN","labels":[],"status":"In progress"}'
+READY_PULL=1 LANE_AGENTS='!architect,designer,-' run --once >/dev/null 2>&1 || true
+if not_grepped "/watch 840"; then pass "a Ready card belonging to another lane is not pulled"; else flunk "build lane pulled a design card from Ready" "$(cat "$TESTLOG")"; fi
+
+# an in-flight Ready row is skipped like any other row
+fresh_state; board_list ""; board_ready $'841\tP1\tbuilder\tin-flight\tReady\tAlready owned'
+READY_PULL=1 run --once >/dev/null 2>&1 || true
+if not_grepped "/watch 841"; then pass "an in-flight Ready row is not launched"; else flunk "in-flight Ready row launched"; fi
+
+# --- failures close, never open ----------------------------------------------------------
+# A board with no Ready column: `list Ready` exits 1. That must not fail the poll, and must
+# not stop In progress from being served.
+fresh_state; board_list $'850\tP1\tbuilder\t-\t-\tOrdinary card'
+board_show '{"number":850,"state":"CLOSED","status":"Done","labels":[]}'
+READY_PULL=1 BOARD_READY_FAIL=1 run --once >/dev/null 2>"$TMP/noready.err" || true
+if grepped "/watch 850"; then pass "a board with no Ready column still serves In progress"; else flunk "a failed Ready lookup stopped the poll" "$(cat "$TESTLOG")"; fi
+if grep -q "not pulling from Ready this poll" "$TMP/noready.err"; then pass "…and says so once"; else flunk "no log line for the failed Ready lookup" "$(cat "$TMP/noready.err")"; fi
+
+# The promote itself failing means NOT launching: a claim on a card the board still calls
+# Ready would be a card nobody can see is being worked.
+fresh_state; board_list ""; board_ready $'860\tP1\tbuilder\t-\tReady\tMove will fail'
+board_show '{"number":860,"state":"OPEN","labels":[],"status":"Ready"}'
+READY_PULL=1 BOARD_MOVE_FAIL=1 run --once >/dev/null 2>&1 || true
+if not_grepped "/watch 860"; then pass "a failed promote does not launch the tick"; else flunk "launched despite a failed move" "$(cat "$TESTLOG")"; fi
+
+# --- dry-run tells the truth and changes nothing -----------------------------------------
+fresh_state; board_list ""; board_ready $'870\tP1\tbuilder\t-\tReady\tDry run me'
+OUT="$(READY_PULL=1 run --dry-run 2>/dev/null || true)"
+if printf '%s' "$OUT" | grep -q '^pick: #870 ' && printf '%s' "$OUT" | grep -q 'from Ready'; then
+  pass "dry-run picks the Ready card and says where it came from"
+else
+  flunk "dry-run Ready pick" "$OUT"
+fi
+if not_grepped "board.py move 870"; then pass "…and moves nothing"; else flunk "dry-run moved a card"; fi
+BOARD_READY_FILE=/dev/null; BOARD_READY_FAIL=0
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

@@ -1,14 +1,26 @@
 # Steve's cheat sheet
 
-**You move cards. The bots do the rest.** One page, no code above the fold.
+**You stock Ready. The bots do the rest.** One page, no code above the fold.
 
 ## The columns
 
-- **Ready** — yours. The bots never touch it.
-- **In progress** — move a card here to hand it to the bots.
+- **Backlog** — yours. The bots never touch it.
+- **Ready** — **the bots' queue, since September 19, 2026.** When they have room they take
+  the top card here by themselves and start it. Put a card in Ready when you want it done;
+  you no longer have to hand it over one at a time.
+- **In progress** — work in flight. **Two cards at a time**, whoever put them there. Move a
+  card here yourself to jump the line: a card you move by hand is always started before one
+  the bots would have chosen.
 - **In review** — the bot's PR is finished and green but the merge did not go through. Nothing for you to do: after two hours the bots try once more, and if that fails the card comes to you in **Stuck** with the question. A card you drop here by hand, with no PR, is moved to **Stuck** within about ten minutes asking where you meant to put it.
 - **Done** — shipped.
 - **Stuck - Needs help** — the bots need you. Read the last comment on the card.
+
+## How much runs at once
+
+- **Two cards in flight**, counted across all three lanes.
+- When both slots are full, Ready waits — nothing is dropped, and nothing piles up.
+- A card that is parked in Stuck is not in flight, so it does not hold a slot.
+- **To stop the bots starting anything new**, empty Ready or pause a lane (last section).
 
 ## Three lanes
 
@@ -16,14 +28,15 @@
 - The label decides the lane: `agent: architect` or `agent: designer` is the design lane.
   Every other label is the build lane. Two builds never run at once.
 - **No label needed.** A card with no `agent:` label is read by the triage lane within a
-  minute of you moving it to In progress, whatever the other two are doing. It adds the
+  minute of it reaching In progress — whether you moved it or the bots took it from Ready
+  — whatever the other two are doing. It adds the
   label, says why in a comment, and the right lane takes it from there. Change the label
   if you disagree; the card moves lanes with it.
 - A card in one lane never waits on the other. It never touches the other's branch either.
 
 ## Cards that wait on other cards
 
-- Move several cards over at once; the bots work the prerequisite first.
+- Stock Ready with several at once; the bots work the prerequisite first.
 - Say it in the card, in words: "after #291", "once the radar redesign lands", "depends
   on". The triage bot records it as the issue's **Relationships** (blocked by). You can
   also set that field yourself on the issue.
@@ -68,6 +81,7 @@ Discord repeats the board; the card is always the record. Every message links to
 |---|---|---|
 | 🚨 **Needs Steve:** | a card is in Stuck; the ask is in the message | open the card, pick A, B or C, move it back to In progress |
 | 📋 #n → **In review** | the PR is green but did not merge | nothing; the bots retry in two hours, then ask you in Stuck |
+| 📋 #n → **In progress** | a card started — yours by hand, or one the bots took from Ready | nothing |
 | 📋 #n → *(any other column)* | the card changed column | nothing |
 | 🔧 #n → **Building** (or any stage) | the bot crossed into that step | nothing |
 | ✅ #n shipped | merged and closed; the PR is linked | nothing |

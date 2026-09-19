@@ -3,7 +3,9 @@
 A headless Claude Code loop that turns a GitHub Projects board into merged pull requests.
 One throwaway box, one systemd unit per project, no permission prompts.
 
-**How it works.** `bin/spawn.sh` polls the board's **In progress** column once a minute. When
+**How it works.** `bin/spawn.sh` polls the board's **In progress** column once a minute, and
+falls back to the **Waiting** stage and then — where `READY_PULL=1` — the **Ready** column,
+so the loop can start a card nobody handed it. When
 a card is claimable it creates a git worktree for it and runs one tick:
 `claude -p "/watch <n>" --dangerously-skip-permissions --max-turns 400 --max-budget-usd 15`.
 The tick claims the card, does the work in the worktree, opens a PR, waits for CI, runs
@@ -53,6 +55,15 @@ with its own state directory; `rollout.sh` rolls them all. Details in
 Relationships field, set by Steve or recorded by `/triage` from the card's words) is
 skipped by every lane until the blocker closes, so a batch of cards handed over at once is
 worked in order. Details in `docs/how-it-works.md`, "Dependencies".
+
+**Self-pull.** `READY_PULL=1` in a project file lets a lane take the top **Ready** card
+when In progress and Waiting are both dry, moving it to In progress before it launches.
+`WIP_MAX` (default 2) is the ceiling, counted across the whole In progress column rather
+than per lane, so the loop keeps a fixed number of cards moving and leaves the rest of
+Ready alone. Off by default: starting work nobody handed over is a policy choice, not a
+default. Order is always In progress, then Waiting, then Ready — a card Steve moved by
+hand is never overtaken by one the loop chose. Details in `docs/how-it-works.md`,
+"Self-pull".
 
 **Stage.** Besides Status, the board carries a single-select `Stage` field (Waiting,
 Claimed, Designing, Building, Testing, Reviewing, PR open, Merging, Parked). **Waiting is
