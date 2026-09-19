@@ -233,8 +233,9 @@ now run in the tick:
   `CLAUDE.md` says cost nothing — and post the numbers on the card as an `🤖 FYI:` comment,
   before and after, never an adjective. Then close the card if the card asked only for the
   measurement, or file the follow-on card the numbers call for and link it. **A measurement
-  that needs a live, paid model run is still Stuck** (§4), with what it would cost as the
-  question: the offline checks are free, a live run is Steve's money.
+  that needs a live model run is still Stuck** (§4), with what it would cost as the
+  question — in whichever currency the project bills in, an API charge or the
+  subscription's quota. The offline checks are free; a live run is not.
 - **A documentation card**: write it and ship it as an ordinary docs-only PR, which gets
   no `reviewer` pass and has CI as its gate. That is a normal merge, not an exception.
 
