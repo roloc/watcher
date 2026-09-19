@@ -82,6 +82,35 @@ September 16, 2026: the card said "too many topics"; the screenshot showed every
 dashed outline, the portal's designed "behind the pipeline" state the morning after a
 pipeline bump. The tick built a cap on topic count, and the ring came out worse.)
 
+**The card names a thing you can go and look at? Look at it.** A picture is the obvious
+case, but so is a live page, a meeting, a record, a deployed screen — anything the project
+can hand you a URL or a file for. **Whether you *can* look is a question about access, not
+about effort**, so find out before you decide you cannot: the project's `CLAUDE.md` says
+what its data is and how a tick is allowed to read it, and a read-only capability link is
+the usual answer. A card that says *"this page is wrong"* is a card whose evidence is the
+page. (riffmap [#431](https://github.com/roloc/riffmap/issues/431), September 19, 2026: a
+tick asked Steve which of two widgets he had seen on a specific meeting. The meeting was
+one fetch away — its data said neither widget could have drawn — so the question spent a
+day of Steve's attention on something the tick could have answered in a minute.)
+
+**Answer your own factual questions. Only judgment goes to Steve.**
+
+- **A fact is anything the data, the code or the page decides**: what drew, what the value
+  was, which branch ran, whether it reproduces. **Go and find out.** Never ask Steve to
+  recall something a machine recorded.
+- **A judgment is what *should* happen** — taste, priority, product direction, what a user
+  ought to see. That is his, and asking is right.
+- **Never put both in one Stuck card.** A card that asks "what should the rule be, and also
+  which widget did you see?" cannot be answered with one letter, so it is not answered at
+  all. Answer the fact, then ask the judgment on its own.
+- **Before you open a Stuck card, re-read the card that spawned this one.** Steve states his
+  goal in the original ask far more often than he restates it later; if that goal already
+  decides your question, it is decided — build it, and say on the card which sentence you
+  read it from. (riffmap [#429](https://github.com/roloc/riffmap/issues/429) →
+  [#431](https://github.com/roloc/riffmap/issues/431), September 19, 2026: the parent card
+  said "the sales widgets should only show when it is a sales call", and the child card
+  asked Steve whether a sales widget should show on a non-sales call.)
+
 **Build the rule the card names, or say why not.** When Steve states a rule ("only topics
 over five minutes"), that rule is the spec. Build it, or put the reason you did not in the
 PR body and on the card — never substitute your own rule silently. Not knowing what a
@@ -287,6 +316,9 @@ The rules behind the shape (full version in `talking-to-steve.md`):
 - **Exactly one question**, ending in `?`. Recommended option first, marked `(recommended)`.
 - **No paths, commands, code, or unexpanded acronyms above the fold.** Say "the build",
   not the check's name. Everything an engineer wants goes under `<details>`.
+  **Including the project's own names for what is on a screen** — describe what Steve
+  would see ("the horizontal bar of who talked when"), never the name the code uses for
+  it ("the talk ribbon"). He looked at the page, not the spec.
 - **Links he has to open go right above the question, never under the fold.** A hosted
   mockup, a screenshot, a live page, the PR: a `**Look:**` list, one per line, what it is
   in plain words and then the URL. A link is not a path — a path is dead text on a phone,

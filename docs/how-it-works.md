@@ -298,6 +298,10 @@ https://example.com` sends one by hand.
   returns.
 - Remove `in-flight` on every exit. A leaked label strands the card.
 - A product decision is Steve's. Do not guess it; park the card with the options laid out.
+- **A fact is not a product decision.** What drew, what the value was, whether it
+  reproduces — go and look, including at the project's own live data where its `CLAUDE.md`
+  says how. Ask Steve for judgment, never for something a machine recorded, and never mix
+  the two in one card.
 - Report the run's quota use, and never call it cost or spend (see "The dollar figure is
   quota, not a bill").
 

@@ -32,6 +32,16 @@ comment, a log line). Those can be as dense as they need to be.
 7. **Plain words above the fold.** No file paths, commands, code, stack traces, or
    unexpanded acronyms in the bullets. Say "the build" not "CI `verify`", say "the meeting
    summary format" not "the `MeetingMap` contract".
+   **This covers the project's own names for the things on a screen.** A widget, panel,
+   chart or field has an internal name in the spec and the renderer, and Steve did not
+   read either — he looked at the page. Describe what he would see: "the horizontal bar
+   of who talked when", not "the talk ribbon". If a name cannot be avoided, describe it
+   first and put the name in brackets after. **Asking him to choose between two things he
+   has no name for is asking him nothing at all** (riffmap
+   [#431](https://github.com/roloc/riffmap/issues/431), September 19, 2026: a card asked
+   whether he had seen "the ruler" or "the ribbon"; his answer was that there is nothing
+   called a ribbon on that page. Both are real names in `template.html`. Neither is a
+   name a reader has).
 8. **Details go under a fold.** Everything an engineer would want (paths, diffs, logs, the
    exact error) goes at the bottom inside `<details><summary>Details</summary> … </details>`.
    A link is not a detail — see the next rule.
