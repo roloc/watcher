@@ -302,10 +302,54 @@ and a move to Stuck posts the alert. Never post to Discord directly, never menti
 comment, and never skip a `board stage` call because "it would be noisy" — the stage
 posts are the updates Steve asked for.
 
+## 4b. Declined — the card says not to do it yet
+
+Some cards gate themselves. A card body that says *"do not work this until X"* is an
+instruction, and **being handed the card is not the same as X having happened** — Steve
+moves cards in batches, and a batch move is not a considered answer to a gate written
+weeks earlier. Honor the gate.
+
+**A decline is not Stuck** when the card itself says nothing is broken: Stuck sends Steve
+a 🚨 alert and asks him a question, and there is no question here — the card already
+states its own condition. It is also **not** a card you leave In progress. Move it back
+to **Backlog**:
+
+```
+gh issue comment <n> --body-file /tmp/card-<n>-declined.md
+board move <n> Backlog
+board unclaim <n>
+```
+
+**Why Backlog specifically, and why this matters:** the spawner reads a card left
+**In progress** with this lane's label as *no progress*, bumps its attempt count, and
+**parks it in Stuck after two** — so a tick that correctly obeys a gate gets punished for
+it, twice, and then wakes Steve. Moving the card out of In progress is what makes the exit
+read as the success it is (`how-it-works.md`, "How a tick ends"). Backlog is the honest
+column: *filed, not scheduled*. Nothing pulls from Backlog, so the card waits there until
+Steve moves it to Ready again — which is him answering the gate.
+
+The comment is `🤖 FYI:` shaped — nothing is being asked, so **no question and no lettered
+options**:
+
+```
+🤖 FYI: not doing this yet — the card gates itself.
+
+- The gate: "<quote the card's own words>"
+- Why not lifted: <one line — what would count as lifting it, and why being handed the card isn't that>
+- Where it is now: back in Backlog. Move it to Ready when the gate is open and I'll pick it up.
+```
+
+Report `Outcome: declined (gated)` and `Ended in: Backlog`.
+
+**Only for a gate the card states about itself.** A card you merely think is a bad idea is
+not a decline — build it, or take it to Stuck (§4) with the reason as the question. Your
+opinion of a card is not a gate; the card's own words are.
+
 ## 5. Always leave the board true
 
 Every tick ends with the card in exactly one of: **Done** (merged — the `Closes #n` does
-this), **In review** (finished, reviewed, green — only the merge is missing; §3), **Stuck - Needs help**, or still
+this), **In review** (finished, reviewed, green — only the merge is missing; §3),
+**Stuck - Needs help**, **Backlog** (you declined a card that gates itself; §4b), or still
 **In progress** if you got nowhere — or if you routed it to another lane (§2), which is
 the one In progress exit that is not a failure.
 
@@ -346,8 +390,8 @@ Bullets, five lines, in this order — it is what the log keeps and what Steve s
 
 ```
 - Card: #<n> <title>
-- Outcome: merged | PR up, waiting on merge | stuck | routed to <agent> | no progress
-- Ended in: Done | In review | Stuck - Needs help | In progress
+- Outcome: merged | PR up, waiting on merge | stuck | declined (gated) | routed to <agent> | no progress
+- Ended in: Done | In review | Stuck - Needs help | Backlog | In progress
 - Quota: ~$<n> equivalent (subscription — not billed); project API spend $<x> (or "none")
 - Needs Steve: no | yes — <one line, the same as the first line of the Stuck comment>
 ```

@@ -27,7 +27,7 @@ Columns, in order: `Backlog | Ready | In progress | In review | Done | Stuck - N
 
 | Column | Who moves cards in | Meaning |
 |---|---|---|
-| Backlog | Steve | not the watcher's business; never pulled from |
+| Backlog | Steve, or a tick returning a card it declined (`watch.md` §4b) | **never pulled from.** Where a self-gated card waits until Steve moves it to Ready |
 | **Ready** | Steve | **the loop's own queue** when `READY_PULL=1` (riffmap, since September 19, 2026): a lane promotes the top card here to In progress when In progress and Waiting are both dry and the column is under `WIP_MAX`. Without that setting it is Backlog's twin and nothing reads it |
 | **In progress** | Steve, a lane promoting a Ready or Waiting card, or Steve moving a Stuck card back | **what a tick is handed.** A card here is work in flight |
 | In review | the tick | the work is finished, reviewed and green, and only the merge did not happen. Not a resting place: the spawner sweeps it every poll (see "The In review sweep") |
@@ -247,6 +247,7 @@ money he had been charged (September 19, 2026). The number was never a bill.
 | Done | removed | success; attempts reset |
 | In review | removed | success; attempts reset |
 | Stuck - Needs help | removed | success as far as the tick goes; attempts reset; Steve's turn |
+| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog, so it waits for Steve to move it to Ready again |
 | In progress, with THIS lane's label (or none) | removed | no progress; attempts +1; at 2 the spawner parks it |
 | In progress, with ANOTHER lane's label | removed | success: the tick relabeled it for that lane (a triage, or `/watch` routing a design card); attempts reset, the other lane starts its own count |
 | any | still there | the tick died; the spawner unclaims, comments, attempts +1 |

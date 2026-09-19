@@ -97,8 +97,8 @@ into the Stuck comment unchanged.
 
 ```
 - Card: #<n> <title>
-- Outcome: merged | PR up, waiting on merge | stuck | routed to <agent> | no progress | quiet tick
-- Ended in: Done | In review | Stuck - Needs help | In progress
+- Outcome: merged | PR up, waiting on merge | stuck | declined (gated) | routed to <agent> | no progress | quiet tick
+- Ended in: Done | In review | Stuck - Needs help | Backlog | In progress
 - Quota: ~$<n> equivalent (subscription — not billed); project API spend $<x> (or "none")
 - Needs Steve: no | yes — <one line, same as the first line of the Stuck comment>
 ```

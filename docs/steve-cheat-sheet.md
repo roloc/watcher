@@ -4,7 +4,8 @@
 
 ## The columns
 
-- **Backlog** — yours. The bots never touch it.
+- **Backlog** — yours. The bots never start anything from here. They will **put a card
+  back** here if its own text says not to work it yet (see below).
 - **Ready** — **the bots' queue, since September 19, 2026.** When they have room they take
   the top card here by themselves and start it. Put a card in Ready when you want it done;
   you no longer have to hand it over one at a time.
@@ -21,6 +22,17 @@
 - When both slots are full, Ready waits — nothing is dropped, and nothing piles up.
 - A card that is parked in Stuck is not in flight, so it does not hold a slot.
 - **To stop the bots starting anything new**, empty Ready or pause a lane (last section).
+
+## Cards that say "not yet"
+
+- A card whose body says **"do not work this until …"** is obeyed. The bot comments why
+  and moves it **back to Backlog**.
+- **This is not a failure and not a Stuck** — you are not asked anything, and nothing
+  pings you.
+- **Being handed the card is not the same as lifting the gate.** Moving a batch to Ready
+  is not a considered answer to a line written weeks ago, so the bots do not read it as
+  one.
+- To actually lift it: **edit that line out of the card**, then move it to Ready.
 
 ## Three lanes
 
@@ -68,6 +80,7 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 | 🤖 Watcher picked this up | a tick started on the card | nothing |
 | 🤖 **Needs Steve:** | a decision or an answer is needed | pick A, B or C, move the card |
 | 🤖 **FYI:** I labeled this for the … lane | the triage bot picked the lane | nothing, unless you disagree — then change the label |
+| 🤖 **FYI:** not doing this yet — the card gates itself | the card's own text says to wait; the bot obeyed and put it back in Backlog | nothing, unless the wait is over — then edit that line out and move it to Ready |
 | 🤖 **FYI:** this card waits on … | it is blocked by an open card; it starts when that closes | nothing, unless that card is not on its way |
 | 🤖 **FYI:** | information only | nothing |
 | 🤖 Watcher: the run ended without finishing | the tick died or ran out of budget; the card will be retried once | nothing, unless it happens twice |

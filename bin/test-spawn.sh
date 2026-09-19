@@ -1317,5 +1317,39 @@ fi
 if not_grepped "board.py move 870"; then pass "…and moves nothing"; else flunk "dry-run moved a card"; fi
 BOARD_READY_FILE=/dev/null; BOARD_READY_FAIL=0
 
+# ============================================================================
+echo "Declined (watch.md 4b): a card that gates itself goes back to Backlog, and that is a success"
+# ============================================================================
+# riffmap #425, September 19, 2026: the card body said "do not work this until Steve says
+# the production-posture question is live". The tick read it, correctly refused, released
+# the claim — and left the card In progress, which this script reads as "no progress".
+# Two of those and it parks the card in Stuck: a tick punished for obeying an instruction,
+# and Steve woken for a card that is fine. watch.md 4b now sends it to Backlog instead.
+
+fresh_state
+board_list $'900\tP1\tarchitect\t-\t-\tA card that gates itself'
+board_show '{"number":900,"state":"OPEN","status":"Backlog","labels":["agent: architect"]}'
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+run --once >/dev/null 2>"$TMP/decline.err" || true
+[ ! -f "$STATE/attempts/900" ] && pass "declined to Backlog: attempts reset, not bumped" || flunk "attempts bumped on a decline" "$(cat "$STATE/attempts/900")"
+if not_grepped "board.py move 900 Stuck"; then pass "…and the card is not parked"; else flunk "a declined card was parked" "$(cat "$TESTLOG")"; fi
+if grep -q "succeeded and left In progress" "$TMP/decline.err"; then pass "…and the spawner logs it as a success"; else flunk "decline not logged as success" "$(cat "$TMP/decline.err")"; fi
+
+# A second decline is still a success — the count never creeps toward the park threshold,
+# however many times Steve moves a still-gated card back to Ready.
+run --once >/dev/null 2>&1 || true
+[ ! -f "$STATE/attempts/900" ] && pass "a second decline still resets: no creep toward the park threshold" || flunk "attempts accumulated across declines"
+
+# The contrast, and the reason Backlog is load-bearing: the SAME successful exit with the
+# card left In progress is no-progress, and parks on the second attempt.
+fresh_state
+board_list $'901\tP1\tarchitect\t-\t-\tLeft sitting In progress'
+board_show '{"number":901,"state":"OPEN","status":"In progress","labels":["agent: architect"]}'
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+run --once >/dev/null 2>&1 || true
+[ "$(cat "$STATE/attempts/901" 2>/dev/null)" = 1 ] && pass "left In progress instead: attempts bumped to 1" || flunk "expected attempts/901=1" "$(cat "$STATE/attempts/901" 2>/dev/null)"
+run --once >/dev/null 2>&1 || true
+if grepped "board.py move 901 Stuck - Needs help"; then pass "…and parked on the second — which is exactly what 4b avoids"; else flunk "expected a park for #901" "$(cat "$TESTLOG")"; fi
+
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail
