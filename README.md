@@ -32,7 +32,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     docs/talking-to-steve.md  the format for anything a human reads (see below)
     docs/steve-cheat-sheet.md one page for Steve: columns, answering a Stuck card, pause, logs
     CLAUDE.md             rules for editing this repo
-    projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, and LANE_AGENTS for a lane
+    projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, PROJECT_REPO,
+                          WORKTREE_COPY_DIRS, and LANE_AGENTS for a lane
     deploy/watcher@.service, deploy/install.sh
     deploy/rollout.sh     deploy a new version without killing a running tick (see below)
 
@@ -143,7 +144,20 @@ paused, and tells you to run it again.
 Add `projects/<name>.env`, run `deploy/install.sh <name>`, `systemctl enable --now
 watcher@<name>`. The project needs a board with the columns
 `Backlog | Ready | In progress | In review | Done | Stuck - Needs help`, an `in-flight`
-label, and CI that is a required check on `main`. To split it into lanes, add
+label, and CI that is a required check on `main`.
+
+Nothing here is riffmap-shaped, but two settings are worth knowing before the first run:
+
+- **`PROJECT_REPO` is the repo to clone**, and the installer uses it. The instance name is
+  a watcher-side label, so the repo may be named differently, and the board's owner need
+  not own the code. Set it whenever `<name>` is not literally the repo under `BOARD_OWNER`.
+- **`WORKTREE_COPY_DIRS`** names the project's gitignored, in-tree private inputs —
+  space-separated, relative to the checkout — copied into every card worktree so a tick can
+  read them (riffmap's meeting transcripts are the default). A project with none sets
+  `WORKTREE_COPY_DIRS=""`; a project with others sets
+  `WORKTREE_COPY_DIRS="docs/fixtures data/seed"`. A directory that is not there is skipped.
+
+To split it into lanes, add
 `projects/<name>-<lane>.env` that sources `<name>.env` and sets `PROJECT_NAME=<name>-<lane>`
 and `LANE_AGENTS`, give `<name>.env` the complementary `!` list, and enable
 `watcher@<name>-<lane>` too; `rollout.sh <name>` finds the lane by the file name.

@@ -42,13 +42,23 @@ systemctl daemon-reload
 for p in "$@"; do
   f="/opt/watcher/projects/$p.env"
   [ -f "$f" ] || { echo "no project file $f" >&2; exit 1; }
+  # Clear what we read from the file before sourcing the next one: several projects share
+  # this one shell, and a value left over from the previous project would silently stand in
+  # for a file that simply does not set it.
+  unset PROJECT_ROOT PROJECT_REPO BOARD_OWNER
   # shellcheck disable=SC1090
   . "$f"
+  [ -n "${PROJECT_ROOT:-}" ] || { echo "$f sets no PROJECT_ROOT" >&2; exit 1; }
+  # The repo to clone is PROJECT_REPO, NOT "$BOARD_OWNER/$p". The instance name is a
+  # watcher-side label (a lane is `<project>-<lane>`), and the board's owner need not own
+  # the code — an org board over a repo in a user account is ordinary. Fall back to the
+  # old guess only when the project file names no repo.
+  repo="${PROJECT_REPO:-${BOARD_OWNER:-}/$p}"
   if [ ! -d "$PROJECT_ROOT/.git" ]; then
-    su - watcher -c "gh repo clone $BOARD_OWNER/$p '$PROJECT_ROOT' -- -q" \
-      || { echo "clone failed — is the watcher user logged in to gh? (su - watcher; gh auth login)" >&2; exit 1; }
+    su - watcher -c "gh repo clone $repo '$PROJECT_ROOT' -- -q" \
+      || { echo "clone of $repo failed — is the watcher user logged in to gh, and is that the right repo? (su - watcher; gh auth login)" >&2; exit 1; }
   fi
-  echo "project $p at $PROJECT_ROOT"
+  echo "project $p at $PROJECT_ROOT ($repo)"
 done
 
 cat <<'NEXT'

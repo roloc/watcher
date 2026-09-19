@@ -35,6 +35,9 @@
 #   LANE_WORKDIR     optional; `card` (default) runs the tick in a worktree made for the
 #                    card, `root` runs it in PROJECT_ROOT with no worktree at all — for a
 #                    lane whose tick only touches the board, never the code.
+#   WORKTREE_COPY_DIRS optional; the project's gitignored private inputs, space-separated
+#                    and relative to the checkout, copied into every card worktree
+#                    (default: riffmap's `docs/transcripts`). See bin/worktree.sh.
 #
 # A card that GitHub says is blocked by an open issue (the issue's "Relationships" field,
 # or what /triage recorded from the card's own words) is skipped by every lane until the
@@ -103,6 +106,11 @@ WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"
 WATCHER_WORKTREE="${WATCHER_WORKTREE:-$WATCHER_HERE/worktree.sh}"
 export WORKTREE_ROOT="$WATCHER_ROOT"
+# Only when the project file set it: worktree.sh distinguishes unset (use its default)
+# from empty (copy nothing), and an unconditional export would erase that difference.
+# An `if`, not `x && export x`: under `set -e` that whole list fails when x is unset,
+# which would exit the spawner for every project that never sets the variable.
+if [ -n "${WORKTREE_COPY_DIRS+set}" ]; then export WORKTREE_COPY_DIRS; fi
 WATCHER_STATE="${WATCHER_STATE:-$HOME/.local/state/watcher/$PROJECT_NAME}"
 WATCHER_LOGS="${WATCHER_LOGS:-$WATCHER_STATE/logs}"
 TICK_TIMEOUT="${TICK_TIMEOUT:-150}"

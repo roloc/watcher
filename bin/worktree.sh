@@ -50,7 +50,24 @@ MAIN="$(cd "$ROOT" && cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 REPO_NAME="$(basename "$MAIN")"
 HOME_DIR="$(dirname "$MAIN")/${REPO_NAME}-worktrees"
 ENV_FILES=(.env.local .env)
-COPY_DIRS=(docs/transcripts)
+# The gitignored, in-tree inputs a worktree needs its own copy of (see the header for why
+# these are copied and not linked). `docs/transcripts` is riffmap's — the default is kept
+# so riffmap needs no configuration, and every entry is guarded by a `-d` test, so it is a
+# no-op in a project that has no such directory. A project with different private inputs
+# sets WORKTREE_COPY_DIRS in its `projects/<name>.env`, space-separated and relative to the
+# checkout (`WORKTREE_COPY_DIRS="docs/fixtures data/seed"`); the spawner exports it.
+# WORKTREE_COPY_DIRS="" is a deliberate "copy nothing", not "use the default" — which is
+# why both loops below expand it as ${COPY_DIRS[@]+"${COPY_DIRS[@]}"}: under `set -u`,
+# bash 3.2 (still what /bin/bash is on a Mac) treats a plain "${empty_array[@]}" as an
+# unbound variable and aborts. The box runs bash 5, where it is fine; this script is also
+# run by hand on a laptop, where it is not.
+if [ -n "${WORKTREE_COPY_DIRS+set}" ]; then
+  # Unquoted on purpose: a space-separated list from the env becomes the array's elements.
+  # shellcheck disable=SC2206
+  COPY_DIRS=(${WORKTREE_COPY_DIRS})
+else
+  COPY_DIRS=(docs/transcripts)
+fi
 
 usage() {
   cat <<USAGE
@@ -58,8 +75,8 @@ Usage: scripts/worktree.sh <command> [args]
 
   new <name> [base]   Create ../${REPO_NAME}-worktrees/<name> on a new branch
                       <name>, branched from [base] (default: main, freshly
-                      fetched). Symlinks env files, copies docs/transcripts,
-                      installs dependencies.
+                      fetched). Symlinks env files, copies the private inputs
+                      (${COPY_DIRS[*]:-none}), installs dependencies.
   list                Show every worktree, its branch, and whether it is dirty.
   remove <name>       Delete the worktree and its branch. Refuses if it has
                       uncommitted work, or commits that neither reached main
@@ -147,7 +164,7 @@ cmd_new() {
   # contains, a symlink, the copy must be a real file, or it reproduces the exact
   # out-of-project link this copy exists to avoid.
   local d
-  for d in "${COPY_DIRS[@]}"; do
+  for d in ${COPY_DIRS[@]+"${COPY_DIRS[@]}"}; do
     if [ -d "$MAIN/$d" ]; then
       mkdir -p "$dir/$d"
       # A warning, not an abort: under `set -e` a broken link or an unreadable file in
@@ -300,7 +317,7 @@ cmd_doctor() {
         bad=1
       fi
     done
-    for f in "${COPY_DIRS[@]}"; do
+    for f in ${COPY_DIRS[@]+"${COPY_DIRS[@]}"}; do
       # Not for the harness's own sandbox worktrees under .claude/worktrees/: those come
       # and go on their own and no tick runs in one — no reason to multiply copies of
       # private meetings into them.
