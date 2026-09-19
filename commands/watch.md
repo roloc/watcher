@@ -322,14 +322,21 @@ bullets is enough).
 - **One card per tick. One card at a time in your lane.** No exceptions. Another lane's tick
   may be running beside you on another card, in its own worktree; nothing of yours is
   shared with it except `main`.
-- **Two different dollars, two different caps.** `--max-budget-usd` on the spawner's own
-  `claude -p` invocation is *your* spend cap — client-side, includes every subagent, ends
-  the run with `error_max_budget_usd` if crossed. The project's *own* API spend (through
-  its env file, when it calls a model itself) is a separate bill with no enforced cap unless
-  the project's `CLAUDE.md` says otherwise. Staying under your cap says nothing about the
-  project's bill, and vice versa.
+- **Your own dollars are quota, not a bill.** The box runs on a Claude **subscription**
+  (`CLAUDE_CODE_OAUTH_TOKEN`; `/etc/watcher/env` may not carry an API key). So
+  `--max-budget-usd` is a **quota ceiling**, not a spending limit, and the `total_cost_usd`
+  you report is **tokens × API list price, computed client-side** — what the run *would*
+  have cost on the API. Nobody is invoiced for it. It still ends the run with
+  `error_max_budget_usd` when crossed, which is the point: it stops a tick that is looping.
+  Full explanation in `$WATCHER_HOME/docs/how-it-works.md`, "The dollar figure is quota,
+  not a bill".
+- **The project's own API spend is the one real bill.** When a project calls a model itself,
+  through its own env file and its own key, that is money, with no enforced cap unless the
+  project's `CLAUDE.md` says otherwise. A project whose lane pins a subscription backend
+  (riffmap pins `RIFFMAP_BACKEND=claude`) has no such path. Your quota says nothing about
+  that bill, and vice versa.
 - **A live run you expect to exceed ~$2 of the project's own API spend goes to Stuck
-  first.** Report what every run cost, and stop if it looks wrong.
+  first.** Report every run's quota use, and stop if it looks wrong.
 - Never `--admin`, never force-push, never merge a red build, never relax a hard rule to
   make a card pass.
 
@@ -341,7 +348,7 @@ Bullets, five lines, in this order — it is what the log keeps and what Steve s
 - Card: #<n> <title>
 - Outcome: merged | PR up, waiting on merge | stuck | routed to <agent> | no progress
 - Ended in: Done | In review | Stuck - Needs help | In progress
-- Cost: $<your spend>; project API spend ~$<x> (or "none")
+- Quota: ~$<n> equivalent (subscription — not billed); project API spend $<x> (or "none")
 - Needs Steve: no | yes — <one line, the same as the first line of the Stuck comment>
 ```
 

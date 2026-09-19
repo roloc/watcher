@@ -438,6 +438,18 @@ if printf '%s' "$comment_line" | grep -q 'PR #52 is up' \
 else
   flunk "sweeper comment with an open PR" "$comment_line"
 fi
+# The dollar figure is quota on a subscription, never a bill (docs/how-it-works.md,
+# "The dollar figure is quota, not a bill"). This card comment used to read
+# "Agent cost: $1.50", and a reader reasonably concluded he had been charged. He had not:
+# the box runs on CLAUDE_CODE_OAUTH_TOKEN and /etc/watcher/env may not carry an API key.
+if printf '%s' "$comment_line" | grep -q 'quota used' \
+   && printf '%s' "$comment_line" | grep -q '1[.]5' \
+   && printf '%s' "$comment_line" | grep -q 'not billed' \
+   && ! printf '%s' "$comment_line" | grep -qi 'agent cost'; then
+  pass "the card comment reports quota and says it is not billed, never 'cost'"
+else
+  flunk "quota wording in the sweeper comment" "$comment_line"
+fi
 released_line="$(grep 'board.py notify 31 released' "$TESTLOG" || true)"
 if printf '%s' "$released_line" | grep -q 'PR #52 is up' && ! printf '%s' "$released_line" | grep -q 'without finishing'; then
   pass "Discord: 'released' names the PR, not a death"

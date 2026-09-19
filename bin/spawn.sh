@@ -57,6 +57,8 @@
 #   WATCHER_TICK_TIMEOUT_SEC  watchdog ceiling in SECONDS instead (tests only)
 #   TICK_MAX_TURNS     --max-turns for the tick                 (default: 400)
 #   TICK_MAX_BUDGET_USD  --max-budget-usd for the tick          (default: 15)
+#                      A QUOTA ceiling, not a spending limit: the box runs on a
+#                      subscription, so this dollar figure is never billed.
 #   POLL_INTERVAL      daemon poll cadence in SECONDS           (default: 60)
 #   READY_PULL         1 = also pull from the Ready column when nothing
 #                      is claimable in In progress or Waiting   (default: 0, off)
@@ -764,7 +766,10 @@ handle_exit() {
   denials="$(json_field "$json" '(len(d.get("permission_denials")) if isinstance(d.get("permission_denials"),list) else d.get("permission_denials",0)) or 0')"
   elapsed_min=$(( ( $(date +%s) - ${TICK_START_EPOCH:-$(date +%s)} ) / 60 ))
 
-  log "tick #$n exited rc=$rc subtype=$subtype cost=\$${total_cost:-?} turns=${num_turns:-?} denials=${denials:-0}"
+  # `quota`, not `cost`: the box runs on a subscription, so this number is tokens x API
+  # list price computed client-side, never a bill (docs/how-it-works.md, "The dollar
+  # figure is quota, not a bill").
+  log "tick #$n exited rc=$rc subtype=$subtype quota~\$${total_cost:-?} turns=${num_turns:-?} denials=${denials:-0}"
 
   # board_show_retry tries three times. If it STILL fails, this is not read as "no
   # in-flight, not in progress" (review, card #65 fold-in: that fail-open means the
@@ -858,7 +863,7 @@ except Exception:
       $WATCHER_GH issue comment "$n" --body "🤖 FYI: PR #${pr%% *} is up for this card, but the run ended before merging it. I released the card; the next poll picks it up and merges once the checks are green.
 - PR: ${pr#* }
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
-- Agent cost: \$${total_cost:-0}" \
+- Agent quota used: ~\$${total_cost:-0} equivalent (subscription — not billed)" \
         || log "sweeper comment failed for #$n"
       $WATCHER_BOARD notify "$n" released "PR #${pr%% *} is up, but the run ended after ${elapsed_min} min before merging it. I released the card; the next poll merges it once the checks are green." \
         || log "discord notify failed for #$n"
@@ -868,7 +873,7 @@ except Exception:
       $WATCHER_GH issue comment "$n" --body "🤖 FYI: the run ended without finishing this card. I released it; the next poll may retry once.
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
 - ${denials:-0} permission denials
-- Agent cost: \$${total_cost:-0}
+- Agent quota used: ~\$${total_cost:-0} equivalent (subscription — not billed)
 - Log: $(basename "$json")" \
         || log "sweeper comment failed for #$n"
       # Discord, if configured (board.py notify is a no-op otherwise). A retry is not an

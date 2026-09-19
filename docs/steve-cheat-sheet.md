@@ -113,9 +113,9 @@ journalctl -u watcher@riffmap -f
 journalctl -u watcher@riffmap-design -f
 journalctl -u watcher@riffmap-triage -f
 
-# what did the last tick say and cost
+# what did the last tick say, and how much quota it used (not a bill — the box is on your subscription)
 ls -t ~watcher/.local/state/watcher/riffmap/logs/ | head
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("subtype"), d.get("total_cost_usd")); print(d.get("result"))' \
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("subtype"), "quota~$%s (not billed)" % d.get("total_cost_usd")); print(d.get("result"))' \
   ~watcher/.local/state/watcher/riffmap/logs/<newest>.json
 
 # the board from the command line

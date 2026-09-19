@@ -57,7 +57,7 @@ carries the short table. Read those, then pick the ONE agent whose remit the car
 - **Never** `evaluator`, `reviewer` or `scribe` unless the card asks for exactly a
   measurement, a review, or a docs pass — those produce no PR.
 
-The label decides who spends the money, so read the card's file names and words rather
+The label decides which lane burns the quota, so read the card's file names and words rather
 than guess between two build agents. If it truly could be either, take the general builder.
 
 ## 3. Record what it waits on
@@ -103,7 +103,7 @@ counts that as a success for this lane.
 it unlabeled, post one `🤖 **Needs Steve:**` comment in the Stuck shape
 (`talking-to-steve.md`) with the two or three agents it could be as the lettered options,
 then `board move <n> "Stuck - Needs help"`. Never add a label you are not sure of; the
-wrong lane spends real money on it.
+wrong lane burns a working tick's quota on it.
 
 ## 5. Report
 
@@ -111,7 +111,7 @@ wrong lane spends real money on it.
 - Card: #<n> <title>
 - Outcome: triaged as <agent> | already labeled | could not decide
 - Waits on: <cards> | nothing
-- Cost: $<agent spend>
+- Quota: ~$<n> equivalent (subscription — not billed)
 ```
 
 ## Hard rules

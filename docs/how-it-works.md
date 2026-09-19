@@ -138,7 +138,7 @@ for (design-shaped asks — options, examples, mockups, a brief, a decision — 
 or `architect`; a bug, a removal or a change to an approved design to the build agent for
 that area), records which cards it waits on (below), leaves an FYI comment, and stops.
 The lane that label names picks the card on its own next poll. A triage never claims the
-card, never touches a file, and costs cents. A card it cannot place goes to Stuck with the
+card, never touches a file, and uses cents' worth of quota. A card it cannot place goes to Stuck with the
 candidate agents as the lettered options. The spawner reads the relabel as a success for
 the triage lane (the card is In progress but no longer its to pick), so nothing counts
 toward an attempt.
@@ -197,6 +197,32 @@ In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third
 - **The tick is unaffected.** It is still handed exactly one card and still never pulls
   from Ready itself; choosing the card is the spawner's job, as it always was.
 
+## The dollar figure is quota, not a bill
+
+**Nobody is invoiced for a tick.** The box authenticates with `CLAUDE_CODE_OAUTH_TOKEN`
+— a Claude **subscription** login — and `/etc/watcher/env` is forbidden from carrying
+`ANTHROPIC_API_KEY`, precisely because the key would outrank the login and bill the API
+instead (`README.md`, "Set up a box", step 1).
+
+So every dollar amount the loop reports is **imputed**: `total_cost_usd` in a tick's JSON
+result is copied from `modelUsage.<model>.costUSD`, which is **tokens × API list price,
+computed client-side**. It is what the run *would* have cost on the API. It is a **usage
+meter denominated in dollars**, and the subscription is what actually paid.
+
+`--max-budget-usd` is the same number as a ceiling. It is still worth having — it stops a
+tick that is looping — but it is a **quota ceiling, not a spending limit**.
+
+**Say "quota", never "cost" or "spend", for this number.** A tick reports
+`Quota: ~$<n> equivalent (subscription — not billed)`. The words *cost*, *spend* and
+*money* are reserved for the one thing that can really be billed: **a project calling a
+model on its own API key**, through its own env file. That is a separate bill with no
+enforced cap, and a project whose lane pins a subscription backend (riffmap pins
+`RIFFMAP_BACKEND=claude`) has no such path at all.
+
+Why this is written down: the loop's own reports said "cost" and "spend" for two months,
+and everything reading them — agents and humans alike — repeated it back to Steve as
+money he had been charged (September 19, 2026). The number was never a bill.
+
 ## State on disk
 
 `~/.local/state/watcher/<project>/` on the box (`WATCHER_STATE`), one directory per lane
@@ -211,7 +237,7 @@ In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third
 | `parked/<n>` | the one Stuck comment for card n was posted |
 | `parked-ok/<n>` | the move to Stuck actually landed |
 | `waiting/<n>` | the FYI comment saying what card n waits on was posted, and for which blockers; cleared when it is picked |
-| `logs/card-<n>-<ts>.json` | the tick's JSON result: `subtype`, `total_cost_usd`, `num_turns`, `result` |
+| `logs/card-<n>-<ts>.json` | the tick's JSON result: `subtype`, `total_cost_usd` (quota, not a bill — see above), `num_turns`, `result` |
 | `logs/card-<n>-<ts>.stderr` | the tick's stderr |
 
 ## How a tick ends
@@ -271,7 +297,8 @@ https://example.com` sends one by hand.
   returns.
 - Remove `in-flight` on every exit. A leaked label strands the card.
 - A product decision is Steve's. Do not guess it; park the card with the options laid out.
-- Report what the run cost.
+- Report the run's quota use, and never call it cost or spend (see "The dollar figure is
+  quota, not a bill").
 
 ## What a project brings, what the watcher brings
 
