@@ -255,6 +255,11 @@ case "$args" in
   "api repos/"*"/issues/"*" --jq .state")
     if [ "${GH_STATE_FAIL:-0}" = 1 ]; then echo "gh: HTTP 502 (simulated)" >&2; exit 1; fi
     n="$(printf '%s' "$args" | sed -E 's#.*/issues/([0-9]+) --jq.*#\1#')"
+    # A state file holding the word `404` answers like the real gh does for a number that
+    # names no issue: the 404 path must be told apart from an outage, never share its answer.
+    if [ -n "${GH_STATE_DIR:-}" ] && [ "$(cat "$GH_STATE_DIR/$n" 2>/dev/null)" = 404 ]; then
+      echo "gh: Not Found (HTTP 404)" >&2; exit 1
+    fi
     if [ -n "${GH_STATE_DIR:-}" ] && [ -f "$GH_STATE_DIR/$n" ]; then cat "$GH_STATE_DIR/$n"; else echo open; fi
     ;;
   "pr list "*)
@@ -1193,6 +1198,26 @@ fresh_state; words_board "This does not depend on $L521 any more."
 OUT="$(run --dry-run 2>/dev/null)"
 if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a negated phrase (does not depend on) is not a dependency"; else flunk "negation" "out=[$OUT]"; fi
 
+# The contraction says the same thing as the word, and reads the opposite way if missed:
+# the card would wait on the one card it says it does not wait on, and the FYI comment
+# would assert the opposite of the sentence it came from.
+fresh_state; words_board "This card isn't blocked by $L521, whatever the title suggests."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a contraction negates it too (isn't blocked by)"; else flunk "contraction" "out=[$OUT]"; fi
+
+fresh_state; words_board "It doesn’t depend on $L521 any more."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "…including the curly apostrophe a Mac types by itself"; else flunk "curly contraction" "out=[$OUT]"; fi
+
+# board.md prints the label itself in bold, so the bolded form is one copy-paste away.
+fresh_state; words_board "**Depends on** $L521 for the contract field."
+OUT="$(run --dry-run 2>"$TMP/words-bold.err")"
+if grep -q "#520 skipped: its own words say it waits on open issue(s) 521" "$TMP/words-bold.err"; then
+  pass "the bolded house form (**Depends on** [#521](…)) is read like the plain one"
+else
+  flunk "bold phrase" "err=[$(cat "$TMP/words-bold.err")]"
+fi
+
 fresh_state; words_board "Depends on [#530](https://github.com/other/repo/issues/530)."
 OUT="$(run --dry-run 2>/dev/null)"
 if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a card in ANOTHER repo is not followed — every link the spawner builds is this repo's"; else flunk "cross-repo" "out=[$OUT]"; fi
@@ -1251,6 +1276,28 @@ fi
 fresh_state; words_board "No prerequisites here at all."
 OUT="$(run --dry-run 2>/dev/null)"
 if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a body with no dependency phrase costs one lookup and blocks nothing"; else flunk "no phrase" "out=[$OUT]"; fi
+
+# A number that names no issue can block nothing. Handled like an outage it would skip the
+# card on every poll for ever — no comment, no park, no attempt counted, one journal line.
+fresh_state; words_board "Depends on #99999 and $L521."
+echo 404 > "$STATE/states/99999"
+OUT="$(run --dry-run 2>"$TMP/words404.err")"
+if grep -q "#520 skipped: its own words say it waits on open issue(s) 521" "$TMP/words404.err" \
+   && grep -q "there is no such issue in owner/proj" "$TMP/words404.err"; then
+  pass "a reference to an issue that does not exist is dropped and logged, not treated as an outage"
+else
+  flunk "404 ref" "err=[$(cat "$TMP/words404.err")]"
+fi
+
+fresh_state; words_board "Depends on #601, #602, #603, #604, #605, #606, #607, #608, #609, #610, #611."
+OUT="$(run --dry-run 2>"$TMP/words11.err")"
+# Unlike an API outage, this refusal is about ONE body: #521, whose own body says nothing,
+# is still claimable. Nothing is answered from the first ten references.
+if printf '%s' "$OUT" | grep -q '^pick: #521 ' && grep -q "#520 skipped: could not read the card's own words" "$TMP/words11.err"; then
+  pass "more than ten references is a body this cannot read: it fails closed, not on the first ten"
+else
+  flunk "ref cap" "out=[$OUT] err=[$(cat "$TMP/words11.err")]"
+fi
 unset GH_BODY_DIR GH_STATE_DIR
 
 # ============================================================================

@@ -320,31 +320,37 @@ print(" ".join(str(i["number"]) for i in items if isinstance(i, dict) and i.get(
 # wrong guess costs one comment and is undone by editing the card.
 #
 # Only the explicit ordering phrases count — depends on, depend on, blocked by, blocked on,
-# waits on, waiting on — immediately before the reference, and only references to THIS repo
-# (`#12`, `[#12](https://github.com/<repo>/issues/12)`, or that URL bare). "Part of #12",
-# "refs", "see", "like #12" are context, not order; triage.md draws the same line. A false
-# positive stalls a card nobody is watching, so precision beats recall here: "after #12",
-# "once #12 lands" and "needs #12 first" are NOT matched, even though /triage records them —
-# a model reading the sentence can tell those from prose, a regex over a card body cannot.
-# A phrase with not/never/no longer in the 24 characters before it is skipped for the same
-# reason. At most 10 references are followed, so a pathological body cannot turn one poll
-# into fifty API calls.
+# waits on, waiting on — before the reference, with nothing between them but whitespace and
+# the markdown that dresses them up (`**Depends on** [#12](…)` is the shape board.md itself
+# prints), and only references to THIS repo (`#12`, `[#12](https://github.com/<repo>/issues/12)`,
+# or that URL bare). "Part of #12", "refs", "see", "like #12" are context, not order;
+# triage.md draws the same line. A false positive stalls a card nobody is watching, so
+# precision beats recall here: "after #12", "once #12 lands" and "needs #12 first" are NOT
+# matched, even though /triage records them — a model reading the sentence can tell those
+# from prose, a regex over a card body cannot. A phrase negated in the 24 characters before
+# it (not, never, no longer, and the contractions — "this card is not blocked by #12" and
+# "it doesn't depend on #12" mean the same thing) is skipped for the same reason.
 #
 # Fails closed exactly like open_blockers: any failed lookup — the body, or any one
 # reference's state — returns 1 with nothing printed, and the caller skips the card for this
-# poll rather than launch it on what it could not read.
+# poll rather than launch it on what it could not read. More than ten references is a body
+# this was not built to read, and fails closed too rather than answering from the first ten.
+#
+# The ONE thing that does not fail closed is a reference to an issue that does not exist
+# (404): a typo can block nothing, and a permanent 404 handled like a transient outage would
+# skip the card silently on every poll for ever. It is dropped, with a line in the journal.
 body_blockers() {
-  local n="$1" body refs m state out=""
+  local n="$1" body refs m state errfile out=""
   [ -n "${PROJECT_REPO:-}" ] || return 0
   body="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$n" --jq '.body // ""' 2>/dev/null)" || return 1
   [ -n "$body" ] || return 0
   refs="$(python3 -c '
 import re, sys
 body, repo, self_n = sys.argv[1], sys.argv[2], sys.argv[3]
-PHRASE = re.compile(r"(?:depends?\s+on|blocked\s+(?:by|on)|wait(?:s|ing)\s+on)\s*:?\s*", re.I)
+PHRASE = re.compile(r"(?:depends?\s+on|blocked\s+(?:by|on)|wait(?:s|ing)\s+on)[*_\x60\s]*:?[*_\x60\s]*", re.I)
 REF = re.compile(r"\[?#(\d+)\]?(?:\(([^)\s]*)\))?|https?://github\.com/([^/\s]+/[^/\s]+)/issues/(\d+)\b", re.I)
 SEP = re.compile(r"\s*(?:,|;|and|&)\s*", re.I)
-NEG = re.compile(r"\b(?:not|never|no longer)\b", re.I)
+NEG = re.compile(r"\b(?:not|never|no longer)\b|n[\x27’]t\b", re.I)
 found = []
 for m in PHRASE.finditer(body):
     if NEG.search(body[max(0, m.start() - 24):m.start()]):
@@ -370,17 +376,31 @@ for m in PHRASE.finditer(body):
         if not s:
             break
         pos = s.end()
-print(" ".join(sorted(found[:10], key=int)))
+if len(found) > 10:
+    sys.exit(3)
+print(" ".join(sorted(found, key=int)))
 ' "$body" "$PROJECT_REPO" "$n")" || return 1
   [ -n "$refs" ] || return 0
+  errfile="$(mktemp)"
   for m in $refs; do
-    state="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$m" --jq .state 2>/dev/null)" || return 1
+    if ! state="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$m" --jq .state 2>"$errfile")"; then
+      # A 404 is not an outage, and the two must not share an answer. A number that names
+      # no issue in this repo — a typo in a card body — can block nothing, so it is dropped
+      # with a line in the journal; treating it like a failed lookup would skip the card on
+      # every poll forever, with no comment, no park and no attempt ever counted.
+      if grep -q '404\|Not Found' "$errfile" 2>/dev/null; then
+        log "#$n names #$m as a prerequisite, but there is no such issue in $PROJECT_REPO; ignoring it"
+        continue
+      fi
+      rm -f "$errfile"; return 1
+    fi
     case "$state" in
       open|OPEN) out="${out:+$out }$m" ;;
       closed|CLOSED) ;;
-      *) return 1 ;;
+      *) rm -f "$errfile"; return 1 ;;
     esac
   done
+  rm -f "$errfile"
   printf '%s' "$out"
 }
 
