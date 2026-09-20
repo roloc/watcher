@@ -185,17 +185,27 @@ dependency came from the card's words and that editing them undoes it.
 
 The reader is deliberately narrow, because a false positive stalls a card nobody is
 watching. Only `depends on`, `depend on`, `blocked by`, `blocked on`, `waits on` and
-`waiting on`, immediately before the reference; only `#12`, `[#12](…/issues/12)` or that
-URL, and only in **this** repo; a list after one phrase (`#12 and #13`) is read whole; a
-phrase with not/never/no longer in front of it is ignored, as is a card naming itself. Ten
-references at most. "After #12", "once #12 lands" and "needs #12 first" are **not** matched
-here even though `/triage` records them — a model reading the sentence can tell those from
-ordinary prose; a regex cannot. And it only ever reads: the relationship is never written
-from a guess, because a guess on the issue outlives the sentence that caused it.
+`waiting on`, with nothing between the phrase and the reference but whitespace and the
+markdown that dresses it up — `**Depends on:** [#12](…)`, the shape a project's own card
+template tends to print, counts, and so does the plain one. Only `#12`, `[#12](…/issues/12)` or
+that URL, and only in **this** repo; a list after one phrase (`#12 and #13`) is read whole;
+a phrase negated in front (not, never, no longer, and the contractions — "isn't blocked by
+#12" says what "is not blocked by #12" says) is ignored, as is a card naming itself.
+"After #12", "once #12 lands" and "needs #12 first" are **not** matched here even though
+`/triage` records them — a model reading the sentence can tell those from ordinary prose;
+a regex cannot. And it only ever reads: the relationship is never written from a guess,
+because a guess on the issue outlives the sentence that caused it.
+
+Across every card riffmap has ever filed, that reader finds 38 dependency statements and
+no false positive.
 
 A recorded relationship is believed on its own and the body is not even fetched, so the
-common path costs exactly what it always did — the extra calls happen only for a card that
-has nothing recorded. Every lookup fails closed like the first one.
+common path costs what it always did. Everything here fails closed like the first lookup —
+an unreadable body, an unreadable state, or more than ten references in one body (a body
+this was not built to read is not answered from its first ten) skips the card for that poll
+rather than launching it. The **one** exception is a reference to an issue that does not
+exist: a typo can block nothing, and a permanent 404 treated like a transient outage would
+skip the card silently for ever, so it is dropped with a line in the journal naming it.
 
 (riffmap [#447](https://github.com/roloc/riffmap/issues/447), September 20, 2026, is why
 this exists: three cards filed together at 02:50, each naming the one before it in its
