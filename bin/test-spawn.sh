@@ -231,6 +231,12 @@ chmod +x "$BIN/claude"
 # prints $GH_DEPS_DIR/<n>.json when that file exists, else an empty list — or fails like
 # an outage when $GH_API_FAIL=1 (open_blockers must fail CLOSED: skip the card, never
 # launch it on a lookup that told us nothing).
+# `gh api repos/<r>/issues/<n> --jq .body // ""` (body_blockers, the net under it) prints
+# $GH_BODY_DIR/<n>.md when that file exists, else nothing; `--jq .state` prints
+# $GH_STATE_DIR/<n> when that file exists, else `open` — a referenced card is open unless a
+# test says otherwise. $GH_BODY_FAIL=1 / $GH_STATE_FAIL=1 make those two fail like an
+# outage, separately from $GH_API_FAIL, so each half of the fail-closed rule is provable on
+# its own.
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
@@ -240,6 +246,16 @@ case "$args" in
     if [ "${GH_API_FAIL:-0}" = 1 ]; then echo "gh: HTTP 502 (simulated)" >&2; exit 1; fi
     n="$(printf '%s' "$args" | sed -E 's#.*/issues/([0-9]+)/dependencies/blocked_by.*#\1#')"
     if [ -n "${GH_DEPS_DIR:-}" ] && [ -f "$GH_DEPS_DIR/$n.json" ]; then cat "$GH_DEPS_DIR/$n.json"; else echo "[]"; fi
+    ;;
+  "api repos/"*"/issues/"*" --jq .body"*)
+    if [ "${GH_BODY_FAIL:-0}" = 1 ]; then echo "gh: HTTP 502 (simulated)" >&2; exit 1; fi
+    n="$(printf '%s' "$args" | sed -E 's#.*/issues/([0-9]+) --jq.*#\1#')"
+    if [ -n "${GH_BODY_DIR:-}" ] && [ -f "$GH_BODY_DIR/$n.md" ]; then cat "$GH_BODY_DIR/$n.md"; fi
+    ;;
+  "api repos/"*"/issues/"*" --jq .state")
+    if [ "${GH_STATE_FAIL:-0}" = 1 ]; then echo "gh: HTTP 502 (simulated)" >&2; exit 1; fi
+    n="$(printf '%s' "$args" | sed -E 's#.*/issues/([0-9]+) --jq.*#\1#')"
+    if [ -n "${GH_STATE_DIR:-}" ] && [ -f "$GH_STATE_DIR/$n" ]; then cat "$GH_STATE_DIR/$n"; else echo open; fi
     ;;
   "pr list "*)
     # The sweeper's open-PR lookup (case 3b): answers with $GH_PR_LIST_FILE when a test set
@@ -340,6 +356,8 @@ run() {
   LANE_AGENTS="${LANE_AGENTS:-}" \
   LANE_COMMAND="${LANE_COMMAND:-/watch}" LANE_WORKDIR="${LANE_WORKDIR:-card}" \
   GH_DEPS_DIR="${GH_DEPS_DIR:-}" GH_API_FAIL="${GH_API_FAIL:-0}" \
+  GH_BODY_DIR="${GH_BODY_DIR:-}" GH_BODY_FAIL="${GH_BODY_FAIL:-0}" \
+  GH_STATE_DIR="${GH_STATE_DIR:-}" GH_STATE_FAIL="${GH_STATE_FAIL:-0}" \
   bash "$SPAWN" "$@"
   return $?
 }
@@ -1124,6 +1142,116 @@ GH_DEPS_DIR="$STATE/deps"; mkdir -p "$GH_DEPS_DIR"; echo '[{"number":511,"state"
 run --once >/dev/null 2>&1 || true
 if grepped "board.py move 511 In progress" && not_grepped "/watch 510"; then pass "a Waiting-stage card that waits on another is skipped the same way"; else flunk "queue deps" "$(cat "$TESTLOG")"; fi
 unset BOARD_QUEUE_FILE GH_DEPS_DIR
+
+# ============================================================================
+echo "32b. The net under it: a dependency the card only states in WORDS (nothing recorded in"
+echo "     Relationships) is honored too — riffmap #447, September 20, 2026"
+# ============================================================================
+# /triage is the only thing that records a relationship from a card's words, and it only
+# sees cards with NO agent: label — so the cards a design tick spins off, labeled from
+# birth, arrived with their Depends-on line and an empty Relationships field, and were
+# launched in board order. These cases pin the body reader: what counts, what does not,
+# and that it fails closed on every lookup it cannot make.
+words_board() { # <body> — card 520 says it, 521 is the prerequisite; nothing recorded
+  board_list $'520\tP0\tbuilder\t-\tThe dependent card (P0, but its body says it waits)' \
+             $'521\tP1\tbuilder\t-\tThe prerequisite'
+  board_show '{"number":521,"state":"OPEN","status":"In progress","labels":[]}'
+  GH_BODY_DIR="$STATE/bodies"; mkdir -p "$GH_BODY_DIR"
+  printf '%s\n' "$1" > "$GH_BODY_DIR/520.md"
+  GH_STATE_DIR="$STATE/states"; mkdir -p "$GH_STATE_DIR"
+}
+L521="[#521](https://github.com/owner/proj/issues/521)"
+
+fresh_state; words_board "## Depends on / Part of
+
+- Depends on $L521 (\`builder\`) for the contract field.
+- Part of [#444](https://github.com/owner/proj/issues/444) (spec 3.19 #10)."
+OUT="$(run --dry-run 2>"$TMP/words.err")"
+if printf '%s' "$OUT" | grep -q '^pick: #521 ' && grep -q "#520 skipped: its own words say it waits on open issue(s) 521 (nothing recorded in Relationships)" "$TMP/words.err"; then
+  pass "the real #447 shape: the Depends-on bullet blocks the card, the Part-of bullet does not"
+else
+  flunk "words dry-run" "out=[$OUT] err=[$(cat "$TMP/words.err")]"
+fi
+
+fresh_state; words_board "Depends on $L521."
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+WATCHER_MAX_POLLS=2 run >/dev/null 2>&1 || true
+if grepped "gh issue comment 520 --body 🤖 FYI: this card waits on $L521, so I am not starting it yet. - Where I got that: this card's own words say so, and its Relationships field is empty." \
+   && [ "$(cat "$STATE/waiting/520" 2>/dev/null)" = "521" ]; then
+  pass "the FYI comment says the dependency came from the card's own words, and how to undo it"
+else
+  flunk "words comment" "$(cat "$TESTLOG")"
+fi
+if grepped "/watch 521" && not_grepped "/watch 520"; then pass "#521 launched, #520 never"; else flunk "words launch" "$(cat "$TESTLOG")"; fi
+
+# Context, not order: none of these is a prerequisite (triage.md draws the same line).
+fresh_state; words_board "Part of $L521. See $L521, like $L521 and same as $L521."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "part of / see / like / same as are context, not order — #520 is picked"; else flunk "context refs" "out=[$OUT]"; fi
+
+fresh_state; words_board "This does not depend on $L521 any more."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a negated phrase (does not depend on) is not a dependency"; else flunk "negation" "out=[$OUT]"; fi
+
+fresh_state; words_board "Depends on [#530](https://github.com/other/repo/issues/530)."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a card in ANOTHER repo is not followed — every link the spawner builds is this repo's"; else flunk "cross-repo" "out=[$OUT]"; fi
+
+fresh_state; words_board "Depends on $L521."
+echo closed > "$STATE/states/521"
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a prerequisite that is already closed does not hold the card"; else flunk "closed ref" "out=[$OUT]"; fi
+
+fresh_state; words_board "Depends on $L521 and [#522](https://github.com/owner/proj/issues/522), #523."
+echo closed > "$STATE/states/522"
+OUT="$(run --dry-run 2>"$TMP/words3.err")"
+if grep -q "#520 skipped: its own words say it waits on open issue(s) 521 523" "$TMP/words3.err"; then
+  pass "a list after one phrase is read whole (521, 522, 523), and the closed one is dropped"
+else
+  flunk "ref list" "err=[$(cat "$TMP/words3.err")]"
+fi
+
+fresh_state; words_board "Depends on #520 itself, which is this card."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a card naming itself is not blocked by itself"; else flunk "self ref" "out=[$OUT]"; fi
+
+# The recorded field wins, and the body is never even fetched for a card that has one:
+# a human-set relationship is the deliberate one, and the extra calls stay off the path.
+fresh_state; words_board "Depends on $L521."
+GH_DEPS_DIR="$STATE/deps"; mkdir -p "$GH_DEPS_DIR"
+echo '[{"number":599,"state":"open"}]' > "$GH_DEPS_DIR/520.json"
+run --dry-run >/dev/null 2>"$TMP/words4.err" || true
+if grep -q "#520 skipped: waiting on open issue(s) 599" "$TMP/words4.err" && not_grepped "issues/520 --jq .body"; then
+  pass "a recorded relationship is believed on its own — the body is not read at all"
+else
+  flunk "recorded wins" "err=[$(cat "$TMP/words4.err")] log=[$(cat "$TESTLOG")]"
+fi
+unset GH_DEPS_DIR
+
+fresh_state; words_board "Depends on $L521."
+OUT="$(GH_BODY_FAIL=1 run --dry-run 2>"$TMP/words5.err")"; RC=$?
+# The outage is the API, not one card: every row's body lookup fails, so the whole poll
+# comes up empty rather than guessing at any of them. One quiet minute, no wrong launch.
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'nothing claimable' \
+   && grep -q "#520 skipped: could not read the card's own words" "$TMP/words5.err" \
+   && grep -q "#521 skipped: could not read the card's own words" "$TMP/words5.err"; then
+  pass "a failed body lookup skips the card for this poll (fail closed), never launches it"
+else
+  flunk "body lookup failure" "rc=$RC out=[$OUT] err=[$(cat "$TMP/words5.err")]"
+fi
+
+fresh_state; words_board "Depends on $L521."
+OUT="$(GH_STATE_FAIL=1 run --dry-run 2>"$TMP/words6.err")"; RC=$?
+if [ "$RC" = 0 ] && grep -q "#520 skipped: could not read the card's own words" "$TMP/words6.err"; then
+  pass "a failed state lookup on a referenced card fails closed the same way"
+else
+  flunk "state lookup failure" "rc=$RC out=[$OUT] err=[$(cat "$TMP/words6.err")]"
+fi
+
+fresh_state; words_board "No prerequisites here at all."
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '^pick: #520 '; then pass "a body with no dependency phrase costs one lookup and blocks nothing"; else flunk "no phrase" "out=[$OUT]"; fi
+unset GH_BODY_DIR GH_STATE_DIR
 
 # ============================================================================
 echo "33. A tick that relabels the card for ANOTHER lane (triage, or /watch routing a design"

@@ -42,7 +42,8 @@
 # A card that GitHub says is blocked by an open issue (the issue's "Relationships" field,
 # or what /triage recorded from the card's own words) is skipped by every lane until the
 # blocker closes, so Steve can hand over a batch of cards in one go and the prerequisite
-# is worked first. One FYI comment per card says what it waits on.
+# is worked first. With nothing recorded there, the card's own body is read for an explicit
+# "depends on #<m>" and honored the same way. One FYI comment per card says what it waits on.
 #
 # Every external command is overridable so this can be tested with stubs, never the network:
 #   WATCHER_PROJECT    path to the project file                  (default: none — required
@@ -304,21 +305,113 @@ print(" ".join(str(i["number"]) for i in items if isinstance(i, dict) and i.get(
 ' "$out" || return 1
 }
 
-# note_waiting <n> <blockers> — the one FYI comment per card saying what it waits on. The
-# marker under $WATCHER_STATE/waiting/<n> holds the blocker list it was posted for, so a
-# card whose blockers change gets one more comment, and a card seen waiting on the same
+# body_blockers <n> — the OPEN issues #n's own BODY names as prerequisites, space-separated,
+# on stdout. The net under open_blockers, for the cards nothing ever recorded a Relationship
+# for: `/triage` is the only thing that turns a card's words into one, and it only ever sees
+# a card with NO `agent:` label — so a batch spun off together by one design tick, each card
+# carrying "Depends on #<m>" in its body and a label from birth, was launched in whatever
+# order the board returned it. riffmap #447 (September 20, 2026) spent a whole tick
+# rediscovering by hand what its own Depends-on line already said, and #448 was one poll
+# from doing it again.
+#
+# It reads the words and never writes the relationship. A regex is a guess; a guess recorded
+# on the issue outlives the sentence that caused it, and only a human would ever take it
+# off. The card is skipped and gets the same FYI comment a recorded blocker earns, so a
+# wrong guess costs one comment and is undone by editing the card.
+#
+# Only the explicit ordering phrases count — depends on, depend on, blocked by, blocked on,
+# waits on, waiting on — immediately before the reference, and only references to THIS repo
+# (`#12`, `[#12](https://github.com/<repo>/issues/12)`, or that URL bare). "Part of #12",
+# "refs", "see", "like #12" are context, not order; triage.md draws the same line. A false
+# positive stalls a card nobody is watching, so precision beats recall here: "after #12",
+# "once #12 lands" and "needs #12 first" are NOT matched, even though /triage records them —
+# a model reading the sentence can tell those from prose, a regex over a card body cannot.
+# A phrase with not/never/no longer in the 24 characters before it is skipped for the same
+# reason. At most 10 references are followed, so a pathological body cannot turn one poll
+# into fifty API calls.
+#
+# Fails closed exactly like open_blockers: any failed lookup — the body, or any one
+# reference's state — returns 1 with nothing printed, and the caller skips the card for this
+# poll rather than launch it on what it could not read.
+body_blockers() {
+  local n="$1" body refs m state out=""
+  [ -n "${PROJECT_REPO:-}" ] || return 0
+  body="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$n" --jq '.body // ""' 2>/dev/null)" || return 1
+  [ -n "$body" ] || return 0
+  refs="$(python3 -c '
+import re, sys
+body, repo, self_n = sys.argv[1], sys.argv[2], sys.argv[3]
+PHRASE = re.compile(r"(?:depends?\s+on|blocked\s+(?:by|on)|wait(?:s|ing)\s+on)\s*:?\s*", re.I)
+REF = re.compile(r"\[?#(\d+)\]?(?:\(([^)\s]*)\))?|https?://github\.com/([^/\s]+/[^/\s]+)/issues/(\d+)\b", re.I)
+SEP = re.compile(r"\s*(?:,|;|and|&)\s*", re.I)
+NEG = re.compile(r"\b(?:not|never|no longer)\b", re.I)
+found = []
+for m in PHRASE.finditer(body):
+    if NEG.search(body[max(0, m.start() - 24):m.start()]):
+        continue
+    pos = m.end()
+    while True:
+        r = REF.match(body, pos)
+        if not r:
+            break
+        if r.group(4):
+            if r.group(3).lower() != repo.lower():
+                break
+            num = r.group(4)
+        else:
+            num = r.group(1)
+            url = r.group(2)
+            if url and not re.search(r"github\.com/" + re.escape(repo) + r"/issues/" + num + r"\b", url, re.I):
+                break
+        if num != self_n and num not in found:
+            found.append(num)
+        pos = r.end()
+        s = SEP.match(body, pos)
+        if not s:
+            break
+        pos = s.end()
+print(" ".join(sorted(found[:10], key=int)))
+' "$body" "$PROJECT_REPO" "$n")" || return 1
+  [ -n "$refs" ] || return 0
+  for m in $refs; do
+    state="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$m" --jq .state 2>/dev/null)" || return 1
+    case "$state" in
+      open|OPEN) out="${out:+$out }$m" ;;
+      closed|CLOSED) ;;
+      *) return 1 ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# note_waiting <n> <blockers> [source] — the one FYI comment per card saying what it waits
+# on. The marker under $WATCHER_STATE/waiting/<n> holds the blocker list it was posted for,
+# so a card whose blockers change gets one more comment, and a card seen waiting on the same
 # ones poll after poll gets none. Written only when the comment lands. Never in --dry-run.
+#
+# <source> is `body` when the dependency was read out of the card's own words rather than
+# its Relationships field (body_blockers), and then the comment says so and how to undo it:
+# a dependency nobody recorded is the one kind Steve may actually need to overrule. The
+# marker keys on the blocker list alone, so the same dependency later recorded properly
+# does not earn a second comment.
 note_waiting() {
-  local n="$1" blockers="$2" links b marker
+  local n="$1" blockers="$2" source="${3:-relationships}" links b marker where undo
   marker="$WATCHER_STATE/waiting/$n"
   [ "${DRY_RUN:-0}" != 1 ] || return 0
   if [ -f "$marker" ] && [ "$(cat "$marker" 2>/dev/null)" = "$blockers" ]; then return 0; fi
   mkdir -p "$WATCHER_STATE/waiting"
   links=""
   for b in $blockers; do links="${links:+$links, }[#$b](https://github.com/$PROJECT_REPO/issues/$b)"; done
+  where=""
+  undo="- Nothing for Steve to do, unless one of those cards is not on its way."
+  if [ "$source" = body ]; then
+    where="- Where I got that: this card's own words say so, and its Relationships field is empty.
+"
+    undo="- Nothing for Steve to do, unless one of those cards is not on its way — or the card's words are wrong, in which case edit them and I stop waiting."
+  fi
   if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card waits on $links, so I am not starting it yet.
-- I start it on my own once every card it waits on is closed.
-- Nothing for Steve to do, unless one of those cards is not on its way."; then
+$where- I start it on my own once every card it waits on is closed.
+$undo"; then
     printf '%s' "$blockers" > "$marker"
   else
     log "waiting comment failed for #$n; retried on a later poll"
@@ -431,14 +524,29 @@ pick_card() {
     # blocker is the card to work first, and if it is on this same board it is picked by
     # this same loop a few rows down. Checked after the attempts safety net so a card
     # that already failed twice is still parked, blocked or not.
-    local blockers
+    #
+    # The recorded Relationships field is asked first and believed on its own; the card's
+    # own words (body_blockers) are consulted ONLY when nothing is recorded, which keeps
+    # the extra API calls off the common path and keeps a human-set relationship — the
+    # deliberate one — from ever being second-guessed by a regex.
+    local blockers blockers_src=relationships
     if ! blockers="$(open_blockers "$r_issue")"; then
       log "#$r_issue skipped: could not read what it is blocked by (gh api failed); trying again next poll"
       continue
     fi
+    if [ -z "$blockers" ]; then
+      if ! blockers="$(body_blockers "$r_issue")"; then
+        log "#$r_issue skipped: could not read the card's own words (gh api failed); trying again next poll"
+        continue
+      fi
+      [ -z "$blockers" ] || blockers_src=body
+    fi
     if [ -n "$blockers" ]; then
-      log "#$r_issue skipped: waiting on open issue(s) $blockers"
-      note_waiting "$r_issue" "$blockers"
+      case "$blockers_src" in
+        body) log "#$r_issue skipped: its own words say it waits on open issue(s) $blockers (nothing recorded in Relationships)" ;;
+        *)    log "#$r_issue skipped: waiting on open issue(s) $blockers" ;;
+      esac
+      note_waiting "$r_issue" "$blockers" "$blockers_src"
       continue
     fi
     [ "${DRY_RUN:-0}" = 1 ] || rm -f "$WATCHER_STATE/waiting/$r_issue"

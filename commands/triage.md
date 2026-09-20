@@ -81,6 +81,11 @@ gh api -X POST repos/{owner}/{repo}/issues/<n>/dependencies/blocked_by -F issue_
 A closed prerequisite needs nothing. Never remove a dependency someone else recorded. A
 relationship that already exists makes the call fail with 422; that is fine, move on.
 
+Record it even when the card's own words look plain enough to speak for themselves. The
+spawner does read an explicit `Depends on #<m>` out of a body when nothing is recorded, but
+that is a regex and it is deliberately narrow — "after #291" and "once the radar redesign
+lands" are yours to resolve, because reading a sentence is the one thing you are here for.
+
 ## 4. Say what you did, then label
 
 Comment first, label second: the moment the label lands, the lane it names may pick the

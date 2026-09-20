@@ -53,9 +53,12 @@ with its own state directory; `rollout.sh` rolls them all. Details in
 `docs/how-it-works.md`, "Lanes".
 
 **Dependencies.** A card GitHub says is *blocked by* an open issue (the issue's
-Relationships field, set by Steve or recorded by `/triage` from the card's words) is
-skipped by every lane until the blocker closes, so a batch of cards handed over at once is
-worked in order. Details in `docs/how-it-works.md`, "Dependencies".
+Relationships field, recorded by the tick that filed the card, set by Steve, or read by
+`/triage` from the card's words) is skipped by every lane until the blocker closes, so a
+batch of cards handed over at once is worked in order. With nothing recorded there, the
+spawner reads the card's own body for an explicit `Depends on #<m>` and honors that the
+same way — the net under a card that was filed already labeled, which `/triage` never
+sees. Details in `docs/how-it-works.md`, "Dependencies".
 
 **Self-pull.** `READY_PULL=1` in a project file lets a lane take the top **Ready** card
 when In progress and Waiting are both dry, moving it to In progress before it launches.

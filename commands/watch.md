@@ -109,6 +109,32 @@ detection, wrote it into the spec, and four correct PRs shipped against that fra
 next six hours. What actually drew was gated somewhere else entirely, and nobody between
 the first card and the last re-read the sentence.)
 
+**A card you file that waits on another one records it, in the same turn you write the
+sentence.** Writing "Depends on #<m>" in the body is half the job: the words are for Steve,
+the *Relationships* field is what the loop reads, and it is what stops the card being
+started before its prerequisite exists. Two commands, right after `item-add`:
+
+```
+id="$(gh api repos/{owner}/{repo}/issues/<m> --jq .id)"
+gh api -X POST repos/{owner}/{repo}/issues/<n>/dependencies/blocked_by -F issue_id="$id"
+```
+
+Only a real prerequisite — work that must be **merged** before this card can be built or
+verified. "Part of", "refs" and "see" are context, not order, and a card that merely
+*reads better* after another one is not blocked by it. A 422 means the relationship is
+already there; that is fine, move on. Never remove one somebody else recorded.
+
+This is yours, not Steve's and not the triage lane's: `/triage` records dependencies from a
+card's words, but it only ever sees a card with **no** `agent:` label, so a card you file
+with a label — which is most of them — is never triaged at all. The spawner reads an
+explicit `Depends on #<m>` out of the body as a net, but it is a regex over prose and it
+only guesses; you know.
+(riffmap [#447](https://github.com/roloc/riffmap/issues/447), September 20, 2026: one
+architect tick filed three cards at 02:50, each one's body naming the one before it, none
+of them recorded. Thirteen hours later a renderer tick picked up the last of the three,
+spent its whole run establishing that the contract field it needed did not exist yet, and
+parked in Stuck to ask Steve a question the card's own first line had already answered.)
+
 **Answer your own factual questions. Only judgment goes to Steve.**
 
 - **A fact is anything the data, the code or the page decides**: what drew, what the value

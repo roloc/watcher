@@ -169,11 +169,38 @@ and gets one FYI comment naming what it waits on (one more if that set changes);
 after the last blocker closes, it is picked. If the lookup itself fails the card is skipped
 for that poll, never launched on a guess. The Waiting stage goes through the same check.
 
-Where the relationships come from: Steve sets them by hand on the issue, or `/triage`
-records them from the card's own words ("after #291", "once the radar redesign lands",
-"depends on", a `Depends on` line — not "part of", "refs" or "see"). A card that already
-has an agent label is never triaged, so a dependency on one of those is Steve's to set or
-to write into the card before he labels it.
+Where the relationships come from, best first: the tick that **files** the card records it
+in the same turn it writes the Depends-on sentence (`watch.md`, section 2); Steve sets one
+by hand on the issue; or `/triage` records it from the card's own words ("after #291",
+"once the radar redesign lands", "depends on", a `Depends on` line — not "part of", "refs"
+or "see").
+
+**And the net, for the cards none of those three reached.** `/triage` only ever sees a card
+with no `agent:` label, so a card filed with one — which is most of what a design tick
+spins off — was never triaged, and if its author did not record the relationship, nothing
+did. So when the Relationships field is **empty**, the spawner reads the card's own body
+(`body_blockers`) and treats an explicit prerequisite there exactly like a recorded one:
+skipped, one FYI comment, picked the poll after the last one closes. The comment says the
+dependency came from the card's words and that editing them undoes it.
+
+The reader is deliberately narrow, because a false positive stalls a card nobody is
+watching. Only `depends on`, `depend on`, `blocked by`, `blocked on`, `waits on` and
+`waiting on`, immediately before the reference; only `#12`, `[#12](…/issues/12)` or that
+URL, and only in **this** repo; a list after one phrase (`#12 and #13`) is read whole; a
+phrase with not/never/no longer in front of it is ignored, as is a card naming itself. Ten
+references at most. "After #12", "once #12 lands" and "needs #12 first" are **not** matched
+here even though `/triage` records them — a model reading the sentence can tell those from
+ordinary prose; a regex cannot. And it only ever reads: the relationship is never written
+from a guess, because a guess on the issue outlives the sentence that caused it.
+
+A recorded relationship is believed on its own and the body is not even fetched, so the
+common path costs exactly what it always did — the extra calls happen only for a card that
+has nothing recorded. Every lookup fails closed like the first one.
+
+(riffmap [#447](https://github.com/roloc/riffmap/issues/447), September 20, 2026, is why
+this exists: three cards filed together at 02:50, each naming the one before it in its
+body, none recorded. The third was picked thirteen hours later and spent its whole tick
+rediscovering by hand what its own first line said.)
 
 ## Self-pull
 
