@@ -302,6 +302,14 @@ https://example.com` sends one by hand.
   reproduces — go and look, including at the project's own live data where its `CLAUDE.md`
   says how. Ask Steve for judgment, never for something a machine recorded, and never mix
   the two in one card.
+- **A symptom card is not done until its symptom is checked again.** Fetch the artifact the
+  card names one more time before the card closes, and say in one sentence what it now
+  shows. Still there? The card does not close, however green the build — the PR says
+  `Refs #<n>` and the card goes to Stuck. A correct fix for the wrong cause is what this
+  catches.
+- **A spawned card re-reads the complaint at the root of its chain**, not only the card that
+  filed it, and says which sentence of the root it is serving. When the last card off a root
+  closes, the root's own symptom is checked again and the answer is commented on the root.
 - Report the run's quota use, and never call it cost or spend (see "The dollar figure is
   quota, not a bill").
 

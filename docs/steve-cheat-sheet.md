@@ -73,12 +73,27 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 - Your options are the same: **A** retry as is, **B** edit the card then retry, **C** close it.
 - Smaller cards get done. A card that stalls twice is usually two cards.
 
+## When the fix landed and it still looks the same
+
+- If you reported **something you saw** — a page that looks wrong, a number that is off, a
+  screen showing what it should not — the bot looks at that same thing again before it
+  closes your card.
+- **The card only closes if what you saw actually changed.** If the code shipped and the
+  page still looks the way you reported it, the card **stays open** and comes to you in
+  **Stuck**, with a comment saying what was built and what the page still shows.
+- So **a card that is still open with a merged PR on it is not a mistake.** It means the fix
+  was for the wrong cause, and the bot told you instead of quietly marking it done.
+- Answer it the usual way: **A, B or C**, then move the card back to In progress.
+- A card with nothing to look at — a cleanup, a document, a decision — is not affected. This
+  only applies to cards where you reported seeing something.
+
 ## What the bot comments mean
 
 | Comment starts with | Meaning | You need to do |
 |---|---|---|
 | 🤖 Watcher picked this up | a tick started on the card | nothing |
 | 🤖 **Needs Steve:** | a decision or an answer is needed | pick A, B or C, move the card |
+| 🤖 **Needs Steve:** the fix landed and it still looks the same | the code shipped and the thing you reported did not change, so the card stayed open | pick A, B or C, move the card |
 | 🤖 **FYI:** I labeled this for the … lane | the triage bot picked the lane | nothing, unless you disagree — then change the label |
 | 🤖 **FYI:** not doing this yet — the card gates itself | the card's own text says to wait; the bot obeyed and put it back in Backlog | nothing, unless the wait is over — then edit that line out and move it to Ready |
 | 🤖 **FYI:** this card waits on … | it is blocked by an open card; it starts when that closes | nothing, unless that card is not on its way |

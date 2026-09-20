@@ -93,6 +93,22 @@ tick asked Steve which of two widgets he had seen on a specific meeting. The mee
 one fetch away — its data said neither widget could have drawn — so the question spent a
 day of Steve's attention on something the tick could have answered in a minute.)
 
+**A spawned card re-reads the complaint, not just its parent.** When this card was filed by
+another card — an architect's build card, a designer's `ui` card, a follow-on — walk the
+chain up to its **root**: the card a human wrote, at the top. Read the root, and say in one
+line which sentence of it this work serves, on the card and in the PR body. The chain is in
+the cards themselves: a spawned card names the one that filed it, and the root's comments
+name what came off it (`gh issue view <n> --json body,comments`). If the work in hand
+cannot be traced to a sentence of the root, **say so on the card before you build it**. A
+parent card's reasoning is a hypothesis exactly as Steve's diagnosis is, and the frame may
+have been set wrong upstream — every card after it inherits that. The root's complaint is
+the thing that has to be true at the end.
+(riffmap [#429](https://github.com/roloc/riffmap/issues/429), September 19, 2026: the root
+said a Friday 1-1 had the sales-call widgets in it. The architect read that as kind
+detection, wrote it into the spec, and four correct PRs shipped against that frame over the
+next six hours. What actually drew was gated somewhere else entirely, and nobody between
+the first card and the last re-read the sentence.)
+
 **Answer your own factual questions. Only judgment goes to Steve.**
 
 - **A fact is anything the data, the code or the page decides**: what drew, what the value
@@ -165,10 +181,41 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 
 ## 3. Ship it
 
-- Open a PR whose body contains **`Closes #<n>`**, so the merge closes the card by itself.
+- Open a PR whose body contains **`Closes #<n>`**, so the merge closes the card by itself —
+  unless the card's symptom is still there at the end, which is the one case that takes
+  `Refs #<n>` instead (next bullet).
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
+- **A symptom card is not done until the symptom is checked again.** A card that reports
+  something *observed* — a page that looks wrong, a number that is off, a screen showing
+  what it should not — names the artifact that shows it, and §2 had you look at that
+  artifact before you decided what was wrong. **Fetch it again before the card closes**, by
+  whatever means the project's `CLAUDE.md` gives you, and say in **one sentence what it now
+  shows** — in the PR body and in a comment on the card.
+  - **The symptom is gone**: say so, and close the card the normal way (`Closes #<n>`,
+    merge).
+  - **The symptom is still there: the card does not close** — even when the change is
+    correct, the reviewer is happy and CI is green. Its PR body says **`Refs #<n>`, never
+    `Closes #<n>`**, so the merge leaves the card open; merge it, then go to **Stuck** (§4)
+    with what was built, what you expected the artifact to show, and what it still shows.
+    **A correct fix for the wrong cause is the outcome this rule exists to catch.**
+  - **A card with no observable symptom** — a refactor, a doc, a decision, a piece of
+    tooling — is unaffected. There is nothing to fetch and nothing to re-check.
+  - If the artifact cannot move until the merge deploys, fetch it anyway and read it
+    against the change you made. What you are checking is **whether the thing you changed
+    is the thing the artifact shows**, and that is answerable before the deploy: a veto
+    with nothing to veto, a ruler that never drew, a branch never reached leaves its trace
+    in the artifact you were given. Green tests say the code does what you wrote; only the
+    artifact says you wrote the right thing.
+- **When the last card spawned from a root card closes, re-check the root's own symptom.**
+  Walk the chain up (§2), fetch the root's artifact, and comment what it now shows on the
+  **root card**. A root whose children all closed green while its symptom survives is the
+  exact shape this catches: if it survives, the root goes to **Stuck** (§4) with what
+  shipped and what it still shows. A root card is not closed by its children being done.
+  (riffmap [#429](https://github.com/roloc/riffmap/issues/429), September 19, 2026: four
+  merged PRs, every link green, and the meeting looked exactly the same at the end as it
+  did in the sentence that started it.)
 - Wait for the project's **required CI check** (its `CLAUDE.md` names it) **in the
   foreground** — `gh pr checks <pr> --watch --fail-fast` blocks until it finishes — then
   `gh pr merge --squash --delete-branch`. **You do the merging.** **Never end your turn to
@@ -251,7 +298,14 @@ an artifact of its own — route those by hand; the card carries `blocked`; **`r
 finds something blocking that you disagree with** — you do not get to overrule the only
 review there is; the work would touch a documented contract the project's `CLAUDE.md`
 says is not a builder's call; the required CI check fails twice for a reason you cannot
-explain; or you have tried the same failing thing twice.
+explain; **the change is built and merged and the card's symptom survives** (§3); or you
+have tried the same failing thing twice.
+
+**The "built, but the symptom survives" ask has the same shape as every other.** The first
+line is still `Needs Steve:`, and the question is still one question with lettered options
+— what changed is that you have a fact to put under it, not an opinion: what shipped, and
+what the thing he reported still shows. Say both in plain words ("the fix for X landed and
+the page still shows Y"), never the project's name for the code path you changed.
 
 **A measurement or a document is a deliverable, and it is yours** (September 19, 2026).
 A card whose `agent:` is the project's measuring agent (`evaluator`) or its docs agent
@@ -384,6 +438,13 @@ this), **In review** (finished, reviewed, green — only the merge is missing; �
 **Stuck - Needs help**, **Backlog** (you declined a card that gates itself; §4b), or still
 **In progress** if you got nowhere — or if you routed it to another lane (§2), which is
 the one In progress exit that is not a failure.
+
+**A merged PR does not always mean Done.** A symptom card whose artifact still shows the
+symptom ends in **Stuck - Needs help** with its PR merged and its `Refs #<n>` leaving the
+card open (§3). That is a complete, honest tick, not a leak and not a failure: the code
+shipped, and the thing Steve reported did not change. Report it as `Outcome: stuck` and
+`Ended in: Stuck - Needs help`, and say in the `Needs Steve` line that the fix landed and
+the symptom survived.
 
 **Remove `in-flight` on every one of those exits, without exception** — Done and In review
 included. It marks *a tick actively working*, nothing else. A leaked label strands the card
