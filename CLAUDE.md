@@ -8,7 +8,10 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 
 - `bin/spawn.sh` — the loop systemd runs. `bin/test-spawn.sh` is its test suite: no network,
   every external command stubbed. **Run it before and after any change to `spawn.sh`:**
-  `bash bin/test-spawn.sh` (exit 0 = all cases hold).
+  `bash bin/test-spawn.sh` (exit 0 = all cases hold). CI runs it on every PR and every push
+  to `main` (`.github/workflows/ci.yml`, job `verify`), so that rule is now checked rather
+  than remembered — but a red CI run you could have seen locally in four seconds is a wasted
+  round trip, so still run it here first.
 - `commands/watch.md` — the `/watch` contract, one tick of the loop. Generic: it must work
   for any project on the box. Project-specific names (the CI check, contracts, spend
   receipts) come from the project's own `CLAUDE.md`, never hard-coded here.
