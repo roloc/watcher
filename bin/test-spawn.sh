@@ -165,6 +165,7 @@ chmod +x "$BIN/board.py"
 cat > "$BIN/claude" <<'STUB'
 #!/usr/bin/env bash
 echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
+echo "claude-env background-tasks-disabled=${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-unset}" >> "$TEST_LOG"
 if [ "$1" = "-p" ] && [ "$2" = "reply ok" ]; then
   # untrusted_message: the real CLI names the exact key it checked in the warning, when
   # $CLAUDE_UNTRUSTED_KEY is set — round 4 fold-in, ensure_trust's parse_trust_key.
@@ -397,6 +398,7 @@ CLAUDE_SUBTYPE=success CLAUDE_RC=0 RC=0
 run --once >/dev/null; RC=$?
 if [ "$RC" = 0 ]; then pass "successful tick → spawn.sh --once exits 0"; else flunk "exit code" "got $RC"; fi
 if grepped "worktree.sh new card-20" && grepped "/watch 20"; then pass "worktree created and tick launched for #20"; else flunk "launch" "$(cat "$TESTLOG")"; fi
+if grepped "claude-env background-tasks-disabled=1"; then pass "the tick runs with background tasks disabled (a headless CI wait must block)"; else flunk "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS not passed to the tick" "$(cat "$TESTLOG")"; fi
 if not_grepped "board.py unclaim 20"; then pass "no unclaim: in-flight was never on the card"; else flunk "unexpected unclaim"; fi
 if not_grepped "worktree.sh remove card-20"; then pass "worktree kept: card is still OPEN"; else flunk "worktree should not be removed"; fi
 if not_grepped "board.py notify"; then pass "no Discord post from the spawner: an ordinary tick is not an event (board.py posts the tick's own moves)"; else flunk "unexpected board.py notify" "$(cat "$TESTLOG")"; fi

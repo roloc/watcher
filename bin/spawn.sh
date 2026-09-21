@@ -107,6 +107,12 @@ WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"
 WATCHER_WORKTREE="${WATCHER_WORKTREE:-$WATCHER_HERE/worktree.sh}"
 export WORKTREE_ROOT="$WATCHER_ROOT"
+# A headless tick never gets a background task's "finished" notification, so a CI wait
+# it backgrounds just ends the run with the PR unmerged — watch.md forbids it, and ticks
+# still did (riffmap#305, then riffmap#461 on September 21, 2026: "CI checks are running;
+# I'll act once they complete"). This makes the CLI reject `run_in_background`, so
+# `gh pr checks --watch` runs in the foreground and the same tick merges.
+export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 # Only when the project file set it: worktree.sh distinguishes unset (use its default)
 # from empty (copy nothing), and an unconditional export would erase that difference.
 # An `if`, not `x && export x`: under `set -e` that whole list fails when x is unset,
