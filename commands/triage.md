@@ -104,6 +104,14 @@ gh issue edit <n> --add-label "agent: <name>"
 Then stop. The spawner sees the card still In progress with another lane's label and
 counts that as a success for this lane.
 
+**The card points at something no tick can open?** A page behind a login is the usual one
+(riffmap: a `/maps/<key>/…` URL with no `/s/<token>` share link on the card). Label it all
+the same — then swap the last bullet for the one action that opens it, as the project's
+`CLAUDE.md` names it: `- Steve: <that action> — no tick can open the link above.` (riffmap:
+*press Share at the top of the meeting page and paste the link here*.) Asked now, it
+lands while Steve still has the page open; asked by the working tick, it costs that tick's
+run (`watch.md` §2, "Could not look?").
+
 **Could not decide** — the card is empty, or a bare title with nothing to route on: leave
 it unlabeled, post one `🤖 **Needs Steve:**` comment in the Stuck shape
 (`talking-to-steve.md`) with the two or three agents it could be as the lettered options,

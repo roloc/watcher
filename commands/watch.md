@@ -93,6 +93,31 @@ tick asked Steve which of two widgets he had seen on a specific meeting. The mee
 one fetch away — its data said neither widget could have drawn — so the question spent a
 day of Steve's attention on something the tick could have answered in a minute.)
 
+**Could not look? Then you do not know — stop, never build from the description.** A
+login wall, a 401, an expired or revoked link, a page you cannot reach from this box: none
+of these make Steve's sentence the evidence instead. His words next to a link are a
+pointer to what he saw, not a spec of it — the link is the card, and a decision, a spec
+section, a mockup or a follow-on card written without opening it is built blind, however
+specific the words seemed. So, in this order:
+
+1. **Find the reader's way in.** The project's `CLAUDE.md` names it (riffmap: a meeting is
+   read through its `/s/<token>` share link; the `/maps/<key>/…` URL is the owner's page and
+   always needs his Google session). Check the card's body *and* comments, and the root
+   card's, for that form of link before you conclude there is none.
+2. **None there? Ask for exactly that, and go to Stuck (§4).** The ask is an access fact,
+   not a judgment, so it is one line with the one action the project's `CLAUDE.md` names
+   (riffmap: *"Press Share at the top of the meeting page and paste the link here."*).
+   No options, no recommendation, and nothing else in the same card (§2, "never put both
+   in one Stuck card").
+3. **Build nothing meanwhile.** No spec amendment, no follow-on cards, no "working from the
+   description, which was specific enough." A tick that reports it could not look and then
+   ships anyway has turned an access gap into a design nobody checked.
+
+(riffmap [#453](https://github.com/roloc/riffmap/issues/453), September 21, 2026: the card
+linked the call to trim by its `/maps/…` URL. The architect tick hit the Google login, said
+so on the card, then merged a spec section and filed four build cards from the three
+sentences under the link. The meeting was one Share click away.)
+
 **A spawned card re-reads the complaint, not just its parent.** When this card was filed by
 another card — an architect's build card, a designer's `ui` card, a follow-on — walk the
 chain up to its **root**: the card a human wrote, at the top. Read the root, and say in one
