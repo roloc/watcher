@@ -24,7 +24,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
-    bin/test-spawn.sh     106 cases, no network, every external command stubbed
+    bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
+    .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
     agents/reviewer.md    the one review pass: blocking findings only, one round
@@ -127,6 +128,24 @@ Then by hand, once:
    watcher@riffmap-triage` (the build, design and triage lanes — without the triage lane
    an unlabeled card is nobody's); `journalctl -u watcher@riffmap -f` follows one.
    Pause a lane with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
+
+## CI
+
+`.github/workflows/ci.yml`, one job — `verify`: `bash -n` over the scripts systemd and the
+installer run, then `bin/test-spawn.sh` and `bin/test-notify.py`. Both suites are offline
+and stubbed, so the job needs no network, no secrets and no services, and takes seconds.
+
+**Where it runs.** PR code is code any branch can write, so it never runs on a box that
+holds credentials — riffmap's split (its `ci.yml`, card #407), which here rules out exactly
+one box: the `agents` LXC this repo deploys to, holding the bot's GitHub login and a Claude
+subscription token. The repo variable `CI_RUNNER` picks the runner and is **unset by
+default**, so out of the box this is GitHub-hosted and needs no infrastructure; set it to a
+self-hosted label to move it into the lab (`riffmap-ci` needs nothing installed beyond bash
+and python3), unset it to come straight back if that box is down. Never point it at the
+agents box.
+
+Deploying is deliberately not a CI job — see below: `rollout.sh` waits for a running tick to
+finish on its own, which is a decision about live work, not a pipeline step.
 
 ## Deploy a new version (without killing a running tick)
 

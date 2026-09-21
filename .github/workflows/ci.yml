@@ -1,0 +1,58 @@
+name: CI
+
+# The loop's own gate. `CLAUDE.md` has said "run it before and after any change to
+# spawn.sh" since the suite existed, and nothing checked that anyone did: this repo had no
+# workflow at all, so every PR merged on the author's word that the cases still passed.
+#
+# `verify` runs the two offline suites and a syntax pass. They need no network, no secrets
+# and no services — `bin/test-spawn.sh` stubs every external command (claude, gh, board.py,
+# worktree.sh) and `bin/test-notify.py` never opens a socket — so this job can run anywhere
+# and must be given nothing.
+#
+# WHERE it runs follows riffmap's split (its ci.yml, card #407): PR code is code any branch
+# can write, so it never runs on a box that holds credentials. Here that rules out exactly
+# one box — the `agents` LXC this repo deploys to, which holds the bot's GitHub login and a
+# Claude subscription token. The repo variable `CI_RUNNER` picks the runner and is unset by
+# default, so out of the box this is GitHub-hosted and needs no infrastructure at all; set
+# it to a self-hosted label (`riffmap-ci` already exists and needs nothing installed beyond
+# bash and python3) to move it into the lab, and unset it to come straight back if that box
+# is down. Never set it to the agents box.
+#
+# Deploying is NOT here and should not be: rollout.sh must pause a lane, wait for a running
+# tick to finish on its own, and restart the unit, which is a decision about live work
+# rather than a step in a pipeline. It stays a hand-run command (README, "Deploy a new
+# version").
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseding an in-flight PR check is fine; a push to main is never cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # A syntax error in any of these is a broken box, not a failed test: spawn.sh is what
+      # systemd runs, and install.sh and rollout.sh are what put it there.
+      - name: Shell syntax
+        run: |
+          for f in bin/spawn.sh bin/worktree.sh bin/test-spawn.sh deploy/install.sh deploy/rollout.sh; do
+            bash -n "$f" && echo "ok  $f"
+          done
+
+      - name: The spawner suite
+        run: bash bin/test-spawn.sh
+
+      - name: The Discord suite
+        run: python3 bin/test-notify.py
