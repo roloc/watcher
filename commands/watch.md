@@ -134,6 +134,16 @@ detection, wrote it into the spec, and four correct PRs shipped against that fra
 next six hours. What actually drew was gated somewhere else entirely, and nobody between
 the first card and the last re-read the sentence.)
 
+**Look for the card before you file it.** Before `gh issue create`, list what already
+came off the same root (`gh issue list --search "<root number> in:body" --state open`)
+and read the titles: an architect often files a surface's build card before its mockup
+is approved. If one already covers the work, update that card's body to what was decided
+since — the approved mockup, Steve's reply — and link it; never file a second.
+(riffmap [#473](https://github.com/roloc/riffmap/issues/473), September 21, 2026: the tick
+that merged the trim mockup filed the renderer build card that
+[#460](https://github.com/roloc/riffmap/issues/460) already was; the older one still
+carried the cost caption Steve had just ruled out.)
+
 **A card you file that waits on another one records it, in the same turn you write the
 sentence.** Writing "Depends on #<m>" in the body is half the job: the words are for Steve,
 the *Relationships* field is what the loop reads, and it is what stops the card being
@@ -325,12 +335,27 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   the move are part of the card, not extra. (riffmap#378, September 17, 2026: a tick ran
   out of budget before its review, left the card In review for "the next tick", and it sat
   for a day while `main` moved three merges and the PR went from green to conflicting.)
+- **A card that arrives with work already in its worktree** — the spawner reuses the
+  folder, so a run that died (the watchdog, the quota backstop, a crash) left its files
+  there: `git status --short` and `git log --oneline origin/main..HEAD` first, before you
+  read anything else. Resume it — build it, see what the card still lacks, finish that —
+  never start the card over. And leave your own run resumable the same way: **commit on
+  the card branch each time the build goes green**, so the next run starts from a commit,
+  not from a guess. (riffmap [#458](https://github.com/roloc/riffmap/issues/458),
+  September 21, 2026: a run died with ~20 files staged and nothing committed; the retry,
+  told to resume, merged it in 25 minutes.)
 - **A card that arrives with its PR already open** (the branch has commits, `gh pr list`
   shows it) came back from In review or from Stuck. Read the last comments on the card and
   the PR, then finish that PR — merge `origin/main`, fix what the comments name, run
   `reviewer` if it never ran, merge. Do not start over and do not open a second PR.
 
 ## 4. Stuck — the important half
+
+**Re-read the card, comments included, right before you ask.** `gh issue view <n> --json
+body,comments` again: Steve, or a session on his Mac, may have answered while you worked,
+and a question already answered on the card costs him a round trip for nothing. (riffmap
+[#454](https://github.com/roloc/riffmap/issues/454), September 21, 2026: a tick parked
+asking for a share link that had been put on the card eight minutes after it started.)
 
 Move to **Stuck - Needs help** the moment you need Steve, rather than guessing —
 **comment first, then move**, so the Discord alert the move sends (see below) can quote
@@ -507,6 +532,13 @@ bullets is enough).
 
 ## Guardrails
 
+- **Run git in the shape the project's gates accept, the first time.** A project's hooks
+  and deny rules refuse more than they look like they would, and every refusal is a
+  wasted turn: push as a Bash call holding exactly `git push -u origin <branch>` — no `cd`
+  before it, no `2>&1`, no pipe, nothing after it; never `git -c …` (set the option with
+  `git config` first, or do without); you are already in the worktree, so no leading
+  `cd <worktree> &&` on anything. (September 21, 2026: every riffmap tick that day lost
+  turns to exactly these three shapes.)
 - **One card per tick. One card at a time in your lane.** No exceptions. Another lane's tick
   may be running beside you on another card, in its own worktree; nothing of yours is
   shared with it except `main`.
