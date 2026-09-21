@@ -7,7 +7,7 @@ copied to another project by changing OWNER/NUMBER.
 
     python3 scripts/board.py list ["In progress"]   # cards in a column, as TSV
     python3 scripts/board.py move <issue> "<status>" [--why "<one line>"]
-    python3 scripts/board.py stage <issue> "<stage>"
+    python3 scripts/board.py stage <issue> "<stage>"     # "-" empties it
     python3 scripts/board.py show <issue>
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
     python3 scripts/board.py notify <issue> shipped|closed|released ["<detail>"]
@@ -250,10 +250,32 @@ def cmd_move(issue, status, *rest):
 QUIET_STAGES = {"Parked"}
 
 
+def clear_stage(issue):
+    """Empty the card's Stage. The spawner calls it when a card closes: a Done card still
+    reading "Merging" or "Claimed" sits in the wrong group on the Stage-grouped view Steve
+    works from (riffmap#425, #454, September 21, 2026). Quiet — no Discord post."""
+    proj, fields = project()
+    f = fields.get(STAGE_FIELD)
+    if not f:
+        return 0
+    it = next((i for i in items() if i["number"] == issue_num(issue)), None)
+    if not it:
+        sys.exit(f"board.py: issue #{issue} is not on the board")
+    if it.get("stage"):
+        m = """mutation($p:ID!,$i:ID!,$f:ID!){ clearProjectV2ItemFieldValue(input:{
+          projectId:$p,itemId:$i,fieldId:$f}){ projectV2Item{ id } } }"""
+        gh(m, p=proj["id"], i=it["item"], f=f["id"])
+    print(f"#{issue} stage → (none)")
+    return 0
+
+
 def cmd_stage(issue, stage):
     """What the tick is doing right now: Claimed | Designing | Building | Testing |
     Reviewing | PR open | Merging | Parked. Status says who owns the card; Stage says
-    where it is. A board view grouped by Stage shows the columns Steve asked for."""
+    where it is. A board view grouped by Stage shows the columns Steve asked for.
+    `-` empties it (clear_stage)."""
+    if stage == "-":
+        return clear_stage(issue)
     name, it = set_option(issue, STAGE_FIELD, stage)
     print(f"#{issue} stage → {name}")
     if name not in QUIET_STAGES:

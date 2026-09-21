@@ -409,6 +409,7 @@ fresh_state
 board_list $'21\tP1\tbuilder\t-\tCard twenty-one'
 board_show '{"number":21,"state":"CLOSED","status":"Done","labels":[]}'
 run --once >/dev/null
+if grepped "board.py stage 21 -"; then pass "stage cleared: a closed card leaves no stale Stage on the grouped view"; else flunk "stage clear on close" "$(cat "$TESTLOG")"; fi
 if grepped "worktree.sh remove card-21"; then pass "worktree removed: card is CLOSED"; else flunk "worktree remove" "$(cat "$TESTLOG")"; fi
 if grepped "board.py notify 21 shipped"; then pass "Discord: a card that closed is reported as shipped (board.py downgrades it to 'closed' if no PR merged)"; else flunk "expected board.py notify 21 shipped" "$(cat "$TESTLOG")"; fi
 

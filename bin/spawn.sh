@@ -1050,6 +1050,7 @@ except Exception:
     # `Closes #n` does it — so the "shipped" post has to come from here. board.py checks
     # the card's PR and posts "closed without a merge" instead when there is none.
     $WATCHER_BOARD notify "$n" shipped || log "discord notify failed for #$n"
+    $WATCHER_BOARD stage "$n" - >/dev/null 2>&1 || log "stage clear failed for #$n"
     rm -f "$WATCHER_STATE/inreview/$n.requeued"   # sweep_in_review's one-turn marker; the card is done
     if [ "$LANE_WORKDIR" = root ]; then
       log "no worktree to remove for #$n (LANE_WORKDIR=root)"
