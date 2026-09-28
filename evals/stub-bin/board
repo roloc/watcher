@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Stands in for the installed `board` (deploy/install.sh's /usr/local/bin/board) inside a
+# replay case's nested `claude -p` run. See evals/stub-bin/gh for the safety story: the only
+# backend is fakehub.py, and anything it does not recognize is a loud failure.
+set -euo pipefail
+export FAKEHUB_CWD="$PWD"
+exec python3 "$FAKEHUB_PY" board "$@"

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Stands in for the real `gh` inside a replay case's nested `claude -p` run. Never the real
+# thing, never a fall-through to it: FAKEHUB_STATE/.../fakehub.py handles every shape a case
+# needs and dies loudly on anything else, so a tick under test can never reach the real
+# roloc/watcher repo through here (bin/eval.sh's header has the full safety story).
+set -euo pipefail
+export FAKEHUB_CWD="$PWD"
+exec python3 "$FAKEHUB_PY" gh "$@"

@@ -8,6 +8,14 @@
 #   bash bin/test-spawn.sh                    # exit 0 = all cases hold; 1 = a case failed
 set -uo pipefail
 
+# Hermetic regardless of the caller's shell: the watcher@watcher lane (CLAUDE.md, "When the
+# watcher works its own board") exports GH_REPO, BOARD_OWNER, BOARD_NUMBER, WATCHER_HOME and
+# WATCHER_PROJECT for its own tick, and a tick that runs this suite from inside that lane
+# inherits them — silently overriding the fake "owner/proj" and other fixtures `run()` sets
+# below, so cases that grep for the fixture's own values fail on a correct tree. Found while
+# verifying card #34 from inside that exact lane.
+unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPAWN="$HERE/spawn.sh"
 TMP="$(mktemp -d)"

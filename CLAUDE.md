@@ -21,6 +21,16 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
 - `bin/notify.py` — Discord posts, called only from `board.py` (`move`, `stage`, `notify`).
   `python3 bin/test-notify.py` is its offline test; run it after touching either file.
+- `bin/eval.sh` — the replay suite: real past failures against `commands/watch.md`,
+  `commands/triage.md` and `agents/reviewer.md`, each a case under `evals/cases/` run with a
+  live `claude -p` against `evals/fakehub.py` (a closed, offline stand-in for `gh` and
+  `board` — no network, ever). **Run it after any change to those three files:**
+  `bash bin/eval.sh` (exit 0 = all cases hold; `bin/eval.sh <name>` for one case). It costs
+  real quota (each case is a full tick) and needs a Claude login, so it never runs in CI —
+  `deploy/rollout.sh` runs it after the pull and before any lane restarts, and a failure
+  stops the rollout cold. The playbook: every future incident that changes one of those
+  three files adds its case in the same PR (`bin/eval.sh`'s own header has the how-to, and
+  the caveat about what a case does and does not prove).
 - `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
   (`steve-cheat-sheet.md`).
 - `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (deploy without
@@ -73,13 +83,14 @@ above:
   whether `bin/spawn.sh` changed (that one also needs the lane restart `rollout.sh` does).
 - **A watcher card's symptom is re-checked by a test, not live.** The fix is not running
   until a rollout, so `watch.md`'s "a symptom card is not done until its symptom is checked
-  again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, or the
-  prompt evals once [#34](https://github.com/roloc/watcher/issues/34) lands — failing on
-  `main` and passing on the branch. Say which case, in one sentence, in the PR.
+  again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, or a replay
+  case in `bin/eval.sh` (card [#34](https://github.com/roloc/watcher/issues/34)) — failing
+  on `main` and passing on the branch. Say which case, in one sentence, in the PR.
 - **A change to the merge gate is built, but not merged.** The gate is
   `.github/workflows/`, `agents/reviewer.md`, the ship-and-merge rules in
   `commands/watch.md` §3, and "Hard rules for every agent" in `docs/how-it-works.md`.
   Build it, run the reviewer, get `verify` green, then park the card in Stuck (§4) with the
   PR under **Look:**, asking Steve to merge it. This is the contract `watch.md` §4 means by
-  "not a builder's call": until the prompt evals exist, the reviewer is the only check on a
-  change to the reviewer, so the watcher never loosens its own gate unseen.
+  "not a builder's call": `bin/eval.sh`'s cases as of card #34 are all `/watch` cases —
+  until one actually exercises `agents/reviewer.md`, the reviewer's own pass is the only
+  check on a change to itself, so the watcher never loosens its own gate unseen.
