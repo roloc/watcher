@@ -336,6 +336,40 @@ nothing else — a notification can never fail a board command or a tick. `pytho
 bin/test-notify.py` checks the shapes offline; `python3 bin/notify.py stuck 1 "smoke test"
 https://example.com` sends one by hand.
 
+## Watching the product
+
+The spawner's sweeps keep the *loop* healthy. Nothing above watches the product itself — a
+regression that ships to a project's own staging box waited for Steve to notice it, until
+card [#36](https://github.com/roloc/watcher/issues/36). `bin/detect.sh` closes that gap the
+same way the deployer closes its own: a small script on a timer, no model, deterministic.
+
+- **Generic in the watcher, specific in the project.** `bin/detect.sh <project>` does
+  nothing unless `projects/<project>.detect.env` exists — a versioned config, sourced after
+  the project's own `.env`, naming one metric (`DETECT_METRIC_CMD`, a command that prints
+  one number), a rolling window, and two fixed bands (`DETECT_SMALL_BAND`,
+  `DETECT_LARGE_BAND`). One reading a run; what gets compared to the bands is the *rolling
+  average* of the last `DETECT_BASELINE_WINDOW` readings, so one noisy reading is never a
+  breach on its own.
+- **Tiers.** Below the small band: nothing. At or above the small band: one log line,
+  nothing else. At or above the large band: a card, filed in **Backlog** with the metric,
+  the rolling average, the readings behind it, and (best-effort) the commit on `main` at
+  the time — evidence, not a diagnosis. **No second card while the first stays open** —
+  closing it, however Steve closes it, is what allows the next one.
+- **The card is written like one of Steve's**, with no `agent:` label, so a project with a
+  triage lane routes it the same as anything else he might have filed. It names the
+  artifact that shows the problem (`DETECT_LOOK_URL`, when the project has one) — the same
+  "look before you diagnose" rule `commands/watch.md` §2 holds every tick to.
+- **Discord stays a repeater.** `bin/detect.sh` never posts; filing the card ends with an
+  ordinary `board move <n> Backlog`, so the post — if one goes out — happens because a card
+  landed, never because a check ran. Nothing is posted for a small breach, or for a clean
+  run.
+- **Opt-in, per project, off by default.** `deploy/install.sh` installs
+  `watcher-detect@.service`/`.timer` but never enables an instance; a project starts
+  watching itself with `systemctl enable --now watcher-detect@<project>` once its
+  `.detect.env` exists. `bin/test-detect.sh` is the offline suite — a stubbed metric source
+  crossing each band, run against stubbed `gh`/`board` — and CI runs it the same as the
+  other two.
+
 ## Where Steve comes in
 
 - He moves cards in. He answers Stuck cards by replying on the card and moving it back to

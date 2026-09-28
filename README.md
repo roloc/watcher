@@ -24,7 +24,9 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
+    bin/detect.sh         the product detector: a metric, a rolling baseline, fixed bands (see below)
     bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
+    bin/test-detect.sh    the detector's cases, offline, every external command stubbed
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
@@ -40,6 +42,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     deploy/watcher-deploy.service, .timer   run it every five minutes
     deploy/rollout.sh     the manual fallback, for a Claude session (see below)
     bin/test-deploy.sh    the deployer's cases, offline, every external command stubbed
+    deploy/watcher-detect@.service, .timer  bin/detect.sh, per project, opt-in (see below)
+    projects/<name>.detect.env   opt-in per-project config for bin/detect.sh (see below)
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
 
@@ -112,6 +116,18 @@ died (⚠️), and — the one that matters — a card landing in **Stuck - Need
 quoting the ask from the card). Every post names the card and links to it, and to its PR
 when there is one. Nothing is posted per poll or per tick. `DISCORD_MENTION` (`<@id>` or
 `@here`) makes the Stuck alert ping someone. Unset the URL and it is all silent again.
+
+## Watching the product
+
+The loop above watches itself — stale claims, In review, parked cards. `bin/detect.sh`
+watches the *product*: a per-project, opt-in timer that reads one metric
+(`projects/<name>.detect.env`), keeps a rolling baseline, and compares it to two fixed
+bands. Below the small band, nothing; at or above it, one log line; at or above the large
+band, one card filed in **Backlog** with the evidence — no model, and no second card while
+the first stays open. Off by default: `deploy/install.sh` installs the unit but never
+enables it, so a project opts in with its own config and
+`systemctl enable --now watcher-detect@<name>`. Details in `docs/how-it-works.md`,
+"Watching the product".
 
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 

@@ -49,7 +49,7 @@ jobs:
       # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/worktree.sh bin/test-spawn.sh bin/test-deploy.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh; do
+          for f in bin/spawn.sh bin/worktree.sh bin/detect.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 
@@ -58,6 +58,9 @@ jobs:
 
       - name: The deployer suite
         run: bash bin/test-deploy.sh
+
+      - name: The detector suite
+        run: bash bin/test-detect.sh
 
       - name: The Discord suite
         run: python3 bin/test-notify.py
