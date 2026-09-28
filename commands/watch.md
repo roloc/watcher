@@ -296,6 +296,15 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     the reason it hasn't moved if you have one — that reason belongs in the Stuck comment,
     never as grounds to write `Closes` instead.
     **A correct fix for the wrong cause is the outcome this rule exists to catch.**
+  - **GitHub closes on the word, anywhere in the body, meaning included or not.** Its
+    merge-time scan for `closes #<n>` / `fixes #<n>` / `resolves #<n>` does not read
+    sentences — it matches the pattern wherever it sits, so a `Refs #<n>` PR whose own
+    prose explains itself with "not `Closes #<n>`" or "`Refs #<n>` rather than
+    `Closes #<n>`" still closes the card on merge, silently, however deliberate the
+    `Refs` line was. When a symptom card stays open, the word "Closes" does not appear in
+    its PR body at all, not even inside a sentence saying you chose not to use it —
+    describe the choice in plain words instead ("this stays open; the artifact has not
+    moved") and save the reasoning for the Stuck comment.
   - **A card with no observable symptom** — a refactor, a doc, a decision, a piece of
     tooling — is unaffected. There is nothing to fetch and nothing to re-check.
   - **The artifact cannot move until the merge deploys? Fetch it anyway — knowing why
