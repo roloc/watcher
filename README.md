@@ -141,13 +141,21 @@ installer run, then `bin/test-spawn.sh` and `bin/test-notify.py`. Both suites ar
 and stubbed, so the job needs no network, no secrets and no services, and takes seconds.
 
 **Where it runs.** PR code is code any branch can write, so it never runs on a box that
-holds credentials — riffmap's split (its `ci.yml`, card #407), which here rules out exactly
-one box: the `agents` LXC this repo deploys to, holding the bot's GitHub login and a Claude
-subscription token. The repo variable `CI_RUNNER` picks the runner and is **unset by
-default**, so out of the box this is GitHub-hosted and needs no infrastructure; set it to a
-self-hosted label to move it into the lab (`riffmap-ci` needs nothing installed beyond bash
-and python3), unset it to come straight back if that box is down. Never point it at the
-agents box.
+holds credentials — riffmap's split (its `ci.yml`, riffmap
+[#407](https://github.com/roloc/riffmap/issues/407)), which here rules out exactly one box:
+the `agents` LXC this repo deploys to, holding the bot's GitHub login and a Claude
+subscription token. The repo variable `CI_RUNNER` picks the runner. It is **`watcher-ci`**
+(since September 28, 2026): the `ci-watcher` runner on the `ci` LXC (108), in
+`/opt/actions-runner-watcher` beside riffmap's, run by the same `gha-runner` user. It needs
+nothing beyond bash and python3.
+
+- **Each repo needs its own runner registration.** Repos in a user account cannot share
+  runners, so riffmap's `riffmap-ci` never picks up this repo's jobs; pointing
+  `CI_RUNNER` at it queues every check, and with `verify` required, nothing merges.
+- **If the ci box is down**, unset the variable (`gh variable delete CI_RUNNER`) and the
+  job falls back to GitHub-hosted until it is back. That costs metered minutes, so set it
+  again as soon as the box is up.
+- Never point it at the agents box.
 
 Deploying is deliberately not a CI job — see below: `rollout.sh` waits for a running tick to
 finish on its own, which is a decision about live work, not a pipeline step.

@@ -12,11 +12,12 @@ name: CI
 # WHERE it runs follows riffmap's split (its ci.yml, card #407): PR code is code any branch
 # can write, so it never runs on a box that holds credentials. Here that rules out exactly
 # one box — the `agents` LXC this repo deploys to, which holds the bot's GitHub login and a
-# Claude subscription token. The repo variable `CI_RUNNER` picks the runner and is unset by
-# default, so out of the box this is GitHub-hosted and needs no infrastructure at all; set
-# it to a self-hosted label (`riffmap-ci` already exists and needs nothing installed beyond
-# bash and python3) to move it into the lab, and unset it to come straight back if that box
-# is down. Never set it to the agents box.
+# Claude subscription token. The repo variable `CI_RUNNER` picks the runner: since
+# September 28, 2026 it is `watcher-ci`, a runner on the `ci` LXC (108) registered to THIS
+# repo — Steve's lab, not GitHub's metered minutes. A runner registered to another repo
+# (`riffmap-ci`) never picks up this repo's jobs, because repos in a user account cannot
+# share runners: pointing at it queues every check forever. Unset the variable to fall back
+# to GitHub-hosted if the ci box is down. Never set it to the agents box.
 #
 # Deploying is NOT here and should not be: rollout.sh must pause a lane, wait for a running
 # tick to finish on its own, and restart the unit, which is a decision about live work
