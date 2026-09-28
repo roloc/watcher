@@ -288,11 +288,11 @@ swap() {
 
 main() {
   wgit "fetch -q origin $BRANCH" || { say_once fetch "fetch failed; trying again next run"; return 0; }
-  local cur tgt drain from force=""
+  local cur tgt drain="" from="" force=""
   cur="$(wgit 'rev-parse HEAD')"; tgt="$(wgit "rev-parse origin/$BRANCH")"
   # The drain record: "<sha> <the commit the box was on> [force]". Kept across runs, so a
   # run that dies after the swap still knows which lane files the deploy added.
-  read -r drain from force < "$DSTATE/draining" 2>/dev/null
+  [ -f "$DSTATE/draining" ] && read -r drain from force < "$DSTATE/draining"
 
   if [ -z "$drain" ]; then
     if [ "$cur" = "$tgt" ]; then rm -f "$DSTATE/ready"; say_once "live $cur" "live at ${cur:0:7}; nothing to deploy"; return 0; fi
