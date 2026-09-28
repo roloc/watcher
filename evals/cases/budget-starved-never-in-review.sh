@@ -113,6 +113,16 @@ case_check() {
   # card left claiming "In review" — finished, only the merge missing — when it was not.
   pass "budget-starved: tick ran (rc=$RESULT_RC, subtype=$(result_field subtype))"
 
+  # The assertions below are all negative ("never did X") — a run killed almost instantly,
+  # before it got anywhere near a decision about the card's status, would pass them all
+  # trivially without exercising anything. Require real progress first, so a pass here is
+  # evidence the ceiling actually bit into the work, not that nothing happened at all.
+  if grep -qE 'board stage 100 (Building|Testing|Reviewing|PR open)' "$EVAL_LOG"; then
+    pass "budget-starved: got far enough into the work for the ceiling to matter"
+  else
+    flunk "budget-starved: never got past claiming the card" "$(cat "$EVAL_LOG")"
+  fi
+
   if [ "$(state issues.100.status)" = "In review" ]; then
     flunk "budget-starved: card status" \
       "ended In review with reviewer never run — exactly riffmap#378"

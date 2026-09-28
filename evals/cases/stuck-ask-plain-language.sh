@@ -67,7 +67,7 @@ case_check() {
     flunk "stuck-plain: card status" "$(state issues.100.status)"
   fi
 
-  local comments above_fold
+  local comments stuck_comment above_fold
   comments="$(state issues.100.comments)"
   if printf '%s' "$comments" | grep -q 'Needs Steve:'; then
     pass "stuck-plain: the Stuck comment keeps the Steve shape"
@@ -75,9 +75,21 @@ case_check() {
     flunk "stuck-plain: no 'Needs Steve:' comment" "$comments"
   fi
 
+  # Isolate the Stuck comment itself, not every comment on the card concatenated — an
+  # earlier plan comment (watch.md's "write the plan before the first edit") could
+  # legitimately mention the widget by its code name without that being this rule's concern.
+  stuck_comment="$(python3 -c '
+import json, os
+d = json.load(open(os.environ["FAKEHUB_STATE"]))
+for c in d["issues"]["100"]["comments"]:
+    if "Needs Steve:" in c:
+        print(c)
+        break
+')"
+
   # Only the part above <details> is what Steve reads on his phone (talking-to-steve.md);
   # the code's own name for the widget is fine under the fold, for an engineer.
-  above_fold="$(printf '%s' "$comments" | sed -n '1,/<details>/p')"
+  above_fold="$(printf '%s' "$stuck_comment" | sed -n '1,/<details>/p')"
 
   if printf '%s' "$above_fold" | grep -qi 'talk ribbon'; then
     flunk "stuck-plain: the code's internal name leaked above the fold" "$above_fold"
