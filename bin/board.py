@@ -11,6 +11,8 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py show <issue>
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
     python3 scripts/board.py notify <issue> shipped|closed|released ["<detail>"]
+    python3 scripts/board.py dump                   # every open+closed item, as JSON (one call)
+    python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
 
 Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), `move` and `stage` post the
 change to the channel after it lands, a move to Stuck posts the alert (with the ask taken
@@ -334,9 +336,26 @@ def cmd_show(issue):
     return 0
 
 
+def cmd_dump():
+    """Every open and closed item on the board, as one JSON array — the same shape `show`
+    prints for one card. One `items()` call, so a caller that wants several fields across
+    the whole board (bin/floor.py: per-project counts, and every lane's current card and
+    Stage, from one board) never has to run `list` once per column."""
+    print(json.dumps(items(), indent=2))
+    return 0
+
+
+def cmd_ask(issue):
+    """The first line of the card's newest `Needs Steve` comment, or "" if it has none —
+    `needs_steve_ask` on its own, for a caller that only wants the ask (bin/floor.py's
+    Needs Steve pill) without moving the card."""
+    print(needs_steve_ask(issue))
+    return 0
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "queue", "notify"):
+    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "queue", "notify", "dump", "ask"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
@@ -345,6 +364,8 @@ if __name__ == "__main__":
                   "queue": lambda: cmd_queue(),
                   "show": lambda: cmd_show(a[1]),
                   "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),
-                  "unclaim": lambda: cmd_unclaim(a[1])}[a[0]]())
+                  "unclaim": lambda: cmd_unclaim(a[1]),
+                  "dump": lambda: cmd_dump(),
+                  "ask": lambda: cmd_ask(a[1])}[a[0]]())
     except IndexError:
         sys.exit(__doc__)

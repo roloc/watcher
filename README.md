@@ -21,9 +21,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
 ## Layout
 
     bin/spawn.sh          the loop (systemd runs it); --dry-run / --once
-    bin/board.py          the board CLI: list/show/move/stage/unclaim/notify (BOARD_OWNER, BOARD_NUMBER)
+    bin/board.py          the board CLI: list/show/move/stage/unclaim/notify/dump/ask (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
+    bin/floor.py          the floor page: what every lane on the box is doing, live and read-only (see below); bin/test-floor.py checks it offline
     bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
@@ -38,6 +39,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
     deploy/watcher@.service, deploy/install.sh
     deploy/autodeploy.sh  THE deploy path: ships main by itself when every lane is idle (see below)
     deploy/watcher-deploy.service, .timer   run it every five minutes
+    deploy/watcher-floor.service  the floor page's unit; install.sh restarts it on every install
     deploy/rollout.sh     the manual fallback, for a Claude session (see below)
     bin/test-deploy.sh    the deployer's cases, offline, every external command stubbed
 
@@ -85,6 +87,19 @@ A project-level `.claude/commands/watch.md` overrides the generic one. The gener
 the project's `CLAUDE.md` for the names it needs (the required CI check, contracts a builder
 must not touch). The spawner exports `WATCHER_HOME` so a tick can read `docs/` from any
 worktree.
+
+## The floor page
+
+**What every lane on the box is doing, without ssh or journalctl.** `bin/floor.py`
+(card [#40](https://github.com/roloc/watcher/issues/40)) is a small stdlib HTTP server,
+always on (`watcher-floor.service`), that groups every lane in `projects/*.env` by the
+board it works and shows one of five states per lane — working (the card, its Stage,
+minutes since launch), idle (why), needs Steve (the card and the first line of its ask),
+paused, or sleeping after a failure — plus the last few ticks across every project. It
+reads `projects/*.env`, each lane's state directory, and one `board.py dump` per board
+(cached, refreshed about once a minute); it never changes anything. Read-only, LAN-only
+(reached off-site over WireGuard), runs as the unprivileged `watcher` user.
+`bin/test-floor.py` is its offline suite: fixture state directories, a stubbed board.
 
 ## Talking to Steve
 
@@ -136,6 +151,11 @@ Then by hand, once:
    The watcher's own lane is `watcher@watcher` (`deploy/install.sh watcher` first); see
    `docs/how-it-works.md`, "The watcher's own board".
    Pause a lane with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
+5. **The floor page** is already up (`deploy/install.sh` starts `watcher-floor.service`
+   the first time it runs, before any project is even cloned): `http://<this box's LAN
+   address>:8787/`, reached off-site over whatever WireGuard tunnel already reaches the
+   box. `journalctl -u watcher-floor -f` follows it; `systemctl restart watcher-floor`
+   after hand-editing `bin/floor.py` outside the normal deploy path.
 
 ## CI
 

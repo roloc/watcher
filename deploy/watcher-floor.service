@@ -1,0 +1,25 @@
+# The floor page (bin/floor.py, card #40): a live, read-only view of every watcher lane on
+# this box, so Steve does not need ssh or journalctl to see what is running. Always on, one
+# instance per box (not a `watcher@` template — it is not a lane, it does no work and holds
+# no card). deploy/install.sh restarts it on every deploy: cheap and safe, since it holds
+# no work in flight and its own cache rebuilds in a few seconds.
+[Unit]
+Description=The floor page: a live view of every watcher lane on this box
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=watcher
+Group=watcher
+WorkingDirectory=/opt/watcher
+Environment=HOME=/home/watcher
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /opt/watcher/bin/floor.py
+Restart=always
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,13 @@
 
 **You stock Ready. The bots do the rest.** One page, no code above the fold.
 
+**The floor page** shows what every bot is doing right now, without asking anyone:
+`http://192.168.176.45:8787/` (the box's LAN address today — it's on DHCP, so `hostname -I`
+on the box is the source of truth if this ever stops loading), reached off-site over
+whatever WireGuard tunnel already reaches the box. Working, idle, needing you, paused, or
+asleep after a failure — one look, phone-friendly, light and dark. Read-only: it never
+changes a card.
+
 ## The columns
 
 - **Backlog** — yours. The bots never start anything from here. They will **put a card

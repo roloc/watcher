@@ -52,6 +52,16 @@ systemctl is-enabled --quiet watcher-deploy.timer 2>/dev/null \
   || systemctl enable --now watcher-deploy.timer >/dev/null 2>&1 \
   || echo "warning: could not enable watcher-deploy.timer" >&2
 
+# The floor page (bin/floor.py, card #40): one instance per box, holds no card and no work
+# in flight, so — unlike a `watcher@` lane — it is simply restarted here on every install,
+# never drained or paused. `enable --now` covers the first install; a later one just picks
+# up new code via the restart.
+install -m 644 /opt/watcher/deploy/watcher-floor.service /etc/systemd/system/watcher-floor.service
+systemctl daemon-reload
+systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
+  && systemctl restart watcher-floor.service \
+  || echo "warning: could not start watcher-floor.service" >&2
+
 for p in "$@"; do
   f="/opt/watcher/projects/$p.env"
   [ -f "$f" ] || { echo "no project file $f" >&2; exit 1; }
