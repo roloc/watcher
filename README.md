@@ -124,10 +124,10 @@ watches the *product*: a per-project, opt-in timer that reads one metric
 (`projects/<name>.detect.env`), keeps a rolling baseline, and compares it to two fixed
 bands. Below the small band, nothing; at or above it, one log line; at or above the large
 band, one card filed in **Backlog** with the evidence — no model, and no second card while
-the first stays open. Off by default: `deploy/install.sh` installs the unit but never
-enables it, so a project opts in with its own config and
-`systemctl enable --now watcher-detect@<name>.timer`. Details in `docs/how-it-works.md`,
-"Watching the product".
+the first stays open. Off until a project opts in: `deploy/install.sh` installs the unit
+for every box, then enables an instance for every `projects/<name>.detect.env` it finds —
+merging that file, on a rerun of `install.sh` or the next deploy, is what turns detection
+on. Details in `docs/how-it-works.md`, "Watching the product".
 
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 

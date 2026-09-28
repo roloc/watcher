@@ -45,9 +45,9 @@ install -m 644 /opt/watcher/deploy/watcher@.service /etc/systemd/system/watcher@
 # idle. Enabled here, so a box set up from scratch deploys itself from its first boot.
 install -m 644 /opt/watcher/deploy/watcher-deploy.service /etc/systemd/system/watcher-deploy.service
 install -m 644 /opt/watcher/deploy/watcher-deploy.timer /etc/systemd/system/watcher-deploy.timer
-# The detector (bin/detect.sh, card #36): installed but never enabled here — a project opts
-# in with its own projects/<name>.detect.env, then `systemctl enable --now
-# watcher-detect@<name>.timer` by hand (see "Next, by hand" below).
+# The detector (bin/detect.sh, card #36): the unit is installed for every box, but an
+# instance only starts for a project that carries its own projects/<name>.detect.env —
+# merging that file is what turns detection on, below, the same as a lane's own .env.
 install -m 644 /opt/watcher/deploy/watcher-detect@.service /etc/systemd/system/watcher-detect@.service
 install -m 644 /opt/watcher/deploy/watcher-detect@.timer /etc/systemd/system/watcher-detect@.timer
 systemctl daemon-reload
@@ -56,6 +56,13 @@ systemctl daemon-reload
 systemctl is-enabled --quiet watcher-deploy.timer 2>/dev/null \
   || systemctl enable --now watcher-deploy.timer >/dev/null 2>&1 \
   || echo "warning: could not enable watcher-deploy.timer" >&2
+for f in /opt/watcher/projects/*.detect.env; do
+  [ -f "$f" ] || continue
+  p="$(basename "$f" .detect.env)"
+  systemctl is-enabled --quiet "watcher-detect@$p.timer" 2>/dev/null \
+    || systemctl enable --now "watcher-detect@$p.timer" >/dev/null 2>&1 \
+    || echo "warning: could not enable watcher-detect@$p.timer" >&2
+done
 
 for p in "$@"; do
   f="/opt/watcher/projects/$p.env"
@@ -90,6 +97,6 @@ Next, by hand:
   3. Project: install.sh <project>  clones it; drop its .env.local / private inputs in place.
   4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f
   Pause:      touch ~watcher/.local/state/watcher/<project>/PAUSE
-  Detector:   optional. If projects/<project>.detect.env exists (card #36):
-              systemctl enable --now watcher-detect@<project>.timer
+  Detector:   optional (card #36). Drop in projects/<project>.detect.env and re-run
+              install.sh (or wait for the next deploy) — the timer starts on its own.
 NEXT

@@ -166,5 +166,38 @@ check "healthy: no breach reported"                      out_lacks "BREACH"
 check "healthy: no card"                                  not_called "issue"
 
 echo
+echo "riffmap-health-probe.sh"
+
+# riffmap's own metric script (projects/riffmap.detect.env's DETECT_METRIC_CMD): stub
+# `curl` to hand back one status code and check the probe's verdict on it (roloc/watcher#36,
+# Steve, September 28, 2026 — a probe of the bare IP was answered by a different app on the
+# same box, so the fix probes RiffMap by name and treats its own 401-to-anonymous as up).
+PROBE="$HERE/../projects/riffmap-health-probe.sh"
+probe_curl() {
+  cat > "$BIN/curl" <<CURLEOF
+#!/usr/bin/env bash
+echo "curl \$*" >> "$CALLS"
+echo -n "$1"
+CURLEOF
+  chmod +x "$BIN/curl"
+}
+probe() { : > "$CALLS"; bash "$PROBE"; }
+
+probe_curl 200
+check "200: healthy"                                     [ "$(probe)" = 0 ]
+
+probe_curl 401
+check "401 (anonymous, app is up): healthy, not just 2xx/3xx" [ "$(probe)" = 0 ]
+check "still probes RiffMap by its own hostname"          called "riffmap.lonestarprod.com"
+check "pinned to lonestar-web's LAN address"              called "192.168.176.37"
+
+probe_curl 500
+check "500 (app unreachable behind the proxy): unhealthy" [ "$(probe)" = 1 ]
+
+probe_curl 000
+check "000 (timeout / no connection): unhealthy"          [ "$(probe)" = 1 ]
+rm -f "$BIN/curl"   # a case added below must not inherit this stub or its wiped $CALLS
+
+echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi
 exit "$fail"

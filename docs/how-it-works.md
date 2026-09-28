@@ -363,11 +363,13 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   ordinary `board move <n> Backlog`, so the post — if one goes out — happens because a card
   landed, never because a check ran. Nothing is posted for a small breach, or for a clean
   run.
-- **Opt-in, per project, off by default.** `deploy/install.sh` installs
-  `watcher-detect@.service`/`.timer` but never enables an instance; a project starts
-  watching itself with `systemctl enable --now watcher-detect@<project>.timer` once its
-  `.detect.env` exists (the `.service` carries no `[Install]` — it is driven by the timer,
-  the same shape as `watcher-deploy.service`/`.timer`). `bin/test-detect.sh` is the offline suite — a stubbed metric source
+- **Opt-in, per project, off until its config exists.** `deploy/install.sh` installs
+  `watcher-detect@.service`/`.timer` for every box, then enables `watcher-detect@<p>.timer`
+  for every `projects/<p>.detect.env` it finds (the `.service` carries no `[Install]` — it
+  is driven by the timer, the same shape as `watcher-deploy.service`/`.timer`). A project
+  opts in by merging its `.detect.env`: `install.sh` reruns on every deploy
+  (`deploy/autodeploy.sh`), so that merge is what turns detection on — nobody runs a
+  command on the box. `bin/test-detect.sh` is the offline suite — a stubbed metric source
   crossing each band, run against stubbed `gh`/`board` — and CI runs it the same as the
   other two.
 
