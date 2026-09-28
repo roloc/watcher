@@ -62,8 +62,9 @@ OUTCOME_RE = re.compile(r'^- Outcome:\s*(.+)$', re.M)
 ENDED_RE = re.compile(r'^- Ended in:\s*(.+)$', re.M)
 NEEDS_RE = re.compile(r'^- Needs Steve:\s*(.+)$', re.M)
 
-# `watch.md`'s "Ended in" enum, longest-first so "Stuck - Needs help" never matches as a
-# prefix of something shorter. Real logs routinely append an explanatory parenthetical —
+# `watch.md`'s "Ended in" enum. None of these five is a prefix of another (they all
+# diverge by the 4th character), so match order does not matter. Real logs routinely
+# append an explanatory parenthetical —
 # "Done (issue closed by merge)", "Stuck - Needs help (awaiting Steve's approval reply)",
 # "In progress (routed onward — the one non-failure In progress exit)" — so this is a
 # prefix match, never `==`, against the raw text; a card whose report used one of these
@@ -114,7 +115,7 @@ class Tick:
         In progress under THIS lane (routing to another lane is progress, not a failure)."""
         if self.died:
             return True
-        return self.ended_in == "In progress" and "routed" not in (self.outcome or "").lower()
+        return self.ended_in == "In progress" and "routed to" not in (self.outcome or "").lower()
 
 
 def load_log(path):
@@ -370,6 +371,8 @@ def main(argv):
                 weeks = int(argv[i])
             except ValueError:
                 sys.exit(f"metrics.py: --weeks wants a number, got {argv[i]!r}")
+            if weeks < 1:
+                sys.exit("metrics.py: --weeks must be at least 1")
         elif a in ("-h", "--help"):
             sys.exit(__doc__)
         else:

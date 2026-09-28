@@ -217,7 +217,10 @@ def wwrite(issue, when, **kw):
         json.dump(d, f)
 
 
-LAST_WEEK = ts(14400)  # 10 days ago — always a different ISO week than "now"
+# Anchored to metrics' own week_start, not a fixed "N days ago" — the distance from "now"
+# to the previous calendar week varies with today's weekday (a fixed 10-day offset landed
+# two weeks back, not one, whenever run early in the week — found in review).
+LAST_WEEK = (metrics.week_start(NOW) - timedelta(days=1)).strftime(TS_FMT)  # last week, any day
 THIS_WEEK = ts(0)
 
 # #20: a "no progress" tick last week, its Done tick this week — took two ticks overall,
