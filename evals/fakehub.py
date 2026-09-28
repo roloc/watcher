@@ -32,7 +32,6 @@ CI_FAIL_ONCE = os.environ.get("FAKEHUB_CI_FAIL_ONCE") == "1"
 
 
 def log(*argv):
-    line = "gh " + " ".join(argv) if argv and argv[0] != "board" else " ".join(argv)
     with open(LOG_PATH, "a") as f:
         f.write(re.sub(r"\s+", " ", " ".join(argv)) + "\n")
 
@@ -69,8 +68,11 @@ def run(cmd, cwd=None, check=True):
 # --- flag parsing (gh's own CLI shape: --flag value, --flag=value, bare positionals) ------
 
 def parse_flags(argv, known_bool=()):
-    """Returns (positionals, {flag: value}). `--flag` with no value and no `=` is
-    treated as boolean-true when it is in `known_bool`."""
+    """Returns (positionals, {flag: value}). `--flag`/`-f` with no value and no `=` is
+    treated as boolean-true when it is in `known_bool`. Handles both `gh`'s long flags
+    (`--body-file x`) and its short ones (`gh api -X POST -F issue_id=1`, both used by
+    watch.md's/triage.md's dependency-recording call) — a short flag repeated (`-F` can
+    appear more than once) just overwrites; nothing here needs more than one value back."""
     pos, flags = [], {}
     i = 0
     while i < len(argv):
@@ -81,6 +83,13 @@ def parse_flags(argv, known_bool=()):
                 name, val = name.split("=", 1)
                 flags[name] = val
             elif name in known_bool:
+                flags[name] = True
+            else:
+                i += 1
+                flags[name] = argv[i] if i < len(argv) else ""
+        elif a.startswith("-") and len(a) > 1 and a != "-":
+            name = a[1:]
+            if name in known_bool:
                 flags[name] = True
             else:
                 i += 1
@@ -250,9 +259,9 @@ def gh_pr_merge(argv, cwd):
             die(f"no open pull requests found for branch {branch!r}")
         pr = cands[0]
 
-    # A unique scratch dir per attempt: a refused merge (conflict) leaves this behind for
-    # inspection, and the tick's own next `gh pr merge` — after it resolves the conflict on
-    # its OWN branch and pushes again — must not collide with that leftover directory.
+    # A unique scratch dir per attempt, always removed in `finally` below: a refused merge
+    # (conflict) must not leave a directory behind that the tick's own NEXT `gh pr merge` —
+    # after it resolves the conflict on its own branch and pushes again — would collide with.
     scratch = STATE_PATH + f".merge-scratch-{pr['number']}-{os.getpid()}-{id(pr)}"
     shutil.rmtree(scratch, ignore_errors=True)
     try:
@@ -284,7 +293,7 @@ def gh_pr_merge(argv, cwd):
 # --- gh api (the dependency-recording net, kept minimal) ------------------------------------
 
 def gh_api(argv):
-    pos, flags = parse_flags(argv, known_bool=("X",))
+    pos, flags = parse_flags(argv)  # -X takes a value (POST); it is not a boolean flag
     path = pos[0] if pos else ""
     m = re.match(r"repos/[^/]+/[^/]+/issues/(\d+)/dependencies/blocked_by", path)
     if m and flags.get("X") == "POST":

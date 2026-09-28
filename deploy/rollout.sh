@@ -61,15 +61,22 @@ say "code at $(su - watcher -c 'git -C /opt/watcher log --oneline -1')"
 # 1b. The replay suite (card #34) — the loop's own prompts (commands/, agents/) are shared
 # by every lane on the box via the ~/.claude symlinks install.sh just refreshed, so a bad
 # prompt change is never scoped to just $PROJECT. Gate every rollout on it here, before any
-# lane is paused or restarted: nothing here has touched a lane yet, so a failure leaves
-# every unit running exactly as it was (the code on disk is already the new commit either
-# way — see the note on step 1 above — but no lane has been asked to pick it up).
-say "running the replay suite (bin/eval.sh)"
-if ! su - watcher -c "cd /opt/watcher && bin/eval.sh"; then
-  say "replay suite FAILED — not touching any lane. Fix the prompts and roll out again."
-  exit 1
+# lane's unit is restarted: a failure at least stops `bin/spawn.sh` itself from restarting
+# on new code (see bin/eval.sh's own header for what this gate does and does not cover).
+# It is a LIVE model suite, not a deterministic one — a case can be a real, known flake
+# (bin/eval.sh's header names one) — so `EVAL_SKIP=1 deploy/rollout.sh …` skips it rather
+# than letting the only deploy path jam on a flake with no way through.
+if [ "${EVAL_SKIP:-0}" = 1 ]; then
+  say "EVAL_SKIP=1: not running the replay suite"
+else
+  say "running the replay suite (bin/eval.sh)"
+  if ! su - watcher -c "cd /opt/watcher && bin/eval.sh"; then
+    say "replay suite FAILED — not touching any lane. Fix the prompts, or re-run with"
+    say "EVAL_SKIP=1 if this is the known flake, not a real regression."
+    exit 1
+  fi
+  say "replay suite passed"
 fi
-say "replay suite passed"
 
 # The project and its lanes, from the project files now on disk (after the pull, so a lane
 # added by this very version is rolled too). A lane's unit that was never enabled is

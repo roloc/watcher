@@ -11,9 +11,16 @@
 #
 # WHERE THIS RUNS: never CI (`.github/workflows/ci.yml`'s own header explains why — PR code
 # never runs on the box holding credentials) and never as part of an ordinary tick's turns.
-# It runs by hand, and from `deploy/rollout.sh` after the pull and before any lane is
-# restarted (recommended option A on the card): a prompt change that fails its own replay
-# suite never reaches a running lane.
+# It runs by hand, and from `deploy/rollout.sh` after the pull and before any lane's UNIT is
+# restarted (recommended option A on the card). That is a narrower guarantee than it sounds:
+# `deploy/install.sh` has already refreshed the `~/.claude/commands` symlink by the time this
+# runs, so a prompt change that fails the suite is already live for the NEXT tick any
+# still-running lane launches on its own, before rollout.sh ever pauses it — same as it was
+# before this suite existed. What the gate actually buys is not touching the lane's systemd
+# unit (so `bin/spawn.sh` itself, if that also changed, never restarts) and a loud "do not
+# proceed" for whoever is running the rollout. `EVAL_SKIP=1 deploy/rollout.sh …` skips the
+# gate — the suite costs real quota and a flaky live case (see the note below) should not be
+# able to block Steve's only deploy path.
 #
 # WHAT A CASE IS: a directory-free single file under evals/cases/, sourced into a fresh
 # subshell-free scope with these already set: $TMP (its own scratch dir), $ORIGIN (an empty
@@ -66,7 +73,7 @@ CLAUDE_BIN="${WATCHER_CLAUDE:-claude}"
 MAX_TURNS="${EVAL_MAX_TURNS:-60}"
 MAX_BUDGET="${EVAL_MAX_BUDGET_USD:-3}"
 
-fail=0; n=0
+fail=0; n=0; cases=0
 say()   { printf '  %-66s %s\n' "$1" "$2"; }
 pass()  { n=$((n+1)); say "$1" "ok"; }
 flunk() { n=$((n+1)); fail=1; say "$1" "FAIL${2:+ — $2}"; }
@@ -146,6 +153,7 @@ run_case() {
   local case_file="$1" name
   name="$(basename "$case_file" .sh)"
   echo "== $name =="
+  cases=$((cases + 1))
 
   TMP="$(mktemp -d)"
   ORIGIN="$TMP/origin.git"
@@ -173,6 +181,7 @@ run_case() {
   if [ -z "$CASE_COMMAND" ] || [ ! -d "$WORKTREE/.git" ]; then
     flunk "$name: case_setup" "did not set CASE_COMMAND and a real \$WORKTREE"
     rm -rf "$TMP"
+    unset -f case_setup case_check
     return
   fi
 
@@ -223,5 +232,5 @@ for f in "${CASES[@]}"; do
   run_case "$f"
 done
 
-echo "$n cases, $([ "$fail" = 0 ] && echo "all passed" || echo "SOME FAILED")"
+echo "$cases case(s), $n check(s), $([ "$fail" = 0 ] && echo "all passed" || echo "SOME FAILED")"
 exit "$fail"
