@@ -28,6 +28,8 @@
 #
 #   case_setup()   - build the fixture: seed_repo a starting commit, new_worktree off it,
 #                    seed_card the issue text, set CASE_COMMAND ("/watch 100" or similar).
+#                    May also set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD to run that one case
+#                    tighter than the suite default (EVAL_MAX_TURNS / EVAL_MAX_BUDGET_USD).
 #   case_check()   - after the tick runs, call pass/flunk against $FAKEHUB_STATE (read it
 #                    with evals/state.py), $EVAL_LOG (the stub gh/board call log, one line
 #                    per call — grep it), $ORIGIN (real git: `git -C "$ORIGIN" log/show`),
@@ -70,6 +72,11 @@ CASE_TIMEOUT="${EVAL_CASE_TIMEOUT_SEC:-480}"
 CLAUDE_BIN="${WATCHER_CLAUDE:-claude}"
 MAX_TURNS="${EVAL_MAX_TURNS:-60}"
 MAX_BUDGET="${EVAL_MAX_BUDGET_USD:-3}"
+# owner/repo a case's tick sees in $GH_REPO, exactly as bin/spawn.sh exports it for a real
+# lane (PROJECT_REPO) — needed so a case that records a card dependency (`gh api
+# repos/$GH_REPO/issues/<n>/dependencies/blocked_by`, commands/watch.md's and
+# commands/triage.md's own recipe) has the same env shape as production, not a guess.
+EVAL_GH_REPO="${EVAL_GH_REPO:-fixture-org/fixture-repo}"
 
 fail=0; n=0; cases=0
 say()   { printf '  %-66s %s\n' "$1" "$2"; }
@@ -160,6 +167,8 @@ run_case() {
   EVAL_LOG="$TMP/log.txt"
   ISSUE=100
   CASE_COMMAND=""
+  CASE_MAX_TURNS=""
+  CASE_MAX_BUDGET_USD=""
   export FAKEHUB_STATE FAKEHUB_ORIGIN="$ORIGIN" FAKEHUB_LOG="$EVAL_LOG"
 
   : > "$EVAL_LOG"
@@ -196,15 +205,21 @@ run_case() {
   ln -s "$REPO/commands" "$cfg/commands"
   ln -s "$REPO/agents" "$cfg/agents"
 
+  # A case may set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD in case_setup to run tighter than the
+  # suite default (riffmap#378: proving a tick parks in Stuck rather than claiming "In review"
+  # when it runs low needs a cap it can actually run into). Unset means the suite default.
+  local turns="${CASE_MAX_TURNS:-$MAX_TURNS}" budget="${CASE_MAX_BUDGET_USD:-$MAX_BUDGET}"
+
   local out="$TMP/result.json" err="$TMP/result.stderr" rc=0
   ( cd "$WORKTREE" && \
     PATH="$EVALS/stub-bin:$PATH" \
     CLAUDE_CONFIG_DIR="$cfg" \
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
     WATCHER_HOME="$REPO" \
+    GH_REPO="$EVAL_GH_REPO" \
     timeout "$CASE_TIMEOUT" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
       --dangerously-skip-permissions \
-      --max-turns "$MAX_TURNS" --max-budget-usd "$MAX_BUDGET" \
+      --max-turns "$turns" --max-budget-usd "$budget" \
       --output-format json \
     > "$out" 2> "$err" )
   rc=$?
