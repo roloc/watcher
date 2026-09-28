@@ -476,7 +476,7 @@ function relTime(iso) {
 
 function deskHTML(d) {
   let detail = "";
-  if (d.pill === "working") detail = `#${d.card.number} · ${esc(d.stage) || "—"} · ${d.minutes}m`;
+  if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   return `<a class="desk" href="${esc(d.link)}">
@@ -602,6 +602,8 @@ def main(argv):
             i += 1
     except IndexError:
         sys.exit(f"floor.py: {a} needs a value")
+    except ValueError:
+        sys.exit(f"floor.py: {a} wants a number, got {argv[i]!r}")
 
     def build():
         return build_state(projects_dir, state_root, fetch_board,

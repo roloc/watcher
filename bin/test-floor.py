@@ -29,7 +29,7 @@ count = 0
 def check(name, cond, detail=""):
     global fails, count
     count += 1
-    print(f"  {name:<78} {'ok' if cond else 'FAIL ' + detail}")
+    print(f"  {name:<78} {'ok' if cond else 'FAIL ' + str(detail)}")
     if not cond:
         fails = 1
 
@@ -428,6 +428,14 @@ except SystemExit as e:
     check("...with a message naming the flag", "--host" in str(e), str(e))
 except IndexError:
     check("a value-less flag exits with a message, not an uncaught IndexError (review finding)", False)
+
+try:
+    floor.main(["--port", "not-a-number"])
+    check("a non-numeric --port exits", False)
+except SystemExit as e:
+    check("...with a message, not a bare ValueError (review finding)", "wants a number" in str(e), str(e))
+except ValueError:
+    check("a non-numeric --port exits with a message, not an uncaught ValueError", False)
 
 shutil.rmtree(ROOT, ignore_errors=True)
 
