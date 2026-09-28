@@ -42,6 +42,14 @@ git diff origin/main...HEAD --stat   # empty means someone already shipped it
 git diff origin/main...HEAD          # review the diff, not the description
 ```
 
+If the tick's invocation gives you a plan — the files it expected to change, the test or
+artifact that proves the card is done, the one risk it named — it is the tick's claim, not
+evidence; read the diff first, on its own terms, then check it against the plan. A file the
+plan named that never changed, or one that changed and was never in the plan, is worth a
+nit; it is **blocking only if it independently trips one of the categories above**, never
+just because the plan changed. A plan updated in place with a one-line reason for the
+divergence is not a divergence — that update is the system working.
+
 Re-verify the claims the branch makes that matter (counts, "all tests pass", "byte-
 identical") — run the command, don't take the sentence. Then the project's own standing
 traps, which its `CLAUDE.md` lists.
