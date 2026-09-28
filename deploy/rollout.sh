@@ -3,6 +3,13 @@
 #
 #   deploy/rollout.sh <project> [branch]      # default branch: main
 #
+# NOT THE DEPLOY PATH. Since September 28, 2026 deploy/autodeploy.sh (watcher-deploy.timer)
+# ships main by itself when every lane is idle, and Steve never runs this. It is kept as the
+# manual fallback for a Claude session: when the deployer is broken, or to try a branch on
+# the box before it merges. It stops the deployer's timer first so the two never pause and
+# restart the same lanes, and starts it again at the end only when it deployed main — after
+# a branch, run it once more for main (the deployer would hold a box that is on a branch).
+#
 # A project with LANES (projects/<project>-<lane>.env next to projects/<project>.env —
 # riffmap has riffmap-design and riffmap-triage) is rolled as one: every lane's unit is drained and swapped
 # by this same command, each one the moment its own tick is done, so a long build never
@@ -52,31 +59,46 @@ tick_running() {
   [ -f "$(state_of "$name")/current" ]
 }
 
-# 1. Code first, so even if we bail out below the next tick already has the new /watch.
-say "pulling /opt/watcher ($BRANCH)"
-su - watcher -c "git -C /opt/watcher fetch -q origin '$BRANCH' && git -C /opt/watcher checkout -q '$BRANCH' && git -C /opt/watcher pull -q --ff-only origin '$BRANCH'"
-/opt/watcher/deploy/install.sh "$PROJECT" >/dev/null
-say "code at $(su - watcher -c 'git -C /opt/watcher log --oneline -1')"
+# 0. The deployer stands down while a person drives: its timer, any run in progress, and any
+# drain it had started (its PAUSE files say "deploy <sha>"; a hand-made PAUSE is left
+# alone). Whatever happens below, a rollout of main turns it back on when this exits.
+systemctl stop watcher-deploy.timer watcher-deploy.service 2>/dev/null || true
+for p in /home/watcher/.local/state/watcher/*/PAUSE; do
+  [ -f "$p" ] && head -c 7 "$p" | grep -q '^deploy ' && rm -f "$p"
+done
+rm -f /var/lib/watcher-deploy/draining /var/lib/watcher-deploy/paused /var/lib/watcher-deploy/ready
+if [ "$BRANCH" = main ]; then
+  trap 'systemctl start watcher-deploy.timer 2>/dev/null || true' EXIT
+fi
 
-# 1b. The replay suite (card #34) — the loop's own prompts (commands/, agents/) are shared
-# by every lane on the box via the ~/.claude symlinks install.sh just refreshed, so a bad
-# prompt change is never scoped to just $PROJECT. Gate every rollout on it here, before any
-# lane's unit is restarted: a failure at least stops `bin/spawn.sh` itself from restarting
-# on new code (see bin/eval.sh's own header for what this gate does and does not cover).
-# It is a LIVE model suite, not a deterministic one — a case can be a real, known flake
-# (bin/eval.sh's header names one) — so `EVAL_SKIP=1 deploy/rollout.sh …` skips it rather
-# than letting the only deploy path jam on a flake with no way through.
+# 1. The replay suite FIRST, in a scratch clone at the exact commit about to go live: the
+# suite copies the prompts from the checkout it runs in, and /opt/watcher is what every
+# lane's ~/.claude links to, so running it there after the pull tested prompts that were
+# already live (the gap roloc/watcher#42's own header named). A live suite has flakes
+# (roloc/watcher#44), so `EVAL_SKIP=1 deploy/rollout.sh …` skips it.
+su - watcher -c "git -C /opt/watcher fetch -q origin '$BRANCH'"
+SHA="$(su - watcher -c "git -C /opt/watcher rev-parse 'origin/$BRANCH'")"
 if [ "${EVAL_SKIP:-0}" = 1 ]; then
   say "EVAL_SKIP=1: not running the replay suite"
 else
-  say "running the replay suite (bin/eval.sh)"
-  if ! su - watcher -c "cd /opt/watcher && bin/eval.sh"; then
-    say "replay suite FAILED — not touching any lane. Fix the prompts, or re-run with"
-    say "EVAL_SKIP=1 if this is the known flake, not a real regression."
+  scratch="/home/watcher/.cache/watcher-rollout-${SHA:0:12}"
+  say "running the replay suite on ${SHA:0:7} (bin/eval.sh, in a scratch clone)"
+  if ! su - watcher -c "rm -rf '$scratch' && git clone -q --shared /opt/watcher '$scratch' && git -C '$scratch' checkout -q --detach '$SHA' && cd '$scratch' && bin/eval.sh"; then
+    su - watcher -c "rm -rf '$scratch'"
+    say "replay suite FAILED on ${SHA:0:7} — nothing on the box changed. Fix the prompts, or"
+    say "re-run with EVAL_SKIP=1 if this is the known flake, not a real regression."
     exit 1
   fi
+  su - watcher -c "rm -rf '$scratch'"
   say "replay suite passed"
 fi
+
+# 2. Code: exactly that commit, fast-forward only. git replaces files by rename, so a
+# running spawn.sh keeps reading its old copy.
+say "moving /opt/watcher to ${SHA:0:7} ($BRANCH)"
+su - watcher -c "git -C /opt/watcher checkout -q '$BRANCH' 2>/dev/null || git -C /opt/watcher checkout -q -b '$BRANCH' 'origin/$BRANCH'; git -C /opt/watcher merge -q --ff-only '$SHA'"
+INSTALL_NO_PULL=1 /opt/watcher/deploy/install.sh "$PROJECT" >/dev/null
+say "code at $(su - watcher -c 'git -C /opt/watcher log --oneline -1')"
 
 # The project and its lanes, from the project files now on disk (after the pull, so a lane
 # added by this very version is rolled too). A lane's unit that was never enabled is
@@ -147,4 +169,8 @@ for name in "${TO_START[@]+"${TO_START[@]}"}"; do
   say "starting $unit on the new code"
   systemctl enable --now "$unit"
 done
-say "done."
+if [ "$BRANCH" = main ]; then
+  say "done; the deployer is back on."
+else
+  say "done. The deployer is OFF while the box is on $BRANCH: run this again for main to turn it back on."
+fi

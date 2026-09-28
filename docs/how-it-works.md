@@ -171,10 +171,13 @@ its own board"). The three things that make a loop editing itself safe enough:
 - **Two copies.** The lane's `PROJECT_ROOT` is `/home/watcher/projects/watcher`, a clone
   of its own. `/opt/watcher` is what every lane runs. A tick edits the clone, never the
   running copy.
-- **The deploy is the gate.** A merge lands on `main`, and `main` goes live only when Steve
-  runs `rollout.sh`. A rollout of any project pulls `/opt/watcher` for all of them.
-- **The merge gate is never self-merged.** A change to CI, the reviewer, the merge rules or
-  the hard rules below is built and reviewed, then parked in Stuck for Steve to merge.
+- **The deploy is the gate.** A merge lands on `main`; `main` goes live only through
+  `deploy/autodeploy.sh`, which ships a commit once `verify` passed on it, the replay suite
+  passed on it in a scratch clone (the new prompts, tested before any lane uses them), and
+  every lane on the box is idle. One deploy moves `/opt/watcher` for every project.
+- **The merge gate is never self-merged.** A change to CI, the reviewer, the merge rules,
+  the hard rules below, anything under `deploy/`, or an existing replay case is built and
+  reviewed, then parked in Stuck for Steve to merge. Adding a new case may merge itself.
 
 `WIP_MAX=1` there: one watcher card in flight at a time, so two changes to the loop's rules
 never race each other to `main`.
@@ -377,8 +380,10 @@ its own `.claude/agents/`, its own CI, and can override `/watch` with its own
 `.claude/commands/watch.md`. The generic `/watch` reads the project's `CLAUDE.md` for the
 names it needs (the CI check, the contracts it must not touch, the spend receipt if any).
 
-Deploying a new watcher version is `deploy/rollout.sh <project> [branch]`: it pulls,
-pauses every lane of the project, waits for each lane's running tick to finish, restarts
-that lane's unit, un-pauses it. It never signals a tick. The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
+Deploying a new watcher version happens by itself: `watcher-deploy.timer` runs
+`deploy/autodeploy.sh`, which ships `main` when `verify` and the replay suite pass on the
+commit and every lane is idle (README, "Deploys happen by themselves"). A held commit is a
+Stuck card on the Watcher board. `deploy/rollout.sh` is the manual fallback for a session;
+it stops the deployer's timer while it runs. Neither ever signals a tick. The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
 the tick as `WATCHER_HOME`, so `cat "$WATCHER_HOME/docs/talking-to-steve.md"` works from any
 worktree.

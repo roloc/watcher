@@ -11,16 +11,14 @@
 #
 # WHERE THIS RUNS: never CI (`.github/workflows/ci.yml`'s own header explains why — PR code
 # never runs on the box holding credentials) and never as part of an ordinary tick's turns.
-# It runs by hand, and from `deploy/rollout.sh` after the pull and before any lane's UNIT is
-# restarted (recommended option A on the card). That is a narrower guarantee than it sounds:
-# `deploy/install.sh` has already refreshed the `~/.claude/commands` symlink by the time this
-# runs, so a prompt change that fails the suite is already live for the NEXT tick any
-# still-running lane launches on its own, before rollout.sh ever pauses it — same as it was
-# before this suite existed. What the gate actually buys is not touching the lane's systemd
-# unit (so `bin/spawn.sh` itself, if that also changed, never restarts) and a loud "do not
-# proceed" for whoever is running the rollout. `EVAL_SKIP=1 deploy/rollout.sh …` skips the
-# gate — the suite costs real quota and a flaky live case (see the note below) should not be
-# able to block Steve's only deploy path.
+# It runs by hand, and from the deployer (`deploy/autodeploy.sh`, and `deploy/rollout.sh`,
+# its manual fallback) in a SCRATCH clone at the commit about to go live, before
+# /opt/watcher moves: this script copies the prompts from the checkout it runs in, so that
+# tests the new prompts while every lane is still on the old ones. (Until September 28,
+# 2026 rollout.sh ran it in /opt/watcher after the pull, when the new prompts were already
+# live.) A commit that fails twice is held with a Stuck card; `deploy-anyway` on the card
+# ships it, and `EVAL_SKIP=1 deploy/rollout.sh …` skips it by hand — a flaky live case (see
+# the note below) should not be able to jam every deploy.
 #
 # WHAT A CASE IS: a directory-free single file under evals/cases/, sourced into a fresh
 # subshell-free scope with these already set: $TMP (its own scratch dir), $ORIGIN (an empty
@@ -61,7 +59,7 @@ EVALS="$REPO/evals"
 export FAKEHUB_PY="$EVALS/fakehub.py"
 
 # A live tick needs CLAUDE_CODE_OAUTH_TOKEN. The spawner's own ticks get it from systemd's
-# EnvironmentFile, but this script also runs by hand and from `deploy/rollout.sh` (as root,
+# EnvironmentFile, but this script also runs by hand and from the deployer (as root,
 # via `su - watcher`), neither of which sources it — so read it here if the caller's shell
 # does not already have it. Harmless where it does not exist (a laptop, CI never runs this).
 if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -r /etc/watcher/env ]; then
@@ -188,10 +186,20 @@ run_case() {
   mkdir -p "$WORKTREE/.claude/commands" "$WORKTREE/.claude/agents"
   cp "$REPO"/commands/*.md "$WORKTREE/.claude/commands/"
   cp "$REPO"/agents/*.md "$WORKTREE/.claude/agents/"
+  # The USER-level commands and agents too. On the box the watcher user's ~/.claude links to
+  # /opt/watcher — the prompts every lane is running now — and a personal /watch can win
+  # over a project one of the same name. A config dir of the case's own, pointing at this
+  # checkout, makes both levels the prompts under test, so precedence cannot matter. The
+  # login still comes from CLAUDE_CODE_OAUTH_TOKEN, which never lived in that directory.
+  local cfg="$TMP/claude-config"
+  mkdir -p "$cfg"
+  ln -s "$REPO/commands" "$cfg/commands"
+  ln -s "$REPO/agents" "$cfg/agents"
 
   local out="$TMP/result.json" err="$TMP/result.stderr" rc=0
   ( cd "$WORKTREE" && \
     PATH="$EVALS/stub-bin:$PATH" \
+    CLAUDE_CONFIG_DIR="$cfg" \
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
     WATCHER_HOME="$REPO" \
     timeout "$CASE_TIMEOUT" "$CLAUDE_BIN" -p "$CASE_COMMAND" \

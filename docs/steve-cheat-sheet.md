@@ -125,19 +125,21 @@ user mention (`<@your-id>`) or `@here`.
 - **The watcher works its own cards too,** on the
   [Watcher board](https://github.com/users/roloc/projects/2). Same columns, same rules.
 - **One card at a time** there, separate from riffmap's two.
-- **Nothing it merges is live until you deploy** (next section). It says on the card
-  whether a change needs a deploy.
+- **What it merges goes live by itself** once the checks pass and the bots are idle
+  (next section).
 - **It never merges a change to its own safety checks.** Those come to you in **Stuck**
-  with the PR link: the build check, the reviewer, and the merge rules.
+  with the PR link: the build check, the reviewer, the merge rules, the deployer, and the
+  tests the deployer runs.
 
-## Deploy a new watcher version
+## New watcher versions deploy themselves
 
-- One command, as root on the box: `/opt/watcher/deploy/rollout.sh riffmap`
-- It covers every lane. Each lane waits for its own running tick to finish, then swaps.
-  It never kills one.
-- Add a branch name at the end to deploy a branch before it merges.
-- **Any deploy ships everything merged on the Watcher board**, for every project.
-  `/opt/watcher/deploy/rollout.sh watcher` restarts the watcher's own lane.
+- **You never deploy.** The box checks for a new version every five minutes.
+- It ships one only when **the build check passed**, **the bots' tests passed**, and
+  **no bot is in the middle of a card**. It never interrupts one.
+- **If a version fails its checks,** a card lands in **Stuck** saying which one. Move it to
+  **In progress** to have the watcher fix it, or add the **deploy-anyway** label to ship it.
+- **To turn deploys off,** on the box: `systemctl stop watcher-deploy.timer` (`start` turns
+  them back on).
 
 ## Pause, resume, logs
 
@@ -153,6 +155,7 @@ journalctl -u watcher@riffmap -f
 journalctl -u watcher@riffmap-design -f
 journalctl -u watcher@riffmap-triage -f
 journalctl -u watcher@watcher -f          # the watcher's own lane
+journalctl -u watcher-deploy -n 30        # what the deployer last did
 
 # what did the last tick say, and how much quota it used (not a bill — the box is on your subscription)
 ls -t ~watcher/.local/state/watcher/riffmap/logs/ | head

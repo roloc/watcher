@@ -36,7 +36,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
     projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, PROJECT_REPO,
                           WORKTREE_COPY_DIRS, and LANE_AGENTS for a lane
     deploy/watcher@.service, deploy/install.sh
-    deploy/rollout.sh     deploy a new version without killing a running tick (see below)
+    deploy/autodeploy.sh  THE deploy path: ships main by itself when every lane is idle (see below)
+    deploy/watcher-deploy.service, .timer   run it every five minutes
+    deploy/rollout.sh     the manual fallback, for a Claude session (see below)
+    bin/test-deploy.sh    the deployer's cases, offline, every external command stubbed
 
 A project keeps its own `CLAUDE.md`, `.claude/agents/` and CI; the watcher brings the loop.
 
@@ -50,7 +53,7 @@ cards it waits on, and stops, so the right lane starts within a minute whatever 
 are doing. The lists are one list (`DESIGN_AGENTS`, defined once) plus `-` named once, so
 no card can ever belong to two lanes and each instance's pidfile stays the only lock. Each
 lane is its own unit (`watcher@riffmap`, `watcher@riffmap-design`, `watcher@riffmap-triage`)
-with its own state directory; `rollout.sh` rolls them all. Details in
+with its own state directory; a deploy restarts them all. Details in
 `docs/how-it-works.md`, "Lanes".
 
 **Dependencies.** A card GitHub says is *blocked by* an open issue (the issue's
@@ -157,19 +160,47 @@ nothing beyond bash and python3.
   again as soon as the box is up.
 - Never point it at the agents box.
 
-Deploying is deliberately not a CI job — see below: `rollout.sh` waits for a running tick to
-finish on its own, which is a decision about live work, not a pipeline step.
+Deploying is deliberately not a CI job: it would need a runner on the agents box. CI's
+`verify` is instead the first thing the box's deployer checks — see below.
 
-## Deploy a new version (without killing a running tick)
+## Deploys happen by themselves
+
+**Nobody runs a deploy.** `watcher-deploy.timer` runs `deploy/autodeploy.sh` every five
+minutes on the box (as root; everything git and GitHub it does as the watcher user). Each
+run is one step, idempotent, so an interrupted one is picked up by the next:
+
+1. A new commit on `main`? Otherwise nothing, and nothing in the journal.
+2. `verify` green on that exact commit (pending: wait).
+3. The replay suite (`bin/eval.sh`) green on it, **in a scratch clone at that commit**,
+   before anything goes live. Skipped when the commits touch nothing a model reads
+   (`commands/ agents/ docs/ evals/ bin/eval.sh CLAUDE.md`). One failure is retried.
+4. **Every lane on the box idle.** Then each lane is paused (a `PAUSE` that says `deploy
+   <sha>`), and after one poll interval checked again. Lanes still busy after
+   `DEPLOY_DRAIN_AFTER_MIN` (240) are paused anyway and their ticks finish on their own.
+5. `/opt/watcher` fast-forwards to exactly that commit, `install.sh` runs without its own
+   pull, every running lane restarts, a lane file the commit added starts last, and only
+   the deployer's own `PAUSE` files are removed. A `PAUSE` you made stays.
+
+A **held** commit — red `verify`, the suite failing twice, or a box checkout that cannot
+fast-forward — gets one card on the Watcher board in **Stuck**. Move it to In progress and
+the watcher fixes the cause; add the `deploy-anyway` label and the next run ships it. A
+later commit that deploys closes it as superseded. Nothing here ever signals a tick.
+
+    journalctl -u watcher-deploy -n 30        # what the deployer last did
+    systemctl stop watcher-deploy.timer       # turn it off; `start` turns it back on
+
+State is in `/var/lib/watcher-deploy/`. Knobs (environment on the unit): `DEPLOY_EVALS=0`,
+`DEPLOY_DRAIN_AFTER_MIN`, `DEPLOY_GRACE_SEC`.
+
+**The manual fallback**, for a Claude session when the deployer itself is broken or to try
+a branch on the box before it merges — never for Steve:
 
     /opt/watcher/deploy/rollout.sh riffmap            # main
     /opt/watcher/deploy/rollout.sh riffmap <branch>   # a branch, before it merges
 
-It pulls the code, pauses the spawner, **waits for the running tick to finish on its own**,
-restarts the unit, and un-pauses. It never signals a tick. The new `/watch`, reviewer and
-docs are live for the next tick as soon as the pull lands; only `spawn.sh` itself needs the
-restart. If a tick is still running after 170 minutes it gives up, leaves the spawner
-paused, and tells you to run it again.
+It stops the deployer's timer, runs the suite in a scratch clone, moves the code, pauses,
+**waits for each running tick to finish on its own**, restarts, un-pauses, and turns the
+timer back on only when it deployed `main`. After a branch, run it again for `main`.
 
 ## Add a project
 
@@ -192,4 +223,4 @@ Nothing here is riffmap-shaped, but two settings are worth knowing before the fi
 To split it into lanes, add
 `projects/<name>-<lane>.env` that sources `<name>.env` and sets `PROJECT_NAME=<name>-<lane>`
 and `LANE_AGENTS`, give `<name>.env` the complementary `!` list, and enable
-`watcher@<name>-<lane>` too; `rollout.sh <name>` finds the lane by the file name.
+`watcher@<name>-<lane>` too; the deployer starts a lane file the moment a commit adds it.

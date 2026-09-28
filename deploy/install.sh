@@ -11,7 +11,11 @@ set -euo pipefail
 REPO_URL="${WATCHER_REPO:-https://github.com/roloc/watcher.git}"
 id watcher >/dev/null 2>&1 || useradd -m -s /bin/bash watcher
 
-if [ -d /opt/watcher/.git ]; then
+if [ -d /opt/watcher/.git ] && [ "${INSTALL_NO_PULL:-0}" = 1 ]; then
+  # deploy/autodeploy.sh has already moved the checkout to the exact commit CI and the
+  # replay suite passed; a pull here could take it past that commit to one nothing checked.
+  :
+elif [ -d /opt/watcher/.git ]; then
   # As the watcher user: it holds the gh login, and the checkout is its own.
   su - watcher -c "git -C /opt/watcher pull -q --ff-only" || echo "warning: /opt/watcher pull failed (watcher user not logged in to gh yet?) — using what is there" >&2
 elif [ ! -d /opt/watcher ]; then
@@ -37,7 +41,16 @@ B
 chmod 755 /usr/local/bin/board
 
 install -m 644 /opt/watcher/deploy/watcher@.service /etc/systemd/system/watcher@.service
+# The deployer (deploy/autodeploy.sh): a timer that ships main by itself when the lanes are
+# idle. Enabled here, so a box set up from scratch deploys itself from its first boot.
+install -m 644 /opt/watcher/deploy/watcher-deploy.service /etc/systemd/system/watcher-deploy.service
+install -m 644 /opt/watcher/deploy/watcher-deploy.timer /etc/systemd/system/watcher-deploy.timer
 systemctl daemon-reload
+# Only the first time: rollout.sh stops the timer while a person drives, and a re-install
+# from inside it must not start it again behind their back.
+systemctl is-enabled --quiet watcher-deploy.timer 2>/dev/null \
+  || systemctl enable --now watcher-deploy.timer >/dev/null 2>&1 \
+  || echo "warning: could not enable watcher-deploy.timer" >&2
 
 for p in "$@"; do
   f="/opt/watcher/projects/$p.env"

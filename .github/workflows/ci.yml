@@ -19,10 +19,11 @@ name: CI
 # share runners: pointing at it queues every check forever. Unset the variable to fall back
 # to GitHub-hosted if the ci box is down. Never set it to the agents box.
 #
-# Deploying is NOT here and should not be: rollout.sh must pause a lane, wait for a running
-# tick to finish on its own, and restart the unit, which is a decision about live work
-# rather than a step in a pipeline. It stays a hand-run command (README, "Deploy a new
-# version").
+# Deploying is NOT here and should not be. A deploy job would need a runner on the agents
+# box, which is exactly the box PR code must never reach. Instead this job's result is the
+# first thing the box's own deployer reads (deploy/autodeploy.sh): it ships a main commit
+# only when `verify` passed on it, then only when every lane is idle. CI decides whether a
+# commit may ship; the box decides when.
 
 on:
   pull_request:
@@ -45,15 +46,18 @@ jobs:
       - uses: actions/checkout@v4
 
       # A syntax error in any of these is a broken box, not a failed test: spawn.sh is what
-      # systemd runs, and install.sh and rollout.sh are what put it there.
+      # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/worktree.sh bin/test-spawn.sh deploy/install.sh deploy/rollout.sh; do
+          for f in bin/spawn.sh bin/worktree.sh bin/test-spawn.sh bin/test-deploy.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 
       - name: The spawner suite
         run: bash bin/test-spawn.sh
+
+      - name: The deployer suite
+        run: bash bin/test-deploy.sh
 
       - name: The Discord suite
         run: python3 bin/test-notify.py

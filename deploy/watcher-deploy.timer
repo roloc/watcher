@@ -1,0 +1,11 @@
+# Every five minutes: fetch main, and move it one step closer to live.
+[Unit]
+Description=Deploy the watcher's main when every lane is idle
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

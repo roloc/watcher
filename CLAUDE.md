@@ -27,13 +27,19 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `board` — no network, ever). **Run it after any change to those three files:**
   `bash bin/eval.sh` (exit 0 = all cases hold; `bin/eval.sh <name>` for one case). It costs
   real quota (each case is a full tick) and needs a Claude login, so it never runs in CI —
-  `deploy/rollout.sh` runs it after the pull and before any lane restarts, and a failure
-  stops the rollout cold. The playbook: every future incident that changes one of those
+  `deploy/autodeploy.sh` runs it on every new `main` commit that touches what a model reads,
+  in a scratch clone at that commit, before anything goes live; a commit that fails it
+  twice is held and never deployed. The playbook: every future incident that changes one of those
   three files adds its case in the same PR (`bin/eval.sh`'s own header has the how-to, and
   the caveat about what a case does and does not prove).
 - `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
   (`steve-cheat-sheet.md`).
-- `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (deploy without
+- `deploy/autodeploy.sh` — **the deploy path.** A timer on the box (`watcher-deploy.timer`)
+  ships `main` by itself: `verify` green on the commit, the replay suite green in a scratch
+  clone, then every lane idle. Nobody runs a deploy by hand. `bash bin/test-deploy.sh` is
+  its offline suite (CI runs it); run it after touching the file.
+- `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (the manual
+  fallback: deploy without
   killing a running tick: pull, pause, wait, restart, un-pause, per lane), one env file per
   systemd instance. A project with two lanes has two files; the lane file sources the
   project file and sets `PROJECT_NAME` and `LANE_AGENTS`, nothing else. `projects/watcher.env`
@@ -73,22 +79,28 @@ above:
   changing, `$WATCHER_HOME`'s for how to behave.
 - **Never write outside your worktree.** Not `/opt/watcher`, not another project's
   checkout, not a lane's state directory (`~/.local/state/watcher/`), not a `PAUSE` file,
-  not `/etc/watcher/`. Never `systemctl`, never `deploy/rollout.sh`. **Reading** the state
+  not `/etc/watcher/`. Never `systemctl`, never `deploy/rollout.sh` or
+  `deploy/autodeploy.sh`. **Reading** the state
   directories and `journalctl -u 'watcher@*'` is fine, and it is how a card about the loop's
   behavior goes and looks instead of asking (`watch.md`: a fact is not a product decision).
-- **Deploying is Steve's.** A merge changes nothing on the box until he runs `rollout.sh`,
-  and a rollout of *any* project pulls `/opt/watcher` for *every* project. So the PR body
-  and the Done comment say, in plain words, whether the change needs a rollout to take
-  effect (anything under `bin/`, `commands/`, `agents/`, `deploy/`, `projects/`), and
-  whether `bin/spawn.sh` changed (that one also needs the lane restart `rollout.sh` does).
+- **Deploying is the deployer's, never yours.** A merge goes live by itself, for *every*
+  project on the box, the next time all lanes are idle — after `verify` and, when the change
+  touches what a model reads, the replay suite pass on it (`deploy/autodeploy.sh`). So the
+  PR body and the Done comment say, in plain words, that it goes live on its own once the
+  lanes are idle, and flag anything that changes how every lane behaves (`commands/`,
+  `agents/`, `bin/spawn.sh`).
 - **A watcher card's symptom is re-checked by a test, not live.** The fix is not running
-  until a rollout, so `watch.md`'s "a symptom card is not done until its symptom is checked
+  until the deployer ships it, so `watch.md`'s "a symptom card is not done until its symptom is checked
   again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, or a replay
   case in `bin/eval.sh` (card [#34](https://github.com/roloc/watcher/issues/34)) — failing
   on `main` and passing on the branch. Say which case, in one sentence, in the PR.
 - **A change to the merge gate is built, but not merged.** The gate is
   `.github/workflows/`, `agents/reviewer.md`, the ship-and-merge rules in
-  `commands/watch.md` §3, and "Hard rules for every agent" in `docs/how-it-works.md`.
+  `commands/watch.md` §3, "Hard rules for every agent" in `docs/how-it-works.md`,
+  **everything under `deploy/`** (the deployer is what decides a change may go live), and
+  **the replay suite** (`bin/eval.sh`, `evals/`), with one exception: a PR that only
+  **adds** new cases under `evals/cases/` may merge itself, since it can only make the gate
+  stricter. Editing or removing an existing case is a gate change.
   Build it, run the reviewer, get `verify` green, then park the card in Stuck (§4) with the
   PR under **Look:**, asking Steve to merge it. This is the contract `watch.md` §4 means by
   "not a builder's call": `bin/eval.sh`'s cases as of card #34 are all `/watch` cases —

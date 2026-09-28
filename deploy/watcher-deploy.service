@@ -1,0 +1,14 @@
+# The deployer: deploy/autodeploy.sh, one step per run. Started by watcher-deploy.timer.
+# Runs as root because it restarts the watcher@ units; everything it does to git and GitHub
+# it does as the watcher user (su - watcher), which holds the checkout and the gh login.
+[Unit]
+Description=Deploy the watcher's main when every lane is idle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/watcher/deploy/autodeploy.sh
+StateDirectory=watcher-deploy
+# The replay suite runs live ticks (up to ~8 min a case); a run can take a while.
+TimeoutStartSec=90min
