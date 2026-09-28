@@ -15,6 +15,7 @@ short version.
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
 | **Discord** | `bin/notify.py` | imported by the board CLI | posts a card's stage and column changes, and the Stuck alert, to Steve's channel — when a webhook is configured |
+| **Metrics** | `bin/metrics.py` | run by hand, on the box | read-only report over a lane's own logs: first-pass merge rate, park rate, deaths, turns/quota and time to Done, per week |
 | **Steve** | a human | GitHub, on his phone | moves cards, answers Stuck cards, owns every product decision |
 
 Steve is the only human. Everything else is a bot. The box the bots run in is throwaway and

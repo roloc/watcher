@@ -97,6 +97,7 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 | 🤖 **FYI:** I labeled this for the … lane | the triage bot picked the lane | nothing, unless you disagree — then change the label |
 | 🤖 **FYI:** not doing this yet — the card gates itself | the card's own text says to wait; the bot obeyed and put it back in Backlog | nothing, unless the wait is over — then edit that line out and move it to Ready |
 | 🤖 **FYI:** this card waits on … | it is blocked by an open card; it starts when that closes | nothing, unless that card is not on its way |
+| 🤖 **FYI:** plan for this card | what the bot is about to build, in three lines, before it starts | nothing, unless it doesn't match what you asked for |
 | 🤖 **FYI:** | information only | nothing |
 | 🤖 Watcher: the run ended without finishing | the tick died or ran out of budget; the card will be retried once | nothing, unless it happens twice |
 | 🤖 Watcher: a run died while holding this card | cleanup after a crash | nothing |
@@ -140,6 +141,34 @@ user mention (`<@your-id>`) or `@here`.
   **In progress** to have the watcher fix it, or add the **deploy-anyway** label to ship it.
 - **To turn deploys off,** on the box: `systemctl stop watcher-deploy.timer` (`start` turns
   them back on).
+
+## How well the bots are doing
+
+A report, run by hand, adds up what every past run already said about itself. **It never
+posts anywhere on its own** — nothing pings you about it; you ask for it when you want it.
+
+- **First-pass merge rate** — of the cards that made it all the way to Done, how many did
+  it in one run, no do-overs.
+- **Parked** — split two ways: parked by a bot with a real question for you, and parked
+  because it tried the same card twice in a row and gave up either time.
+- **Died** — a run that crashed or ran out of room before it could finish.
+- **Turns and quota per shipped card** — the typical and the worst it took, in bot turns
+  and quota, to get one card all the way to Done.
+- **Time from start to Done** — the typical and the worst wall-clock time, including any
+  stretch a card spent sitting in Stuck waiting on you.
+
+<details><summary>Command (on the box)</summary>
+
+```
+python3 /opt/watcher/bin/metrics.py ~watcher/.local/state/watcher/riffmap
+python3 /opt/watcher/bin/metrics.py ~watcher/.local/state/watcher/riffmap ~watcher/.local/state/watcher/riffmap-design --weeks 4
+```
+
+One state directory per lane (riffmap, riffmap-design, riffmap-triage, watcher); give it
+several to see them side by side. `--weeks N` sets how many weeks the weekly table covers
+(default 8).
+
+</details>
 
 ## Pause, resume, logs
 

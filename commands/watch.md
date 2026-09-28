@@ -65,9 +65,32 @@ You are in the card's worktree already (`git rev-parse --show-toplevel`); never 
 another. Read the card, read the project's `CLAUDE.md`, then do the work yourself — a
 decision card gets a written decision in `docs/`, an implementation card gets code and
 tests. Use the project's own subagents (`.claude/agents/`) when the card's `agent:` label
-names one; otherwise you are the builder. Build and test locally before opening the PR.
-Run `reviewer` once on the branch when the change touches source or scripts; fix what it
-marks blocking, take or leave the nits. Docs-only changes get no review.
+names one; otherwise you are the builder.
+
+**Write the plan before the first edit.** Before you touch a file, write down: the files
+that will change, in order; the test or check that proves the card is done (for a symptom
+card, the artifact you will re-fetch, §3); and the one risk you expect. Tell Steve you're
+starting — plain words, no paths above the fold (`docs/talking-to-steve.md` rule 7):
+
+```
+🤖 **FYI:** plan for this card.
+- Files: <what's changing, in a sentence>
+- Test: <what proves it's done, in a sentence>
+- Risk: <the one thing most likely to go wrong>
+```
+
+Keep the exact list — real paths, the real check — for the PR body under `## Plan` (§3)
+and for `reviewer`, which you hand it to directly when you call it; the card comment is for
+Steve, not for `reviewer` to read back. The plan is a claim you're about to test, not
+evidence: it is not a contract, and `reviewer` reads the diff first regardless. If the
+build diverges, update both copies and say why in one line — an unexplained divergence,
+not a changed plan, is what `reviewer` checks for. Skip all of this for a card whose build
+produces no diff to review — a docs-only or relabel-only tick, a decision card whose only
+output is the doc itself.
+
+Build and test locally before opening the PR. Run `reviewer` once on the branch when the
+change touches source or scripts — hand it the plan when you wrote one — fix what it marks
+blocking, take or leave the nits. Docs-only changes get no review.
 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
@@ -248,6 +271,10 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
+- **If §2 gave the card a plan, the PR body carries it too**, under `## Plan` — the real
+  file list and check this time, not the plain-word version from the FYI comment. Diverged
+  from it while building? Update `## Plan` in place with the one-line reason, rather than
+  leaving the original text to go stale.
 - **A symptom card is not done until the symptom is checked again.** A card that reports
   something *observed* — a page that looks wrong, a number that is off, a screen showing
   what it should not — names the artifact that shows it, and §2 had you look at that
