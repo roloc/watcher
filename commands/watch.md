@@ -284,18 +284,27 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   - **The symptom is gone**: say so, and close the card the normal way (`Closes #<n>`,
     merge).
   - **The symptom is still there: the card does not close** — even when the change is
-    correct, the reviewer is happy and CI is green. Its PR body says **`Refs #<n>`, never
+    correct, the reviewer is happy, CI is green, and even when you have a good reason the
+    artifact hasn't moved yet. **The reason is not the evidence — only the artifact is.**
+    "It's deploy-gated," "the cache hasn't refreshed," "this can't restart from here":
+    every one of those may be true, and none of them is the artifact showing the fix. If
+    you find yourself reasoning from the explanation instead of from what you just
+    fetched, that is the exact judgment call this rule exists to forbid — stop, and answer
+    only "what does the artifact show right now." Its PR body says **`Refs #<n>`, never
     `Closes #<n>`**, so the merge leaves the card open; merge it, then go to **Stuck** (§4)
-    with what was built, what you expected the artifact to show, and what it still shows.
+    with what was built, what you expected the artifact to show, what it still shows, and
+    the reason it hasn't moved if you have one — that reason belongs in the Stuck comment,
+    never as grounds to write `Closes` instead.
     **A correct fix for the wrong cause is the outcome this rule exists to catch.**
   - **A card with no observable symptom** — a refactor, a doc, a decision, a piece of
     tooling — is unaffected. There is nothing to fetch and nothing to re-check.
-  - If the artifact cannot move until the merge deploys, fetch it anyway and read it
-    against the change you made. What you are checking is **whether the thing you changed
-    is the thing the artifact shows**, and that is answerable before the deploy: a veto
-    with nothing to veto, a ruler that never drew, a branch never reached leaves its trace
-    in the artifact you were given. Green tests say the code does what you wrote; only the
-    artifact says you wrote the right thing.
+  - **The artifact cannot move until the merge deploys? Fetch it anyway — knowing why
+    upgrades nothing.** Deploy-gating is never a reason to skip the fetch or to write
+    `Closes` on the strength of the explanation alone. What you are checking is **whether
+    the thing you changed is the thing the artifact shows**, and that is answerable before
+    the deploy: a veto with nothing to veto, a ruler that never drew, a branch never
+    reached leaves its trace in the artifact you were given. Green tests say the code does
+    what you wrote; only the artifact says you wrote the right thing.
 - **When the last card spawned from a root card closes, re-check the root's own symptom.**
   Walk the chain up (§2), fetch the root's artifact, and comment what it now shows on the
   **root card**. A root whose children all closed green while its symptom survives is the
