@@ -47,7 +47,7 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `bin/detect.sh` — the product detector (card #36): no model, one metric, a rolling
   baseline, fixed bands; a large breach files a Backlog card, never more than one while it
   stays open. Opt-in per project via `projects/<name>.detect.env` and
-  `systemctl enable --now watcher-detect@<name>` (`deploy/watcher-detect@.service`, `.timer`
+  `systemctl enable --now watcher-detect@<name>.timer` (`deploy/watcher-detect@.service`, `.timer`
   — installed by `install.sh`, never enabled by it). `bash bin/test-detect.sh` is its
   offline suite (CI runs it); run it after touching `detect.sh`. Detail in
   `docs/how-it-works.md`, "Watching the product".

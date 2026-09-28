@@ -46,6 +46,8 @@ EOF
 cat > "$BIN/board" <<'EOF'
 #!/usr/bin/env bash
 echo "board $*" >> "$CALLS"
+[ "$1" = move ] && [ -f "$TMP/board-move-fails" ] && exit 1
+exit 0
 EOF
 chmod +x "$BIN"/*
 export PATH="$BIN:$PATH"
@@ -87,7 +89,8 @@ called()     { grep -q -- "$1" "$CALLS"; }
 not_called() { ! grep -q -- "$1" "$CALLS"; }
 count()      { grep -c -- "$1" "$CALLS"; }
 fresh() {
-  rm -rf "$STATE" "$TMP/issue-state" "$TMP/next-issue" "$TMP/item-add-fails" "$TMP/last-body"
+  rm -rf "$STATE" "$TMP/issue-state" "$TMP/next-issue" "$TMP/item-add-fails" "$TMP/last-body" \
+         "$TMP/board-move-fails"
   mkdir -p "$STATE"
   no_conf
 }
@@ -131,7 +134,15 @@ check "large breach: put on the right board"            called "gh project item-
 check "large breach: moved into Backlog (the Discord post)" called "board move 701 Backlog"
 check "large breach: the card names the Look url"       grep -q "https://example.test/look" "$TMP/last-body"
 
+# 5b. The board move fails after the card is filed: says so, does not lie about Backlog
+fresh; conf 5 1 0.3 0.6; metric 1; next_issue 801; touch "$TMP/board-move-fails"
+run
+check "board move fails: the card still exists"         called "gh issue create -R roloc/testproj"
+check "board move fails: does not claim it landed"      out_lacks "filed .* in Backlog"
+check "board move fails: says to check by hand"         out_has "could not put it on the board"
+
 # 6. Still breaching, same card still open: no second card
+fresh; conf 5 1 0.3 0.6 "https://example.test/look"; metric 1; next_issue 701; run
 issue_state OPEN
 run
 check "still open: no second card"                      [ "$(count 'issue create')" = 0 ]

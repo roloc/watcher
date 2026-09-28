@@ -1,9 +1,10 @@
-# One detector instance per project: `systemctl enable --now watcher-detect@riffmap`.
-# Reads projects/%i.detect.env; a project with no such file makes bin/detect.sh exit 0
-# immediately, so enabling this for one that has not opted in is harmless but pointless.
-# Unlike watcher@.service this is Type=oneshot, driven by watcher-detect@.timer, not a
-# long-running process — a deploy that updates /opt/watcher needs no restart here, the
-# next timer firing just runs the new code.
+# One detector instance per project: `systemctl enable --now watcher-detect@riffmap.timer`
+# (this unit carries no [Install] section — it is driven by the timer, not enabled itself,
+# the same shape as watcher-deploy.service/.timer). Reads projects/%i.detect.env; a
+# project with no such file makes bin/detect.sh exit 0 immediately, so enabling this for
+# one that has not opted in is harmless but pointless. Unlike watcher@.service this is
+# Type=oneshot — a deploy that updates /opt/watcher needs no restart here, the next timer
+# firing just runs the new code.
 [Unit]
 Description=Regression detector for %i
 After=network-online.target

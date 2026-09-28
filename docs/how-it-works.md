@@ -365,8 +365,9 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   run.
 - **Opt-in, per project, off by default.** `deploy/install.sh` installs
   `watcher-detect@.service`/`.timer` but never enables an instance; a project starts
-  watching itself with `systemctl enable --now watcher-detect@<project>` once its
-  `.detect.env` exists. `bin/test-detect.sh` is the offline suite — a stubbed metric source
+  watching itself with `systemctl enable --now watcher-detect@<project>.timer` once its
+  `.detect.env` exists (the `.service` carries no `[Install]` — it is driven by the timer,
+  the same shape as `watcher-deploy.service`/`.timer`). `bin/test-detect.sh` is the offline suite — a stubbed metric source
   crossing each band, run against stubbed `gh`/`board` — and CI runs it the same as the
   other two.
 

@@ -47,7 +47,7 @@ install -m 644 /opt/watcher/deploy/watcher-deploy.service /etc/systemd/system/wa
 install -m 644 /opt/watcher/deploy/watcher-deploy.timer /etc/systemd/system/watcher-deploy.timer
 # The detector (bin/detect.sh, card #36): installed but never enabled here — a project opts
 # in with its own projects/<name>.detect.env, then `systemctl enable --now
-# watcher-detect@<name>` by hand (see "Next, by hand" below).
+# watcher-detect@<name>.timer` by hand (see "Next, by hand" below).
 install -m 644 /opt/watcher/deploy/watcher-detect@.service /etc/systemd/system/watcher-detect@.service
 install -m 644 /opt/watcher/deploy/watcher-detect@.timer /etc/systemd/system/watcher-detect@.timer
 systemctl daemon-reload
@@ -91,5 +91,5 @@ Next, by hand:
   4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f
   Pause:      touch ~watcher/.local/state/watcher/<project>/PAUSE
   Detector:   optional. If projects/<project>.detect.env exists (card #36):
-              systemctl enable --now watcher-detect@<project>
+              systemctl enable --now watcher-detect@<project>.timer
 NEXT

@@ -55,7 +55,7 @@ mkdir -p "$STATE"
 READINGS="$STATE/readings"
 FILED="$STATE/filed"
 
-value="$(cd "$WATCHER_DIR" && timeout 60 bash -c "$DETECT_METRIC_CMD" 2>>"$STATE/error.log")"
+value="$(cd "$WATCHER_DIR" && timeout 60 bash -c "$DETECT_METRIC_CMD" 2>"$STATE/error.log")"
 if ! [[ "$value" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
   say "the metric command produced no number (${value:-empty}); skipping this run"
   exit 0
@@ -139,9 +139,9 @@ if ! [[ "$iss" =~ ^[0-9]+$ ]]; then
 fi
 echo "$iss" > "$FILED"
 
-if gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" >/dev/null 2>&1; then
-  board move "$iss" Backlog >/dev/null 2>&1
+if gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" >/dev/null 2>&1 \
+   && board move "$iss" Backlog >/dev/null 2>&1; then
   say "filed $url in Backlog"
 else
-  say "filed $url but could not put it on the board"
+  say "filed $url but could not put it on the board (it still exists — check it by hand)"
 fi
