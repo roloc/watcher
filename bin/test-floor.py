@@ -96,6 +96,14 @@ PROJECT_REPO=roloc/third
 BOARD_NUMBER=4
 """)
 
+write_env("fourth", """\
+PROJECT_NAME=fourth
+PROJECT_ROOT=/x
+BOARD_OWNER=roloc
+PROJECT_REPO=roloc/fourth
+BOARD_NUMBER=5
+""")
+
 # A file that is not a project file at all — must be silently skipped, not crash discovery.
 write_env("scratch-notes", "SOME_VAR=hello\n")
 
@@ -103,8 +111,9 @@ write_env("scratch-notes", "SOME_VAR=hello\n")
 print("1. discover_lanes reads projects/*.env as bash, interpolation and sourcing included")
 lanes = floor.discover_lanes(PROJECTS, STATE)
 by_name = {l["lane"]: l for l in lanes}
-check("six real lanes found, the stray file skipped",
-      sorted(by_name) == ["riffmap", "riffmap-design", "riffmap-triage", "second", "third", "watcher"],
+check("seven real lanes found, the stray file skipped",
+      sorted(by_name) == ["fourth", "riffmap", "riffmap-design", "riffmap-triage",
+                           "second", "third", "watcher"],
       str(sorted(by_name)))
 check("riffmap-design's LANE_AGENTS is riffmap's own DESIGN_AGENTS, expanded",
       by_name["riffmap-design"]["lane_agents"] == "architect,designer",
@@ -137,7 +146,8 @@ check("...and nothing else", floor.lane_takes("designer", "-") is False)
 print("4. group_by_project groups riffmap's three lanes under one board, by owner+number")
 projects = floor.group_by_project(lanes)
 by_pname = {p["name"]: p for p in projects}
-check("four projects (watcher, riffmap, second, third)", sorted(by_pname) == ["riffmap", "second", "third", "watcher"])
+check("five projects (watcher, riffmap, second, third, fourth)",
+      sorted(by_pname) == ["fourth", "riffmap", "second", "third", "watcher"])
 check("riffmap's board holds all three of its lanes",
       sorted(l["lane"] for l in by_pname["riffmap"]["lanes"])
       == ["riffmap", "riffmap-design", "riffmap-triage"])
@@ -202,6 +212,12 @@ second_dir = lane_dir("second")
 third_dir = lane_dir("third")
 write_log(third_dir, 42, 300, ended_in="Done", outcome="merged")
 
+# fourth: last tick DIED 2 minutes ago (inside the sleep window) but the SPAWNER already
+# parked the card (two failed attempts, no Stuck comment from the tick itself) -> the board
+# is authoritative and this must read as needs_steve, never sleeping (review finding).
+fourth_dir = lane_dir("fourth")
+write_log(fourth_dir, 99, 2, subtype="error_max_turns")
+
 # also feed WATCHER_STATE explicitly on one lane to prove it overrides the default guess
 by_name["riffmap"]["state_dir"] = riffmap_dir
 by_name["riffmap-design"]["state_dir"] = design_dir
@@ -209,6 +225,7 @@ by_name["riffmap-triage"]["state_dir"] = triage_dir
 by_name["watcher"]["state_dir"] = watcher_dir
 by_name["second"]["state_dir"] = second_dir
 by_name["third"]["state_dir"] = third_dir
+by_name["fourth"]["state_dir"] = fourth_dir
 # the group_by_project result shares the same lane dicts, already correct: discover_lanes
 # put a default state_dir under STATE/<lane> for every one of them, so no override is
 # needed here beyond what discover_lanes already computed. Kept for clarity only.
@@ -233,6 +250,10 @@ BOARDS = {
          "state": "OPEN", "labels": [], "status": "Ready", "priority": "P1", "stage": None},
     ],
     ("roloc", 4): [],  # third: board is empty; the idle reason falls back to "last shipped"
+    ("roloc", 5): [  # fourth: the spawner parked #99 after two died ticks
+        {"number": 99, "title": "spawner-parked", "url": "https://github.com/roloc/fourth/issues/99",
+         "state": "OPEN", "labels": [], "status": "Stuck - Needs help", "priority": "P2", "stage": "Parked"},
+    ],
 }
 
 
@@ -244,7 +265,11 @@ def stub_unit_active(unit):
     return {"watcher@watcher": False, "watcher@riffmap": True}.get(unit)
 
 
-def stub_ask(issue):
+ASK_CALLS = []
+
+
+def stub_ask(issue, project_repo):
+    ASK_CALLS.append((issue, project_repo))
     return {777: "Needs Steve: which of two mockups did you mean?"}.get(issue, "")
 
 
@@ -276,6 +301,9 @@ check("riffmap-triage: needs_steve (its last card is now Stuck on the board)",
       d["pill"] == "needs_steve", d)
 check("riffmap-triage: card #777 and the ask from board.py's own comment reader",
       d["card"]["number"] == 777 and "which of two mockups" in d["ask"], d)
+check("the ask was resolved against riffmap-triage's OWN repo, not whatever repo "
+      "this process happens to run in — several projects share one box (review finding)",
+      (777, "roloc/riffmap") in ASK_CALLS, ASK_CALLS)
 
 d = lanes_by_name[("second", "second")]
 check("second: idle, something of its own sitting in Ready",
@@ -285,9 +313,14 @@ d = lanes_by_name[("third", "third")]
 check("third: idle, names the last shipped card (empty board, no pending work)",
       d["pill"] == "idle" and d["reason"] == "Last shipped #42.", d)
 
+d = lanes_by_name[("fourth", "fourth")]
+check("fourth: needs_steve, not sleeping — the board (a spawner park, no Stuck-shaped "
+      "comment from the tick) outranks a recently-died log (review finding)",
+      d["pill"] == "needs_steve" and d["card"]["number"] == 99, d)
+
 print("6. header and counts")
-check("needs_steve_total counts exactly the one lane in that state",
-      state["header"]["needs_steve_total"] == 1, state["header"])
+check("needs_steve_total counts exactly the two lanes in that state (riffmap-triage, fourth)",
+      state["header"]["needs_steve_total"] == 2, state["header"])
 riffmap_counts = by_pname_state = next(p for p in state["projects"] if p["name"] == "riffmap")["counts"]
 check("riffmap counts: 1 in progress, 1 stuck (not counted as in progress), 1 backlog",
       riffmap_counts == {"ready": 0, "in_progress": 1, "backlog": 1}, riffmap_counts)
@@ -321,7 +354,8 @@ riffmap2 = next(p for p in state2["projects"] if p["name"] == "riffmap")
 check("the failing project carries board_error", "rate limited" in riffmap2.get("board_error", ""))
 check("its counts are just empty, not a crash", riffmap2["counts"] == {"ready": 0, "in_progress": 0, "backlog": 0})
 other_names = {p["name"] for p in state2["projects"]}
-check("every other project still rendered", other_names == {"watcher", "riffmap", "second", "third"})
+check("every other project still rendered",
+      other_names == {"watcher", "riffmap", "second", "third", "fourth"})
 
 print("9. the JSON endpoint carries no field outside what the card allows")
 
@@ -385,6 +419,15 @@ try:
     check("unknown flag exits", False)
 except SystemExit as e:
     check("unknown flag exits non-zero with a message", "unknown argument" in str(e))
+
+print("13. CLI: a flag with no value after it exits with a message, not a raw traceback")
+try:
+    floor.main(["--host"])
+    check("a value-less flag exits", False)
+except SystemExit as e:
+    check("...with a message naming the flag", "--host" in str(e), str(e))
+except IndexError:
+    check("a value-less flag exits with a message, not an uncaught IndexError (review finding)", False)
 
 shutil.rmtree(ROOT, ignore_errors=True)
 

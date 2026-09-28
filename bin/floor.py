@@ -103,10 +103,14 @@ def discover_lanes(projects_dir, state_root):
     `PROJECT_NAME`/`LANE_AGENTS`, because bash re-sources each file from scratch."""
     lanes = []
     for path in sorted(glob.glob(os.path.join(projects_dir, "*.env"))):
-        name = os.path.splitext(os.path.basename(path))[0]
         env = read_env_file(path)
         if not env.get("PROJECT_REPO") or not env.get("BOARD_OWNER"):
             continue  # not a real project file
+        # PROJECT_NAME, not the filename: `spawn.sh` keys WATCHER_STATE and the systemd
+        # instance (`watcher@<PROJECT_NAME>`) on it, and every project file's own comment
+        # requires the two to match — but the filename is what a tick would guess wrong if
+        # that ever slipped.
+        name = env.get("PROJECT_NAME") or os.path.splitext(os.path.basename(path))[0]
         try:
             board_number = int(env.get("BOARD_NUMBER") or 1)
         except ValueError:
@@ -228,11 +232,6 @@ def _minutes_since(when, now):
     return max(int((now - when).total_seconds() // 60), 0)
 
 
-def _last_tick(state_dir):
-    ticks = metrics.load_lane(state_dir)
-    return ticks[-1] if ticks else None
-
-
 def _idle_reason(lane, items_by_number, last_tick):
     """Plain words for why the desk is empty right now — never the internal name of
     anything (`docs/talking-to-steve.md`, rule 7). Best-effort, not a re-implementation of
@@ -250,11 +249,14 @@ def _idle_reason(lane, items_by_number, last_tick):
     return "Nothing to pick up right now."
 
 
-def lane_desk(lane, items_by_number, board_url, now, unit_active=None, ask=None):
+def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None):
     """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
-    `ask` is a callable `issue -> str` (board.py's `needs_steve_ask`, injected so tests
-    never touch the network); `unit_active` is `systemctl is-active`'s answer, already
-    looked up by the caller (None when it could not be checked)."""
+    `last_tick` is the lane's own newest log entry (a `metrics.Tick`, or None — loaded
+    once by the caller, not re-read here: a lane's own `Cache` refresh used to parse every
+    log file twice, once for this and once for the recent-ticks list). `ask` is a callable
+    `(issue, project_repo) -> str` (board.py's `needs_steve_ask`, injected so tests never
+    touch the network); `unit_active` is `systemctl is-active`'s answer, already looked up
+    by the caller (None when it could not be checked)."""
     base = {"lane": lane["lane"], "kind": lane_kind(lane), "unit": lane["unit"]}
     if unit_active is not None:
         base["unit_active"] = unit_active
@@ -276,23 +278,26 @@ def lane_desk(lane, items_by_number, board_url, now, unit_active=None, ask=None)
         return {**base, "pill": "working", "link": url, "card": {"number": n, "url": url},
                 "stage": it.get("stage") or "", "minutes": minutes}
 
-    last = _last_tick(state_dir)
-    if last is not None and last.died:
-        age = _minutes_since(last.mtime, now)
-        if age < SLEEP_AFTER_FAILURE_MIN:
-            return {**base, "pill": "sleeping", "link": board_url,
-                    "reason": f"Card #{last.issue} did not finish; trying again shortly."}
-
-    if last is not None and not last.died:
-        it = items_by_number.get(last.issue) or {}
+    # The board is authoritative over the lane's own log: a card the SPAWNER parked (two
+    # died ticks, no Stuck-shaped comment from the tick itself) is just as much "needs
+    # Steve" as one the tick parked itself, so this is checked before — not only when —
+    # the last tick "died" is false.
+    if last_tick is not None:
+        it = items_by_number.get(last_tick.issue) or {}
         if (it.get("status") or "").strip() == STUCK_STATUS:
             url = it.get("url") or board_url
-            text = ask(last.issue) if ask else ""
+            text = ask(last_tick.issue, lane["project_repo"]) if ask else ""
             return {**base, "pill": "needs_steve", "link": url,
-                    "card": {"number": last.issue, "url": url}, "ask": text or ""}
+                    "card": {"number": last_tick.issue, "url": url}, "ask": text or ""}
+
+    if last_tick is not None and last_tick.died:
+        age = _minutes_since(last_tick.mtime, now)
+        if age < SLEEP_AFTER_FAILURE_MIN:
+            return {**base, "pill": "sleeping", "link": board_url,
+                    "reason": f"Card #{last_tick.issue} did not finish; trying again shortly."}
 
     return {**base, "pill": "idle", "link": board_url,
-            "reason": _idle_reason(lane, items_by_number, last)}
+            "reason": _idle_reason(lane, items_by_number, last_tick)}
 
 
 def _fmt_quota(cost):
@@ -325,14 +330,16 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
 
         lane_out = []
         for lane in p["lanes"]:
+            ticks = metrics.load_lane(lane["state_dir"])  # one parse of this lane's logs
             active = unit_active_fn(lane["unit"]) if unit_active_fn else None
             desk = lane_desk(lane, items_by_number, p["board_url"], now,
+                              last_tick=ticks[-1] if ticks else None,
                               unit_active=active, ask=ask_fn)
             if desk["pill"] == "needs_steve":
                 needs_steve_total += 1
             lane_out.append(desk)
 
-            for t in metrics.load_lane(lane["state_dir"])[-RECENT_PER_LANE:]:
+            for t in ticks[-RECENT_PER_LANE:]:
                 url = f"https://github.com/{lane['project_repo']}/issues/{t.issue}"
                 recent.append({
                     "project": p["name"], "lane": lane["lane"],
@@ -364,14 +371,19 @@ def systemctl_is_active(unit, timeout=5):
         return None
 
 
-def board_ask(issue, board_py=None, timeout=20):
+def board_ask(issue, project_repo, board_py=None, timeout=20):
     """The first line of the card's newest `Needs Steve` comment (`board.py ask`, which
-    wraps `needs_steve_ask` — a plain `gh issue view`, no board/GraphQL involved, so this
-    needs no BOARD_OWNER/BOARD_NUMBER)."""
+    wraps `needs_steve_ask` — a plain `gh issue view`, no board/GraphQL involved). `gh`
+    itself still has to be told which repo, though: with several projects on one box,
+    `GH_REPO` is what `spawn.sh` sets before every repo-scoped `gh` call (its own comment:
+    "GH_REPO pins every repo-scoped gh call here AND in board.py"). Without it here, every
+    lane's ask would resolve against whatever repo this process's cwd happens to be in —
+    this repo, for every project, silently."""
     board_py = board_py or os.path.join(HERE, "board.py")
+    env = dict(os.environ, GH_REPO=project_repo)
     try:
         r = subprocess.run([sys.executable, board_py, "ask", str(issue)],
-                            capture_output=True, text=True, timeout=timeout)
+                            capture_output=True, text=True, env=env, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return (r.stdout or "").strip() if r.returncode == 0 else ""
@@ -449,6 +461,11 @@ INDEX_HTML = """<!doctype html>
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
                      paused: "Paused", sleeping: "Sleeping"};
 
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
 function relTime(iso) {
   const d = (Date.now() - new Date(iso).getTime()) / 1000;
   if (d < 90) return "just now";
@@ -459,13 +476,13 @@ function relTime(iso) {
 
 function deskHTML(d) {
   let detail = "";
-  if (d.pill === "working") detail = `#${d.card.number} · ${d.stage || "—"} · ${d.minutes}m`;
-  else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${d.ask || "needs a decision"}`;
-  else if (d.pill === "idle" || d.pill === "sleeping") detail = d.reason || "";
-  return `<a class="desk" href="${d.link}">
-    <div class="name">${d.kind}</div>
-    <div class="unit">${d.unit}</div>
-    <span class="pill ${d.pill}">${PILL_LABEL[d.pill] || d.pill}</span>
+  if (d.pill === "working") detail = `#${d.card.number} · ${esc(d.stage) || "—"} · ${d.minutes}m`;
+  else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
+  else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
+  return `<a class="desk" href="${esc(d.link)}">
+    <div class="name">${esc(d.kind)}</div>
+    <div class="unit">${esc(d.unit)}</div>
+    <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
     <div class="detail">${detail}</div>
   </a>`;
 }
@@ -479,7 +496,7 @@ function render(state) {
   const projects = document.getElementById("projects");
   projects.innerHTML = state.projects.map(p => `
     <section class="project">
-      <h2><a href="${p.board_url}">${p.name}</a></h2>
+      <h2><a href="${esc(p.board_url)}">${esc(p.name)}</a></h2>
       <div class="counts">Ready ${p.counts.ready} · In progress ${p.counts.in_progress} · Backlog ${p.counts.backlog}
         ${p.board_error ? `<span class="alert"> — board unreachable</span>` : ""}</div>
       <div class="desks">${p.lanes.map(deskHTML).join("")}</div>
@@ -487,9 +504,9 @@ function render(state) {
 
   const tbody = document.querySelector("#recent tbody");
   tbody.innerHTML = state.recent.map(r => `
-    <tr><td>${r.project}</td><td>${r.lane}</td>
-      <td><a href="${r.card.url}">#${r.card.number}</a></td>
-      <td>${relTime(r.when)}</td><td>${r.quota}</td></tr>`).join("");
+    <tr><td>${esc(r.project)}</td><td>${esc(r.lane)}</td>
+      <td><a href="${esc(r.card.url)}">#${r.card.number}</a></td>
+      <td>${relTime(r.when)}</td><td>${esc(r.quota)}</td></tr>`).join("");
 }
 
 async function refresh() {
@@ -565,23 +582,26 @@ def main(argv):
     refresh_sec = 60
 
     i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a == "--host":
-            i += 1; host = argv[i]
-        elif a == "--port":
-            i += 1; port = int(argv[i])
-        elif a == "--projects-dir":
-            i += 1; projects_dir = argv[i]
-        elif a == "--state-root":
-            i += 1; state_root = argv[i]
-        elif a == "--refresh-sec":
-            i += 1; refresh_sec = int(argv[i])
-        elif a in ("-h", "--help"):
-            sys.exit(__doc__)
-        else:
-            sys.exit(f"floor.py: unknown argument {a!r}")
-        i += 1
+    try:
+        while i < len(argv):
+            a = argv[i]
+            if a == "--host":
+                i += 1; host = argv[i]
+            elif a == "--port":
+                i += 1; port = int(argv[i])
+            elif a == "--projects-dir":
+                i += 1; projects_dir = argv[i]
+            elif a == "--state-root":
+                i += 1; state_root = argv[i]
+            elif a == "--refresh-sec":
+                i += 1; refresh_sec = int(argv[i])
+            elif a in ("-h", "--help"):
+                sys.exit(__doc__)
+            else:
+                sys.exit(f"floor.py: unknown argument {a!r}")
+            i += 1
+    except IndexError:
+        sys.exit(f"floor.py: {a} needs a value")
 
     def build():
         return build_state(projects_dir, state_root, fetch_board,
