@@ -300,7 +300,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     tooling — is unaffected. There is nothing to fetch and nothing to re-check.
   - **The artifact cannot move until the merge deploys? Fetch it anyway — knowing why
     upgrades nothing.** Deploy-gating is never a reason to skip the fetch or to write
-    `Closes` on the strength of the explanation alone. What you are checking is **whether
+    `Closes` on the strength of the explanation — not even alongside a correct diff and
+    green CI. What you are checking is **whether
     the thing you changed is the thing the artifact shows**, and that is answerable before
     the deploy: a veto with nothing to veto, a ruler that never drew, a branch never
     reached leaves its trace in the artifact you were given. Green tests say the code does

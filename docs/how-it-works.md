@@ -366,7 +366,7 @@ https://example.com` sends one by hand.
   card names one more time before the card closes, and say in one sentence what it now
   shows. Still there? The card does not close, however green the build, and however good
   the reason it hasn't moved (deploy-gated, cached, can't restart from here) — the reason
-  explains the artifact, it is never itself evidence the symptom is gone. The PR says
+  explains the artifact, but it is never itself evidence the symptom is gone. The PR says
   `Refs #<n>` and the card goes to Stuck. A correct fix for the wrong cause is what this
   catches.
 - **A spawned card re-reads the complaint at the root of its chain**, not only the card that
