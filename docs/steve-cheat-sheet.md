@@ -120,12 +120,24 @@ To turn it off, remove `DISCORD_WEBHOOK_URL` from `/etc/watcher/env` on the box 
 restart the unit. To get pinged on 🚨 only, set `DISCORD_MENTION` there to your Discord
 user mention (`<@your-id>`) or `@here`.
 
+## The watcher's own board
+
+- **The watcher works its own cards too,** on the
+  [Watcher board](https://github.com/users/roloc/projects/2). Same columns, same rules.
+- **One card at a time** there, separate from riffmap's two.
+- **Nothing it merges is live until you deploy** (next section). It says on the card
+  whether a change needs a deploy.
+- **It never merges a change to its own safety checks.** Those come to you in **Stuck**
+  with the PR link: the build check, the reviewer, and the merge rules.
+
 ## Deploy a new watcher version
 
 - One command, as root on the box: `/opt/watcher/deploy/rollout.sh riffmap`
 - It covers every lane. Each lane waits for its own running tick to finish, then swaps.
   It never kills one.
 - Add a branch name at the end to deploy a branch before it merges.
+- **Any deploy ships everything merged on the Watcher board**, for every project.
+  `/opt/watcher/deploy/rollout.sh watcher` restarts the watcher's own lane.
 
 ## Pause, resume, logs
 
@@ -140,6 +152,7 @@ rm    ~watcher/.local/state/watcher/riffmap/PAUSE
 journalctl -u watcher@riffmap -f
 journalctl -u watcher@riffmap-design -f
 journalctl -u watcher@riffmap-triage -f
+journalctl -u watcher@watcher -f          # the watcher's own lane
 
 # what did the last tick say, and how much quota it used (not a bill — the box is on your subscription)
 ls -t ~watcher/.local/state/watcher/riffmap/logs/ | head

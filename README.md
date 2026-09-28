@@ -130,6 +130,8 @@ Then by hand, once:
 4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design
    watcher@riffmap-triage` (the build, design and triage lanes — without the triage lane
    an unlabeled card is nobody's); `journalctl -u watcher@riffmap -f` follows one.
+   The watcher's own lane is `watcher@watcher` (`deploy/install.sh watcher` first); see
+   `docs/how-it-works.md`, "The watcher's own board".
    Pause a lane with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
 
 ## CI

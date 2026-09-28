@@ -160,6 +160,25 @@ rare; the additive kind is the one that does happen (riffmap#349, September 17, 
 that keeps retrying the same failing thing inside one run is wasting the budget; go to Stuck
 instead. Steve moving a parked card back to In progress resets the count to zero.
 
+## The watcher's own board
+
+The watcher is also a project: `watcher@watcher` (`projects/watcher.env`) is one lane,
+with no `LANE_AGENTS`, over the [Watcher board](https://github.com/users/roloc/projects/2)
+and this repo. Nothing about the spawner or `/watch` is special-cased for it; what differs
+lives where every project's differences live, in its `CLAUDE.md` ("When the watcher works
+its own board"). The three things that make a loop editing itself safe enough:
+
+- **Two copies.** The lane's `PROJECT_ROOT` is `/home/watcher/projects/watcher`, a clone
+  of its own. `/opt/watcher` is what every lane runs. A tick edits the clone, never the
+  running copy.
+- **The deploy is the gate.** A merge lands on `main`, and `main` goes live only when Steve
+  runs `rollout.sh`. A rollout of any project pulls `/opt/watcher` for all of them.
+- **The merge gate is never self-merged.** A change to CI, the reviewer, the merge rules or
+  the hard rules below is built and reviewed, then parked in Stuck for Steve to merge.
+
+`WIP_MAX=1` there: one watcher card in flight at a time, so two changes to the loop's rules
+never race each other to `main`.
+
 ## Dependencies
 
 Steve can hand over several cards at once and the prerequisite is worked first. The

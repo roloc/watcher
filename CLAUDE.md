@@ -26,7 +26,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (deploy without
   killing a running tick: pull, pause, wait, restart, un-pause, per lane), one env file per
   systemd instance. A project with two lanes has two files; the lane file sources the
-  project file and sets `PROJECT_NAME` and `LANE_AGENTS`, nothing else.
+  project file and sets `PROJECT_NAME` and `LANE_AGENTS`, nothing else. `projects/watcher.env`
+  is the watcher's own lane; see "When the watcher works its own board" below.
 
 ## Rules for editing this repo
 
@@ -45,3 +46,40 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   failed post is one stderr line and nothing else, and no message goes out per poll or
   per tick. The webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
 - American English in every file. Dates like September 7, 2026.
+
+## When the watcher works its own board
+
+The `watcher@watcher` lane (`projects/watcher.env`) works the
+[Watcher board](https://github.com/users/roloc/projects/2) with this repo as its project, so
+a tick on that board reads this file as the project's `CLAUDE.md`. On top of everything
+above:
+
+- **The required CI check is `verify`.** Run both suites locally before pushing (Layout,
+  above); a red `verify` you could have seen in four seconds is a wasted round trip.
+- **You are editing the code you run under, but not the copy you are running.** Your
+  `/watch`, the reviewer and `$WATCHER_HOME` are `/opt/watcher`, the deployed copy. Your
+  worktree is a separate clone of the repo. Editing `commands/watch.md` there changes
+  nothing about the tick in progress: read the worktree's copy for what the card is
+  changing, `$WATCHER_HOME`'s for how to behave.
+- **Never write outside your worktree.** Not `/opt/watcher`, not another project's
+  checkout, not a lane's state directory (`~/.local/state/watcher/`), not a `PAUSE` file,
+  not `/etc/watcher/`. Never `systemctl`, never `deploy/rollout.sh`. **Reading** the state
+  directories and `journalctl -u 'watcher@*'` is fine, and it is how a card about the loop's
+  behavior goes and looks instead of asking (`watch.md`: a fact is not a product decision).
+- **Deploying is Steve's.** A merge changes nothing on the box until he runs `rollout.sh`,
+  and a rollout of *any* project pulls `/opt/watcher` for *every* project. So the PR body
+  and the Done comment say, in plain words, whether the change needs a rollout to take
+  effect (anything under `bin/`, `commands/`, `agents/`, `deploy/`, `projects/`), and
+  whether `bin/spawn.sh` changed (that one also needs the lane restart `rollout.sh` does).
+- **A watcher card's symptom is re-checked by a test, not live.** The fix is not running
+  until a rollout, so `watch.md`'s "a symptom card is not done until its symptom is checked
+  again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, or the
+  prompt evals once [#34](https://github.com/roloc/watcher/issues/34) lands — failing on
+  `main` and passing on the branch. Say which case, in one sentence, in the PR.
+- **A change to the merge gate is built, but not merged.** The gate is
+  `.github/workflows/`, `agents/reviewer.md`, the ship-and-merge rules in
+  `commands/watch.md` §3, and "Hard rules for every agent" in `docs/how-it-works.md`.
+  Build it, run the reviewer, get `verify` green, then park the card in Stuck (§4) with the
+  PR under **Look:**, asking Steve to merge it. This is the contract `watch.md` §4 means by
+  "not a builder's call": until the prompt evals exist, the reviewer is the only check on a
+  change to the reviewer, so the watcher never loosens its own gate unseen.
