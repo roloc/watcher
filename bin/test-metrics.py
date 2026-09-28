@@ -105,28 +105,46 @@ write_log(10, ts(70), empty=True)
 # #11: a corrupt result file
 write_log(11, ts(60), corrupt=True)
 
-# a stray file that does not match the log naming — must be ignored, not crash the loader
+# real riffmap text: a tick's own parenthetical after the enum word, which a strict `==`
+# against "Done"/"In progress" would silently drop from every count (found on real data:
+# card-275, card-200 in ~/.local/state/watcher/riffmap*/logs)
+write_log(13, ts(55), outcome="merged", ended_in="Done (issue closed via `Closes #262`)")
+write_log(14, ts(52),
+          outcome="architect decision written and merged; build work filed as #208 and routed to the renderer lane",
+          ended_in="In progress (routed onward — the one non-failure In progress exit)")
+
+# a stray file that does not match the log naming — must be ignored, not crash the loader.
+# card-99-notatimestamp.json is the sharper case: it matches the `card-*.json` glob, so
+# only the per-file filename regex (not the glob) is what has to reject it.
 with open(os.path.join(LOGS, f"card-12-{ts(50)}.stderr"), "w") as f:
     f.write("some stderr\n")
-with open(os.path.join(LOGS, "not-a-log.json"), "w") as f:
+with open(os.path.join(LOGS, "card-99-notatimestamp.json"), "w") as f:
     f.write("{}")
 
 ticks = metrics.load_lane(STATE)
 issues = metrics.group_by_issue(ticks)
 
 print("1. loading tolerates every shape and ignores non-log files")
-check("13 real ticks loaded (12 cards' worth, #2 has two)", len(ticks) == 13, str(len(ticks)))
-check("stray .stderr and non-matching .json are skipped",
-      12 not in issues)
+check("15 real ticks loaded (14 cards' worth, #2 has two)", len(ticks) == 15, str(len(ticks)))
+check("a stray .stderr is skipped (no card #12)", 12 not in issues)
+check("a card-*.json that fails the filename regex is skipped too (no card #99)", 99 not in issues)
 check("empty file (#10) still counts as a died tick, subtype unknown",
       next(t for t in ticks if t.issue == 10).subtype == "unknown")
 check("corrupt file (#11) also falls back to subtype unknown",
       next(t for t in ticks if t.issue == 11).subtype == "unknown")
 
+print("1b. a parenthetical after the enum word still classifies (real riffmap text)")
+check("'Done (issue closed via ...)' still reads as Done",
+      issues[13][0].ended_in == "Done")
+check("'In progress (routed onward ...)' still reads as In progress",
+      issues[14][0].ended_in == "In progress")
+check("...and its Outcome mentioning 'routed' (not `startswith`) marks it not-a-failure",
+      issues[14][0].non_terminal is False)
+
 print("2. first-pass merge rate")
 fp, done = metrics.first_pass_merge_rate(issues)
-check("2 cards reached Done (#1, #2)", done == 2, str(done))
-check("only #1 did it on the first tick", fp == 1, str(fp))
+check("3 cards reached Done (#1, #2, #13)", done == 3, str(done))
+check("#1 and #13 did it on the first tick, #2 needed a second", fp == 2, str(fp))
 
 print("3. park rate: tick-initiated vs. spawner-inferred")
 tick_parked, spawner_parked = metrics.park_counts(issues)
@@ -163,9 +181,9 @@ buf = io.StringIO()
 metrics.report("riffmap", ticks, 4, out=buf)
 text = buf.getvalue()
 check("names the lane", "## riffmap" in text)
-check("shows the first-pass rate", "First-pass merge rate: 1/2" in text)
+check("shows the first-pass rate", "First-pass merge rate: 2/3" in text)
 check("shows the park split", "1 by the tick itself" in text and "1 by the spawner" in text)
-check("shows a per-shipped-card line", "Per shipped card (2)" in text)
+check("shows a per-shipped-card line", "Per shipped card (3)" in text)
 buf2 = io.StringIO()
 metrics.report("empty-lane", [], 4, out=buf2)
 check("an empty lane says so instead of crashing", "no logs found" in buf2.getvalue())
@@ -176,7 +194,62 @@ try:
     check("no args exits", False)
 except SystemExit as e:
     check("no args exits with the docstring", "python3 bin/metrics.py" in str(e))
+try:
+    metrics.main(["some-dir", "--weeks", "not-a-number"])
+    check("--weeks rejects a non-number", False)
+except SystemExit as e:
+    check("--weeks rejects a non-number", "wants a number" in str(e))
 
+print("9. weekly breakdown attributes a fact to the week that decided it, not the week "
+      "that merely holds one of its ticks (a card's story can span a week boundary)")
+WSTATE = tempfile.mkdtemp(prefix="watcher-metrics-test-weekly-")
+WLOGS = os.path.join(WSTATE, "logs")
+os.makedirs(WLOGS, exist_ok=True)
+
+
+def wwrite(issue, when, **kw):
+    path = os.path.join(WLOGS, f"card-{issue}-{when}.json")
+    d = {"subtype": kw.get("subtype", "success"), "total_cost_usd": kw.get("cost", 1.0),
+         "num_turns": kw.get("turns", 5), "duration_ms": kw.get("duration_ms", 60000)}
+    if d["subtype"] == "success":
+        d["result"] = report_lines(issue, kw.get("outcome"), kw.get("ended_in"), kw.get("needs_steve", "no"))
+    with open(path, "w") as f:
+        json.dump(d, f)
+
+
+LAST_WEEK = ts(14400)  # 10 days ago — always a different ISO week than "now"
+THIS_WEEK = ts(0)
+
+# #20: a "no progress" tick last week, its Done tick this week — took two ticks overall,
+# so it must NOT read as a first-pass Done in either week's row.
+wwrite(20, LAST_WEEK, outcome="no progress", ended_in="In progress")
+wwrite(20, THIS_WEEK, outcome="merged", ended_in="Done")
+
+# #21: the first of a two-tick spawner-park streak last week, the second (the one the
+# spawner actually acts on) this week — the park belongs to THIS week, not nowhere.
+wwrite(21, LAST_WEEK, outcome="no progress", ended_in="In progress")
+wwrite(21, THIS_WEEK, outcome="no progress", ended_in="In progress")
+
+wticks = metrics.load_lane(WSTATE)
+w_starts, w_rows = metrics.weekly_breakdown(wticks, 3)
+this_week_row = w_rows[-1]
+last_week_row = w_rows[-2] if len(w_rows) > 1 else None
+
+check("overall: #20 reached Done but not on its first tick",
+      metrics.first_pass_merge_rate(metrics.group_by_issue(wticks)) == (0, 1))
+check("this week's row does NOT count #20 as a first-pass Done",
+      this_week_row["done"] == 1 and this_week_row["first_pass"] == 0,
+      str(this_week_row))
+if last_week_row is not None:
+    check("last week's row has no Done at all for #20 (it wasn't decided that week)",
+          last_week_row["done"] == 0, str(last_week_row))
+check("the #21 park is attributed to the week of the SECOND failing tick (this week)",
+      this_week_row["spawner_parked"] == 1, str(this_week_row))
+if last_week_row is not None:
+    check("...not split into or lost in the earlier week",
+          last_week_row["spawner_parked"] == 0, str(last_week_row))
+
+shutil.rmtree(WSTATE, ignore_errors=True)
 shutil.rmtree(STATE, ignore_errors=True)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")

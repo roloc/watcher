@@ -159,8 +159,8 @@ posts anywhere on its own** — nothing pings you about it; you ask for it when 
 <details><summary>Command (on the box)</summary>
 
 ```
-python3 /opt/watcher/bin/metrics.py ~/.local/state/watcher/riffmap
-python3 /opt/watcher/bin/metrics.py ~/.local/state/watcher/riffmap ~/.local/state/watcher/riffmap-design --weeks 4
+python3 /opt/watcher/bin/metrics.py ~watcher/.local/state/watcher/riffmap
+python3 /opt/watcher/bin/metrics.py ~watcher/.local/state/watcher/riffmap ~watcher/.local/state/watcher/riffmap-design --weeks 4
 ```
 
 One state directory per lane (riffmap, riffmap-design, riffmap-triage, watcher); give it

@@ -62,6 +62,23 @@ OUTCOME_RE = re.compile(r'^- Outcome:\s*(.+)$', re.M)
 ENDED_RE = re.compile(r'^- Ended in:\s*(.+)$', re.M)
 NEEDS_RE = re.compile(r'^- Needs Steve:\s*(.+)$', re.M)
 
+# `watch.md`'s "Ended in" enum, longest-first so "Stuck - Needs help" never matches as a
+# prefix of something shorter. Real logs routinely append an explanatory parenthetical —
+# "Done (issue closed by merge)", "Stuck - Needs help (awaiting Steve's approval reply)",
+# "In progress (routed onward — the one non-failure In progress exit)" — so this is a
+# prefix match, never `==`, against the raw text; a card whose report used one of these
+# reads as its column regardless of what a tick added after it.
+ENDED_IN_KINDS = ("Stuck - Needs help", "In review", "In progress", "Backlog", "Done")
+
+
+def classify_ended_in(raw):
+    if raw is None:
+        return None
+    for kind in ENDED_IN_KINDS:
+        if raw.startswith(kind):
+            return kind
+    return raw  # an unrecognized value: kept verbatim so it counts nowhere silently
+
 
 class Tick:
     __slots__ = ("issue", "ts", "mtime", "subtype", "cost", "turns", "duration_ms",
@@ -97,7 +114,7 @@ class Tick:
         In progress under THIS lane (routing to another lane is progress, not a failure)."""
         if self.died:
             return True
-        return self.ended_in == "In progress" and not (self.outcome or "").startswith("routed to")
+        return self.ended_in == "In progress" and "routed" not in (self.outcome or "").lower()
 
 
 def load_log(path):
@@ -125,7 +142,7 @@ def load_log(path):
         m = OUTCOME_RE.search(result)
         t.outcome = m.group(1).strip() if m else None
         m = ENDED_RE.search(result)
-        t.ended_in = m.group(1).strip() if m else None
+        t.ended_in = classify_ended_in(m.group(1).strip()) if m else None
         m = NEEDS_RE.search(result)
         t.needs_steve = m.group(1).strip() if m else None
     return t
@@ -228,6 +245,66 @@ def week_start(dt):
     return monday.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def weekly_breakdown(ticks, weeks, now=None):
+    """One pass over the FULL tick history, not a re-run of the summary metrics on each
+    week's slice of ticks in isolation — a card's own story routinely spans a week
+    boundary (a `no progress` tick Sunday night, its `Done` tick Monday morning), and
+    slicing first would count that card as a same-week first-pass Done, or lose half of a
+    spawner-park streak, in both cases changing the number in the flattering direction.
+    Each fact is instead attributed to the week of the tick that actually decided it: a
+    first-pass or a Done to the week of the Done tick, an inferred spawner-park to the
+    week of the second of its two triggering ticks, a died tick or a raw tick count to its
+    own week."""
+    now = now or datetime.now(timezone.utc)
+    starts = [week_start(now) - timedelta(weeks=i) for i in range(weeks)][::-1]
+
+    def bucket(dt):
+        if dt < starts[0]:
+            return None
+        for i in range(len(starts) - 1):
+            if dt < starts[i + 1]:
+                return i
+        return len(starts) - 1
+
+    rows = [{"ticks": 0, "died": 0, "done": 0, "first_pass": 0,
+             "tick_parked": 0, "spawner_parked": 0} for _ in starts]
+
+    for t in ticks:
+        b = bucket(t.ts)
+        if b is None:
+            continue
+        rows[b]["ticks"] += 1
+        if t.died:
+            rows[b]["died"] += 1
+
+    for recs in group_by_issue(ticks).values():
+        done_at = next((r for r in recs if r.ended_in == "Done"), None)
+        if done_at is not None:
+            b = bucket(done_at.ts)
+            if b is not None:
+                rows[b]["done"] += 1
+                if recs[0] is done_at:
+                    rows[b]["first_pass"] += 1
+        for r in recs:
+            if r.ended_in == "Stuck - Needs help" and (r.needs_steve or "").lower().startswith("yes"):
+                b = bucket(r.ts)
+                if b is not None:
+                    rows[b]["tick_parked"] += 1
+        streak = 0
+        for r in recs:
+            if r.non_terminal:
+                streak += 1
+                if streak == 2:
+                    b = bucket(r.ts)  # the second failing tick is the one the spawner acts on
+                    if b is not None:
+                        rows[b]["spawner_parked"] += 1
+                    streak = 0
+            else:
+                streak = 0
+
+    return starts, rows
+
+
 def report(lane, ticks, weeks, out=sys.stdout):
     p = lambda s="": print(s, file=out)
     p(f"## {lane}")
@@ -270,17 +347,12 @@ def report(lane, ticks, weeks, out=sys.stdout):
 
     p(f"  By week (last {weeks}):")
     p(f"  {'week of':<12}{'ticks':>7}{'1st-pass':>10}{'parked t/s':>12}{'died':>6}")
-    cur = week_start(datetime.now(timezone.utc))
-    for wk_start in [cur - timedelta(weeks=i) for i in range(weeks)][::-1]:
-        wk_end = wk_start + timedelta(weeks=1)
-        wk_ticks = [t for t in ticks if wk_start <= t.ts < wk_end]
-        wk_issues = group_by_issue(wk_ticks)
-        wfp, wdone = first_pass_merge_rate(wk_issues)
-        wtp, wsp = park_counts(wk_issues)
-        wdied = sum(1 for t in wk_ticks if t.died)
-        fp_str = f"{wfp}/{wdone}" if wdone else "-"
-        p(f"  {wk_start.date().isoformat():<12}{len(wk_ticks):>7}{fp_str:>10}"
-          f"{f'{wtp}/{wsp}':>12}{wdied:>6}")
+    starts, rows = weekly_breakdown(ticks, weeks)
+    for wk_start, row in zip(starts, rows):
+        fp_str = f"{row['first_pass']}/{row['done']}" if row["done"] else "-"
+        parked_str = f"{row['tick_parked']}/{row['spawner_parked']}"
+        p(f"  {wk_start.date().isoformat():<12}{row['ticks']:>7}{fp_str:>10}"
+          f"{parked_str:>12}{row['died']:>6}")
     p()
 
 
@@ -294,7 +366,10 @@ def main(argv):
             i += 1
             if i >= len(argv):
                 sys.exit("metrics.py: --weeks needs a number")
-            weeks = int(argv[i])
+            try:
+                weeks = int(argv[i])
+            except ValueError:
+                sys.exit(f"metrics.py: --weeks wants a number, got {argv[i]!r}")
         elif a in ("-h", "--help"):
             sys.exit(__doc__)
         else:

@@ -21,6 +21,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
 - `bin/notify.py` — Discord posts, called only from `board.py` (`move`, `stage`, `notify`).
   `python3 bin/test-notify.py` is its offline test; run it after touching either file.
+- `bin/metrics.py` — a read-only weekly report over a lane's own tick logs (first-pass
+  merge rate, park rate, deaths, turns/quota and time to Done), run by hand, never by the
+  loop. `python3 bin/test-metrics.py` is its offline test; run it after touching the file.
 - `bin/eval.sh` — the replay suite: real past failures against `commands/watch.md`,
   `commands/triage.md` and `agents/reviewer.md`, each a case under `evals/cases/` run with a
   live `claude -p` against `evals/fakehub.py` (a closed, offline stand-in for `gh` and
