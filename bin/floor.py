@@ -520,7 +520,7 @@ function spriteSVG(pill) {
     : `<rect x="40" y="52" width="12" height="5" rx="2" style="fill:${c}"/>`;
   let extra = "";
   if (pill === "idle" || pill === "sleeping")
-    extra = `<text class="zz" x="${pill === "sleeping" ? 44 : 44}" y="${pill === "sleeping" ? 34 : 22}">z</text>
+    extra = `<text class="zz" x="44" y="${pill === "sleeping" ? 34 : 22}">z</text>
              <text class="zz late" x="52" y="${pill === "sleeping" ? 26 : 14}">z</text>`;
   if (pill === "needs_steve")
     extra = `<g class="flag"><rect x="12" y="6" width="2" height="30" class="monitor"/>
