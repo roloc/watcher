@@ -128,9 +128,9 @@ user mention (`<@your-id>`) or `@here`.
 - **One card at a time** there, separate from riffmap's two.
 - **What it merges goes live by itself** once the checks pass and the bots are idle
   (next section).
-- **It never merges a change to its own safety checks.** Those come to you in **Stuck**
-  with the PR link: the build check, the reviewer, the merge rules, the deployer, and the
-  tests the deployer runs.
+- **You never merge anything,** here or on RiffMap. The bots merge their own work once the
+  build check passes and the reviewer finds nothing blocking. Changes to their own safety
+  checks get the strictest review, and nothing goes live until its tests pass again.
 
 ## New watcher versions deploy themselves
 

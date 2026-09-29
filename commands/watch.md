@@ -90,7 +90,9 @@ output is the doc itself.
 
 Build and test locally before opening the PR. Run `reviewer` once on the branch when the
 change touches source or scripts — hand it the plan when you wrote one — fix what it marks
-blocking, take or leave the nits. Docs-only changes get no review.
+blocking, take or leave the nits. Docs-only changes get no review, unless they touch the
+merge gate (the CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names
+as its gate) — those always get `reviewer`.
 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
@@ -342,7 +344,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Once per tick: if `main` moves again and conflicts again after your resolution, that is
   Stuck too. (riffmap#349, September 17, 2026: a four-line list conflict, both sides
   appending a mockup entry, went to Steve as a decision and cost a day's round trip.)
-- Docs-only changes go through a PR the same way; they get no `reviewer` pass.
+- Docs-only changes go through a PR the same way; they get no `reviewer` pass, unless they
+  touch the merge gate (§2).
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
   force-push, never merge red, never push `main` directly, never touch a project's secrets.

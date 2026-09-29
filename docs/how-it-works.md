@@ -176,9 +176,12 @@ its own board"). The three things that make a loop editing itself safe enough:
   `deploy/autodeploy.sh`, which ships a commit once `verify` passed on it, the replay suite
   passed on it in a scratch clone (the new prompts, tested before any lane uses them), and
   every lane on the box is idle. One deploy moves `/opt/watcher` for every project.
-- **The merge gate is never self-merged.** A change to CI, the reviewer, the merge rules,
-  the hard rules below, anything under `deploy/`, or an existing replay case is built and
-  reviewed, then parked in Stuck for Steve to merge. Adding a new case may merge itself.
+- **The gate is reviewed hardest, then merged like everything else.** A change to CI, the
+  reviewer, the merge rules, the hard rules below, anything under `deploy/`, or the replay
+  suite always gets the reviewer, which blocks anything that weakens it, and then merges on
+  green like any card — Steve never merges, the same as riffmap (September 28, 2026). Until
+  that day these parked in Stuck for Steve, who does not review code, so the park added a
+  wait and no review.
 
 `WIP_MAX=1` there: one watcher card in flight at a time, so two changes to the loop's rules
 never race each other to `main`.

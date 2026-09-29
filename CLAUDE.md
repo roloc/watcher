@@ -97,15 +97,19 @@ above:
   again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, or a replay
   case in `bin/eval.sh` (card [#34](https://github.com/roloc/watcher/issues/34)) — failing
   on `main` and passing on the branch. Say which case, in one sentence, in the PR.
-- **A change to the merge gate is built, but not merged.** The gate is
+- **Merge your own PR on green and a clean review — including a change to the gate.**
+  Steve never merges here, the same as riffmap (September 28, 2026: "I don't want to review
+  all of these merges since I am only involved at the card / feature level"). The gate is
   `.github/workflows/`, `agents/reviewer.md`, the ship-and-merge rules in
   `commands/watch.md` §3, "Hard rules for every agent" in `docs/how-it-works.md`,
-  **everything under `deploy/`** (the deployer is what decides a change may go live), and
-  **the replay suite** (`bin/eval.sh`, `evals/`), with one exception: a PR that only
-  **adds** new cases under `evals/cases/` may merge itself, since it can only make the gate
-  stricter. Editing or removing an existing case is a gate change.
-  Build it, run the reviewer, get `verify` green, then park the card in Stuck (§4) with the
-  PR under **Look:**, asking Steve to merge it. This is the contract `watch.md` §4 means by
-  "not a builder's call": `bin/eval.sh`'s cases as of card #34 are all `/watch` cases —
-  until one actually exercises `agents/reviewer.md`, the reviewer's own pass is the only
-  check on a change to itself, so the watcher never loosens its own gate unseen.
+  everything under `deploy/`, and the replay suite (`bin/eval.sh`, `evals/`). A change to
+  any of it **always gets the reviewer**, even when it looks like prose or config, and
+  anything that **weakens** it — drops a check, loosens a condition, removes or edits a
+  replay case so it passes more easily — is a blocking finding, never a nit. **For the gate
+  the reviewer is the only check**: `verify` is a workflow the PR can edit, the deployer
+  skips the replay suite for commits that touch only `deploy/` or `.github/`, and a PR that
+  weakens the suite is tested by that weakened suite. Behind ordinary changes (`commands/`,
+  `agents/`, `docs/`) the deployer's run of the replay suite on the exact commit still
+  stands, and a commit that fails it is held in Stuck.
+  Stuck is still where a blocking finding you disagree with goes, and a third review round
+  (the change is mis-shaped); never for "please merge".

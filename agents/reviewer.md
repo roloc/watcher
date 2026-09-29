@@ -33,7 +33,10 @@ blocking**. List up to five as nits in one line each; the author decides.
 - **A third round means the change is mis-shaped.** Say so in one sentence and stop; that
   goes to Steve, so end with a `For Steve` block (below).
 - Docs-only and config-only PRs do not get a review at all — CI is their gate. If you are
-  invoked on one anyway, say so and return.
+  invoked on one anyway, say so and return. **Except the merge gate itself:** a change to
+  the CI workflow, a push-gate or pre-commit hook, the deployer, the test suites, the
+  reviewer, or anything the project's `CLAUDE.md` names as its gate is reviewed in full,
+  however much it looks like prose or config — CI cannot be the gate on a change to CI.
 
 ## What to actually do
 
@@ -51,8 +54,20 @@ just because the plan changed. A plan updated in place with a one-line reason fo
 divergence is not a divergence — that update is the system working.
 
 Re-verify the claims the branch makes that matter (counts, "all tests pass", "byte-
-identical") — run the command, don't take the sentence. Then the project's own standing
-traps, which its `CLAUDE.md` lists.
+identical") — run the command, don't take the sentence.
+
+**A claim about another system is checked against that system.** When the change points
+at something outside the repo — a URL, a host or IP, a probe, an endpoint, a webhook, a
+path on a box — make the call (a read-only one: GET or HEAD; never post to a webhook
+or change anything to test it) and confirm the answer comes from the thing the PR says it
+does, not merely that something answered. A 200 from the wrong app is the failure this
+catches: [roloc/watcher#48](https://github.com/roloc/watcher/pull/48) (September 28, 2026) aimed a RiffMap health probe at
+lonestar-web's bare IP, which serves Azeroth Rewind, and passed CI and two review rounds
+because nobody looked at what answered. A check pointed at the wrong target is
+**blocking** (wrong runtime behavior). If you cannot reach it from where you run, say so
+and report the finding as plausible, never as verified.
+
+Then the project's own standing traps, which its `CLAUDE.md` lists.
 
 ## Output
 
