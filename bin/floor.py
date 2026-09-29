@@ -266,7 +266,10 @@ def ci_summary(ci, repo):
 
 
 def _git(repo_dir, *args):
-    r = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True, timeout=10)
+    try:
+        r = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
@@ -299,14 +302,17 @@ def deploy_status(repo_dir, deploy_state, repo, git=_git):
     draining = (_read(os.path.join(deploy_state, "draining")) or "").split()
     ready = (_read(os.path.join(deploy_state, "ready")) or "").split()
     evals = _read(os.path.join(deploy_state, "evals", target)) if target else None
-    if held is not None:
-        out["state"] = "held"
-        if held.isdigit():
-            out["card"] = {"number": int(held), "url": f"https://github.com/{repo}/issues/{held}"}
-    elif draining:
+    # Swapping and live come before held: a commit shipped with deploy-anyway keeps its own
+    # held/<sha> file (the deployer only clears the OTHER held cards), and the page must not
+    # call a live commit Blocked, or count it as needing Steve.
+    if draining:
         out["state"], out["target"] = "swapping", draining[0][:7]
     elif not target or live == target:
         out["state"] = "live"
+    elif held is not None:
+        out["state"] = "held"
+        if held.isdigit():
+            out["card"] = {"number": int(held), "url": f"https://github.com/{repo}/issues/{held}"}
     elif ready and ready[0] == live:
         out["state"] = "waiting"
     elif evals and evals.startswith("fail"):
@@ -464,7 +470,11 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                 print(f"floor: CI for {p['project_repo']} unreachable: {e}", file=sys.stderr, flush=True)
         ship = {"ci": ci_summary(ci, p["project_repo"])}
         if deploy_fn and deploy_repo and p["project_repo"] == deploy_repo:
-            dep = deploy_fn()
+            try:
+                dep = deploy_fn()
+            except Exception as e:
+                dep = None
+                print(f"floor: deployer state unreadable: {e}", file=sys.stderr, flush=True)
             if dep:
                 ship["deploy"] = dep
                 if dep["state"] == "held":

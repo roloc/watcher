@@ -499,9 +499,21 @@ check("ready and behind is waiting for idle lanes", dstate()["state"] == "waitin
 open(os.path.join(DS, "draining"), "w").write(f"{T} {L} ")
 check("a drain in progress is swapping", dstate()["state"] == "swapping")
 open(os.path.join(DS, "held", T), "w").write("58")
+check("...even when that commit was held and is shipping through deploy-anyway",
+      dstate()["state"] == "swapping")
+os.remove(os.path.join(DS, "draining"))
+check("a held commit that is now live is live, not held (review finding)",
+      floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(T, T))["state"] == "live")
 h = dstate()
 check("a held commit is held, with its card", h["state"] == "held" and h["card"]["number"] == 58
       and h["card"]["url"] == "https://github.com/roloc/watcher/issues/58", h)
+def boom():
+    raise subprocess.TimeoutExpired("git", 10)
+state17c = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                             ask_fn=stub_ask, now=NOW, box_name="test-box",
+                             deploy_fn=boom, deploy_repo="roloc/riffmap")
+check("a deployer read that blows up leaves the page up, with no deploy block",
+      all("deploy" not in p["ship"] for p in state17c["projects"]))
 check("a checkout that is not a repo shows no deployer", floor.deploy_status("/x", DS, "r/w", git=lambda d, *a: "") is None)
 
 state17 = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
