@@ -199,6 +199,14 @@ run
 check "a new lane file: its unit is enabled and started" called "systemctl enable --now watcher@riffmap-triage"
 check "…after every running lane restarted"            [ "$(grep -n 'enable --now' "$CALLS" | cut -d: -f1)" -gt "$(grep -n 'systemctl restart' "$CALLS" | tail -1 | cut -d: -f1)" ]
 
+# 11a. Only projects/<name>.env is a lane: a project's helper files are never started
+fresh; commit projects/riffmap-health-probe.sh 'echo 0' >/dev/null
+T="$(commit projects/riffmap.detect.env DETECT_WHAT=x)"
+run
+check "a helper script under projects/ is not started as a lane" not_called "watcher@riffmap-health-probe"
+check "…nor a <name>.detect.env config"                not_called "watcher@riffmap.detect"
+check "…and the deploy still lands"                    [ "$(head_)" = "$T" ]
+
 # 11b. The drain clock counts from when the box fell behind, not from the newest commit
 fresh; echo 12 > "$STATE/riffmap/current"; T="$(commit commands/watch.md v11b)"
 DEPLOY_DRAIN_AFTER_MIN=60 run

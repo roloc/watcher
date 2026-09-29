@@ -177,9 +177,12 @@ its own board"). The three things that make a loop editing itself safe enough:
   `deploy/autodeploy.sh`, which ships a commit once `verify` passed on it, the replay suite
   passed on it in a scratch clone (the new prompts, tested before any lane uses them), and
   every lane on the box is idle. One deploy moves `/opt/watcher` for every project.
-- **The merge gate is never self-merged.** A change to CI, the reviewer, the merge rules,
-  the hard rules below, anything under `deploy/`, or an existing replay case is built and
-  reviewed, then parked in Stuck for Steve to merge. Adding a new case may merge itself.
+- **The gate is reviewed hardest, then merged like everything else.** A change to CI, the
+  reviewer, the merge rules, the hard rules below, anything under `deploy/`, or the replay
+  suite always gets the reviewer, which blocks anything that weakens it, and then merges on
+  green like any card — Steve never merges, the same as riffmap (September 28, 2026). Until
+  that day these parked in Stuck for Steve, who does not review code, so the park added a
+  wait and no review.
 
 `WIP_MAX=1` there: one watcher card in flight at a time, so two changes to the loop's rules
 never race each other to `main`.
@@ -338,6 +341,43 @@ nothing else — a notification can never fail a board command or a tick. `pytho
 bin/test-notify.py` checks the shapes offline; `python3 bin/notify.py stuck 1 "smoke test"
 https://example.com` sends one by hand.
 
+## Watching the product
+
+The spawner's sweeps keep the *loop* healthy. Nothing above watches the product itself — a
+regression that ships to a project's own staging box waited for Steve to notice it, until
+card [#36](https://github.com/roloc/watcher/issues/36). `bin/detect.sh` closes that gap the
+same way the deployer closes its own: a small script on a timer, no model, deterministic.
+
+- **Generic in the watcher, specific in the project.** `bin/detect.sh <project>` does
+  nothing unless `projects/<project>.detect.env` exists — a versioned config, sourced after
+  the project's own `.env`, naming one metric (`DETECT_METRIC_CMD`, a command that prints
+  one number), a rolling window, and two fixed bands (`DETECT_SMALL_BAND`,
+  `DETECT_LARGE_BAND`). One reading a run; what gets compared to the bands is the *rolling
+  average* of the last `DETECT_BASELINE_WINDOW` readings, so one noisy reading is never a
+  breach on its own.
+- **Tiers.** Below the small band: nothing. At or above the small band: one log line,
+  nothing else. At or above the large band: a card, filed in **Backlog** with the metric,
+  the rolling average, the readings behind it, and (best-effort) the commit on `main` at
+  the time — evidence, not a diagnosis. **No second card while the first stays open** —
+  closing it, however Steve closes it, is what allows the next one.
+- **The card is written like one of Steve's**, with no `agent:` label, so a project with a
+  triage lane routes it the same as anything else he might have filed. It names the
+  artifact that shows the problem (`DETECT_LOOK_URL`, when the project has one) — the same
+  "look before you diagnose" rule `commands/watch.md` §2 holds every tick to.
+- **Discord stays a repeater.** `bin/detect.sh` never posts; filing the card ends with an
+  ordinary `board move <n> Backlog`, so the post — if one goes out — happens because a card
+  landed, never because a check ran. Nothing is posted for a small breach, or for a clean
+  run.
+- **Opt-in, per project, off until its config exists.** `deploy/install.sh` installs
+  `watcher-detect@.service`/`.timer` for every box, then enables `watcher-detect@<p>.timer`
+  for every `projects/<p>.detect.env` it finds (the `.service` carries no `[Install]` — it
+  is driven by the timer, the same shape as `watcher-deploy.service`/`.timer`). A project
+  opts in by merging its `.detect.env`: `install.sh` reruns on every deploy
+  (`deploy/autodeploy.sh`), so that merge is what turns detection on — nobody runs a
+  command on the box. `bin/test-detect.sh` is the offline suite — a stubbed metric source
+  crossing each band, run against stubbed `gh`/`board` — and CI runs it the same as the
+  other two.
+
 ## Where Steve comes in
 
 - He moves cards in. He answers Stuck cards by replying on the card and moving it back to
@@ -365,9 +405,14 @@ https://example.com` sends one by hand.
   the two in one card.
 - **A symptom card is not done until its symptom is checked again.** Fetch the artifact the
   card names one more time before the card closes, and say in one sentence what it now
-  shows. Still there? The card does not close, however green the build — the PR says
+  shows. Still there? The card does not close, however green the build, and however good
+  the reason it hasn't moved (deploy-gated, cached, can't restart from here) — the reason
+  explains the artifact, but it is never itself evidence the symptom is gone. The PR says
   `Refs #<n>` and the card goes to Stuck. A correct fix for the wrong cause is what this
-  catches.
+  catches. GitHub's merge-time close scan matches a closing keyword next to the card's
+  number wherever that pairing sits in the body, meaning included or not — so a card
+  staying open means that keyword and the number never appear next to each other in the
+  PR body, not even inside a sentence explaining why the other keyword was chosen.
 - **A spawned card re-reads the complaint at the root of its chain**, not only the card that
   filed it, and says which sentence of the root it is serving. When the last card off a root
   closes, the root's own symptom is checked again and the answer is commented on the root.

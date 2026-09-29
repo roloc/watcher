@@ -1,0 +1,13 @@
+# Sparse on purpose: a regression is a sustained shift in the rolling average, not a single
+# noisy reading, so the timer only needs to be frequent enough to fill that window in a
+# reasonable time (projects/*.detect.env's own comment says what its window covers).
+[Unit]
+Description=Regression detector for %i
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

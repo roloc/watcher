@@ -65,9 +65,34 @@ You are in the card's worktree already (`git rev-parse --show-toplevel`); never 
 another. Read the card, read the project's `CLAUDE.md`, then do the work yourself — a
 decision card gets a written decision in `docs/`, an implementation card gets code and
 tests. Use the project's own subagents (`.claude/agents/`) when the card's `agent:` label
-names one; otherwise you are the builder. Build and test locally before opening the PR.
-Run `reviewer` once on the branch when the change touches source or scripts; fix what it
-marks blocking, take or leave the nits. Docs-only changes get no review.
+names one; otherwise you are the builder.
+
+**Write the plan before the first edit.** Before you touch a file, write down: the files
+that will change, in order; the test or check that proves the card is done (for a symptom
+card, the artifact you will re-fetch, §3); and the one risk you expect. Tell Steve you're
+starting — plain words, no paths above the fold (`docs/talking-to-steve.md` rule 7):
+
+```
+🤖 **FYI:** plan for this card.
+- Files: <what's changing, in a sentence>
+- Test: <what proves it's done, in a sentence>
+- Risk: <the one thing most likely to go wrong>
+```
+
+Keep the exact list — real paths, the real check — for the PR body under `## Plan` (§3)
+and for `reviewer`, which you hand it to directly when you call it; the card comment is for
+Steve, not for `reviewer` to read back. The plan is a claim you're about to test, not
+evidence: it is not a contract, and `reviewer` reads the diff first regardless. If the
+build diverges, update both copies and say why in one line — an unexplained divergence,
+not a changed plan, is what `reviewer` checks for. Skip all of this for a card whose build
+produces no diff to review — a docs-only or relabel-only tick, a decision card whose only
+output is the doc itself.
+
+Build and test locally before opening the PR. Run `reviewer` once on the branch when the
+change touches source or scripts — hand it the plan when you wrote one — fix what it marks
+blocking, take or leave the nits. Docs-only changes get no review, unless they touch the
+merge gate (the CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names
+as its gate) — those always get `reviewer`.
 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
@@ -248,6 +273,10 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
+- **If §2 gave the card a plan, the PR body carries it too**, under `## Plan` — the real
+  file list and check this time, not the plain-word version from the FYI comment. Diverged
+  from it while building? Update `## Plan` in place with the one-line reason, rather than
+  leaving the original text to go stale.
 - **A symptom card is not done until the symptom is checked again.** A card that reports
   something *observed* — a page that looks wrong, a number that is off, a screen showing
   what it should not — names the artifact that shows it, and §2 had you look at that
@@ -257,18 +286,41 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   - **The symptom is gone**: say so, and close the card the normal way (`Closes #<n>`,
     merge).
   - **The symptom is still there: the card does not close** — even when the change is
-    correct, the reviewer is happy and CI is green. Its PR body says **`Refs #<n>`, never
+    correct, the reviewer is happy, CI is green, and even when you have a good reason the
+    artifact hasn't moved yet. **The reason is not the evidence — only the artifact is.**
+    "It's deploy-gated," "the cache hasn't refreshed," "this can't restart from here":
+    every one of those may be true, and none of them is the artifact showing the fix. If
+    you find yourself reasoning from the explanation instead of from what you just
+    fetched, that is the exact judgment call this rule exists to forbid — stop, and answer
+    only "what does the artifact show right now." Its PR body says **`Refs #<n>`, never
     `Closes #<n>`**, so the merge leaves the card open; merge it, then go to **Stuck** (§4)
-    with what was built, what you expected the artifact to show, and what it still shows.
+    with what was built, what you expected the artifact to show, what it still shows, and
+    the reason it hasn't moved if you have one — that reason belongs in the Stuck comment,
+    never as grounds to write `Closes` instead.
     **A correct fix for the wrong cause is the outcome this rule exists to catch.**
+  - **GitHub closes on the keyword-plus-number pairing, anywhere in the body, meaning
+    included or not.** Its merge-time scan does not read sentences — it matches that one
+    pairing wherever it sits, so a `Refs #<n>` PR whose own prose pairs the *other*
+    keyword with the same number to explain the choice — even a sentence built only to
+    say that keyword is NOT what you used — still closes the card on merge, silently,
+    however deliberate the `Refs` line above it was. **And `Closes` is not the only word
+    that does it:** close, closes, closed, fix, fixes, fixed, resolve, resolves and
+    resolved all close the card — "fixes" most of all, because it is the word a PR reaches
+    for — and so does any of them next to a link to the card. So in a `Refs` PR body, the
+    only place the card's number appears is the `Refs #<n>` line itself, and no word from
+    that list ever sits next to it, in any sentence, for any reason, contrast included.
+    Say what the PR does without the card's number ("this stays open; the artifact has not
+    moved") and save the reasoning for the Stuck comment instead.
   - **A card with no observable symptom** — a refactor, a doc, a decision, a piece of
     tooling — is unaffected. There is nothing to fetch and nothing to re-check.
-  - If the artifact cannot move until the merge deploys, fetch it anyway and read it
-    against the change you made. What you are checking is **whether the thing you changed
-    is the thing the artifact shows**, and that is answerable before the deploy: a veto
-    with nothing to veto, a ruler that never drew, a branch never reached leaves its trace
-    in the artifact you were given. Green tests say the code does what you wrote; only the
-    artifact says you wrote the right thing.
+  - **The artifact cannot move until the merge deploys? Fetch it anyway — knowing why
+    upgrades nothing.** Deploy-gating is never a reason to skip the fetch or to write
+    `Closes` on the strength of the explanation — not even alongside a correct diff and
+    green CI. What you are checking is **whether
+    the thing you changed is the thing the artifact shows**, and that is answerable before
+    the deploy: a veto with nothing to veto, a ruler that never drew, a branch never
+    reached leaves its trace in the artifact you were given. Green tests say the code does
+    what you wrote; only the artifact says you wrote the right thing.
 - **When the last card spawned from a root card closes, re-check the root's own symptom.**
   Walk the chain up (§2), fetch the root's artifact, and comment what it now shows on the
   **root card**. A root whose children all closed green while its symptom survives is the
@@ -315,7 +367,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Once per tick: if `main` moves again and conflicts again after your resolution, that is
   Stuck too. (riffmap#349, September 17, 2026: a four-line list conflict, both sides
   appending a mockup entry, went to Steve as a decision and cost a day's round trip.)
-- Docs-only changes go through a PR the same way; they get no `reviewer` pass.
+- Docs-only changes go through a PR the same way; they get no `reviewer` pass, unless they
+  touch the merge gate (§2).
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
   force-push, never merge red, never push `main` directly, never touch a project's secrets.

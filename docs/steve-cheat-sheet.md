@@ -104,6 +104,7 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 | 🤖 **FYI:** I labeled this for the … lane | the triage bot picked the lane | nothing, unless you disagree — then change the label |
 | 🤖 **FYI:** not doing this yet — the card gates itself | the card's own text says to wait; the bot obeyed and put it back in Backlog | nothing, unless the wait is over — then edit that line out and move it to Ready |
 | 🤖 **FYI:** this card waits on … | it is blocked by an open card; it starts when that closes | nothing, unless that card is not on its way |
+| 🤖 **FYI:** plan for this card | what the bot is about to build, in three lines, before it starts | nothing, unless it doesn't match what you asked for |
 | 🤖 **FYI:** | information only | nothing |
 | 🤖 Watcher: the run ended without finishing | the tick died or ran out of budget; the card will be retried once | nothing, unless it happens twice |
 | 🤖 Watcher: a run died while holding this card | cleanup after a crash | nothing |
@@ -134,9 +135,9 @@ user mention (`<@your-id>`) or `@here`.
 - **One card at a time** there, separate from riffmap's two.
 - **What it merges goes live by itself** once the checks pass and the bots are idle
   (next section).
-- **It never merges a change to its own safety checks.** Those come to you in **Stuck**
-  with the PR link: the build check, the reviewer, the merge rules, the deployer, and the
-  tests the deployer runs.
+- **You never merge anything,** here or on RiffMap. The bots merge their own work once the
+  build check passes and the reviewer finds nothing blocking. Changes to their own safety
+  checks get the strictest review, and nothing goes live until its tests pass again.
 
 ## New watcher versions deploy themselves
 

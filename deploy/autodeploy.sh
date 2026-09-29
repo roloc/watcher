@@ -70,12 +70,20 @@ active_lanes() {
     | awk '{print $1}' | sed -n 's/^watcher@\(.*\)\.service$/\1/p'
 }
 
+# A lane file is projects/<name>.env with no dot in <name>. Anything else under projects/
+# is a project's own helper (a probe script, a `<name>.detect.env` config) and never a lane:
+# starting one as watcher@<file> is a unit that fails and restarts every 30 seconds.
+is_lane_file() {
+  local b; b="$(basename "$1")"
+  [ "${b%.env}" != "$b" ] && [ -n "${b%.env}" ] && [ "${b%.env}" = "${b%%.*}" ]
+}
+
 # The project a lane belongs to: the shortest project file name it equals or extends with
 # "-" (riffmap-design -> riffmap), the same naming rollout.sh and install.sh rely on.
 project_of() {
   local lane="$1" best="" f m
   for f in "$WATCHER_DIR"/projects/*.env; do
-    [ -f "$f" ] || continue
+    [ -f "$f" ] && is_lane_file "$f" || continue
     m="$(basename "$f" .env)"
     if [ "$lane" = "$m" ] || [ "${lane#"$m"-}" != "$lane" ]; then
       [ -z "$best" ] || [ "${#m}" -lt "${#best}" ] && best="$m"
@@ -273,7 +281,7 @@ swap() {
   # A lane file this commit added, for a project already running, is started last, once
   # every sibling is on the new code (rollout.sh step 5 explains why the order matters).
   while read -r f; do
-    [ -n "$f" ] && [ -f "$WATCHER_DIR/$f" ] || continue
+    [ -n "$f" ] && [ -f "$WATCHER_DIR/$f" ] && is_lane_file "$f" || continue
     l="$(basename "$f" .env)"; p="$(project_of "$l")"
     [ "$l" != "$p" ] && echo " $lanes " | grep -q " $p " && new+=("$l")
   done <<< "$(wgit "diff --name-only --diff-filter=A $cur $sha -- projects/")"

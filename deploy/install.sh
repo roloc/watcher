@@ -45,12 +45,24 @@ install -m 644 /opt/watcher/deploy/watcher@.service /etc/systemd/system/watcher@
 # idle. Enabled here, so a box set up from scratch deploys itself from its first boot.
 install -m 644 /opt/watcher/deploy/watcher-deploy.service /etc/systemd/system/watcher-deploy.service
 install -m 644 /opt/watcher/deploy/watcher-deploy.timer /etc/systemd/system/watcher-deploy.timer
+# The detector (bin/detect.sh, card #36): the unit is installed for every box, but an
+# instance only starts for a project that carries its own projects/<name>.detect.env —
+# merging that file is what turns detection on, below, the same as a lane's own .env.
+install -m 644 /opt/watcher/deploy/watcher-detect@.service /etc/systemd/system/watcher-detect@.service
+install -m 644 /opt/watcher/deploy/watcher-detect@.timer /etc/systemd/system/watcher-detect@.timer
 systemctl daemon-reload
 # Only the first time: rollout.sh stops the timer while a person drives, and a re-install
 # from inside it must not start it again behind their back.
 systemctl is-enabled --quiet watcher-deploy.timer 2>/dev/null \
   || systemctl enable --now watcher-deploy.timer >/dev/null 2>&1 \
   || echo "warning: could not enable watcher-deploy.timer" >&2
+for f in /opt/watcher/projects/*.detect.env; do
+  [ -f "$f" ] || continue
+  p="$(basename "$f" .detect.env)"
+  systemctl is-enabled --quiet "watcher-detect@$p.timer" 2>/dev/null \
+    || systemctl enable --now "watcher-detect@$p.timer" >/dev/null 2>&1 \
+    || echo "warning: could not enable watcher-detect@$p.timer" >&2
+done
 
 # The floor page (bin/floor.py, card #40): one instance per box, holds no card and no work
 # in flight, so — unlike a `watcher@` lane — it is simply restarted here on every install,
@@ -95,4 +107,6 @@ Next, by hand:
   3. Project: install.sh <project>  clones it; drop its .env.local / private inputs in place.
   4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f
   Pause:      touch ~watcher/.local/state/watcher/<project>/PAUSE
+  Detector:   optional (card #36). Drop in projects/<project>.detect.env and re-run
+              install.sh (or wait for the next deploy) — the timer starts on its own.
 NEXT
