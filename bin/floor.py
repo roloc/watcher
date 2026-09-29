@@ -67,6 +67,8 @@ ALLOWED_FIELDS = {
     "lane", "kind", "unit", "unit_active", "pill", "link", "card", "stage", "minutes",
     "reason", "ask", "number", "url",
     "recent", "project", "when", "quota",
+    # the ship station (after the lanes): CI on main, and the box's own deployer
+    "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
 }
 
 
@@ -145,6 +147,11 @@ def lane_kind(lane):
     return "Build"
 
 
+# SDLC order on the page: the dispatcher first, then design, then build (and the ship
+# station after them all, which is not a lane).
+KIND_ORDER = {"Triage": 0, "Design": 1, "Build": 2}
+
+
 def lane_takes(agent, spec):
     """Port of `spawn.sh`'s `lane_takes`: is a card with this `agent:` label (`"-"` for
     none — `board list`'s own convention, which `spawn.sh` compares against directly) this
@@ -181,6 +188,7 @@ def group_by_project(lanes):
             "board_owner": lane["board_owner"],
             "board_number": lane["board_number"],
             "board_url": f"https://github.com/users/{lane['board_owner']}/projects/{lane['board_number']}",
+            "project_repo": lane["project_repo"],
             "lanes": [],
         })
         p["lanes"].append(lane)
@@ -215,6 +223,97 @@ def project_counts(items):
         elif st == "backlog":
             counts["backlog"] += 1
     return counts
+
+
+# --- the ship station: CI on main, and the box's own deployer ----------------------------
+
+def fetch_ci(repo, branch="main", timeout=30):
+    """The newest commit on `branch` and its check runs, through `gh api` — REST only, never
+    GraphQL, which the board dump already spends. Raises on any failure; the caller shows
+    "unknown" and never the error text."""
+    def get(path):
+        r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            raise RuntimeError("gh api failed")
+        return json.loads(r.stdout)
+    commit = get(f"repos/{repo}/commits/{branch}")
+    runs = get(f"repos/{repo}/commits/{commit['sha']}/check-runs?per_page=100").get("check_runs", [])
+    return {"sha": commit["sha"],
+            "runs": [(x.get("name", ""), x.get("status", ""), x.get("conclusion")) for x in runs]}
+
+
+def ci_summary(ci, repo):
+    """passing | running | failing | none | unknown. A failed check wins over running ones:
+    red is what someone needs to see first."""
+    if not ci:
+        return {"state": "unknown"}
+    runs = ci["runs"]
+    failing = sorted({n for n, st, c in runs
+                      if st == "completed" and c not in ("success", "skipped", "neutral")})
+    if failing:
+        state = "failing"
+    elif any(st != "completed" for _, st, _ in runs):
+        state = "running"
+    elif runs:
+        state = "passing"
+    else:
+        state = "none"
+    out = {"state": state, "sha": ci["sha"][:7],
+           "url": f"https://github.com/{repo}/commit/{ci['sha']}"}
+    if failing:
+        out["failing"] = failing[:5]
+    return out
+
+
+def _git(repo_dir, *args):
+    r = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True, timeout=10)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def watcher_repo(repo_dir, git=_git):
+    """owner/repo of the checkout this page runs from — the one the box's deployer ships."""
+    url = git(repo_dir, "remote", "get-url", "origin")
+    for prefix in ("git@github.com:", "https://github.com/"):
+        if url.startswith(prefix):
+            url = url[len(prefix):]
+    return url[:-4] if url.endswith(".git") else url
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def deploy_status(repo_dir, deploy_state, repo, git=_git):
+    """What deploy/autodeploy.sh is doing, from the files it keeps (read-only):
+    live | checking | testing | waiting | swapping | held."""
+    live = git(repo_dir, "rev-parse", "HEAD")
+    target = git(repo_dir, "rev-parse", "origin/main")
+    if not live:
+        return None
+    out = {"live": live[:7], "target": (target or live)[:7]}
+    held = _read(os.path.join(deploy_state, "held", target)) if target else None
+    draining = (_read(os.path.join(deploy_state, "draining")) or "").split()
+    ready = (_read(os.path.join(deploy_state, "ready")) or "").split()
+    evals = _read(os.path.join(deploy_state, "evals", target)) if target else None
+    if held is not None:
+        out["state"] = "held"
+        if held.isdigit():
+            out["card"] = {"number": int(held), "url": f"https://github.com/{repo}/issues/{held}"}
+    elif draining:
+        out["state"], out["target"] = "swapping", draining[0][:7]
+    elif not target or live == target:
+        out["state"] = "live"
+    elif ready and ready[0] == live:
+        out["state"] = "waiting"
+    elif evals and evals.startswith("fail"):
+        out["state"] = "testing"
+    else:
+        out["state"] = "checking"
+    return out
 
 
 # --- one lane's desk ---------------------------------------------------------------------
@@ -314,7 +413,7 @@ def _fmt_quota(cost):
 # --- assembling the page's data -----------------------------------------------------------
 
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
-                 now=None, box_name=None):
+                 now=None, box_name=None, ci_fetcher=None, deploy_fn=None, deploy_repo=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -339,7 +438,7 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
         items_by_number = {it["number"]: it for it in items if it.get("number") is not None}
 
         lane_out = []
-        for lane in p["lanes"]:
+        for lane in sorted(p["lanes"], key=lambda l: KIND_ORDER.get(lane_kind(l), 9)):
             ticks = metrics.load_lane(lane["state_dir"])  # one parse of this lane's logs
             active = unit_active_fn(lane["unit"]) if unit_active_fn else None
             desk = lane_desk(lane, items_by_number, p["board_url"], now,
@@ -357,8 +456,22 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                     "when": t.mtime.isoformat(), "quota": _fmt_quota(t.cost),
                 })
 
+        ci = None
+        if ci_fetcher:
+            try:
+                ci = ci_fetcher(p["project_repo"])
+            except Exception as e:
+                print(f"floor: CI for {p['project_repo']} unreachable: {e}", file=sys.stderr, flush=True)
+        ship = {"ci": ci_summary(ci, p["project_repo"])}
+        if deploy_fn and deploy_repo and p["project_repo"] == deploy_repo:
+            dep = deploy_fn()
+            if dep:
+                ship["deploy"] = dep
+                if dep["state"] == "held":
+                    needs_steve_total += 1
+
         entry = {"name": p["name"], "board_url": p["board_url"],
-                  "counts": project_counts(items), "lanes": lane_out}
+                  "counts": project_counts(items), "lanes": lane_out, "ship": ship}
         if board_error:
             entry["board_error"] = board_error
         out_projects.append(entry)
@@ -467,6 +580,20 @@ INDEX_HTML = """<!doctype html>
   .sprite .zz.late { animation-delay: 1.2s; }
   .sprite .flag { animation: wave 1s infinite; transform-origin: bottom left; transform-box: fill-box; }
   .sprite .body-breathe { animation: breathe 3s infinite; }
+  /* The dispatcher (the triage lane) is smaller: it routes cards, it does not work them. */
+  .desk.dispatcher { flex: 0 1 150px; min-width: 150px; }
+  .desk.dispatcher .sprite { height: 66px; }
+  .desk.ship { border-style: dashed; }
+  @keyframes sort { 0% { opacity: 0; transform: translate(0, 0); } 15% { opacity: 1; }
+                    85% { opacity: 1; } 100% { opacity: 0; transform: translate(58px, -6px); } }
+  @keyframes push { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+  @keyframes blink { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+  @keyframes flip { 0%, 40% { transform: rotate(0); } 50%, 90% { transform: rotate(180deg); } 100% { transform: rotate(360deg); } }
+  .sprite .sorting { animation: sort 1.6s infinite; }
+  .sprite .pushing { animation: push .9s infinite; }
+  .sprite .dot { animation: blink 1.2s infinite; }
+  .sprite .dot.d2 { animation-delay: .3s; } .sprite .dot.d3 { animation-delay: .6s; }
+  .sprite .glass { animation: flip 3s infinite; transform-origin: center; transform-box: fill-box; }
   @media (prefers-reduced-motion: reduce) { .sprite * { animation: none !important; } }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -539,13 +666,103 @@ function spriteSVG(pill) {
     ${extra}</svg>`;
 }
 
+// The triage lane is the dispatcher: a smaller figure at a counter with an inbox tray,
+// sending cards on to the lanes after it.
+function dispatcherSVG(pill) {
+  const c = `var(${PILL_COLOR[pill] || "--idle"})`;
+  const headAt = {sleeping: [8, 16]}[pill] || [0, 0];
+  const head = `<g transform="translate(${headAt[0]},${headAt[1]})">
+      <rect class="skin" x="44" y="24" width="13" height="13" rx="3"/>
+      <rect class="hair" x="44" y="22" width="13" height="5" rx="2"/></g>`;
+  let extra = "";
+  if (pill === "working")
+    extra = `<rect class="sorting" x="14" y="46" width="10" height="7" rx="1" style="fill:${c}"/>`;
+  if (pill === "needs_steve")
+    extra = `<g class="flag"><rect x="60" y="8" width="16" height="12" rx="1" style="fill:${c}"/>
+             <text x="64" y="18" style="fill:var(--panel);font:700 10px sans-serif">?</text></g>`;
+  if (pill === "paused")
+    extra = `<rect x="46" y="8" width="3" height="10" rx="1" style="fill:${c}"/>
+             <rect x="52" y="8" width="3" height="10" rx="1" style="fill:${c}"/>`;
+  if (pill === "idle" || pill === "sleeping")
+    extra = `<text class="zz" x="62" y="${pill === "sleeping" ? 34 : 22}">z</text>`;
+  return `<svg class="sprite" viewBox="0 0 100 80" aria-hidden="true">
+    <rect class="desk-top" x="6" y="62" width="88" height="6" rx="1"/>
+    <rect class="monitor" x="8" y="54" width="22" height="8" rx="1"/>
+    <path d="M78 44 l6 5 l-6 5" style="fill:none;stroke:var(--dim);stroke-width:2"/>
+    <path d="M86 44 l6 5 l-6 5" style="fill:none;stroke:var(--dim);stroke-width:2"/>
+    <g class="${pill === "idle" ? "body-breathe" : ""}">${pill === "sleeping" ? "" : head}
+      <rect x="40" y="39" width="21" height="23" rx="3" style="fill:${c}"/>
+      ${pill === "sleeping" ? head : ""}</g>
+    ${extra}</svg>`;
+}
+
+// The ship station, after the lanes: CI on main, and for the watcher's own board the box's
+// deployer too. Not a lane — nothing here works a card.
+const SHIP_PILL = {ok: ["working", "All green"], busy: ["paused", "Shipping"],
+                   blocked: ["needs_steve", "Blocked"], unknown: ["idle", "Unknown"]};
+function shipState(ship) {
+  const ci = (ship && ship.ci) || {state: "unknown"};
+  const dep = ship && ship.deploy;
+  const lines = [];
+  const ciLine = {passing: "all checks passed", running: "checks running",
+                  failing: "failing: " + (ci.failing || []).join(", "), none: "no checks"}[ci.state];
+  lines.push(ci.state === "unknown" ? "CI unreachable" : `main ${esc(ci.sha)}: ${esc(ciLine)}`);
+  if (dep) lines.push({live: `live on the box: ${esc(dep.live)}`,
+                       checking: `checking ${esc(dep.target)}: CI and tests`,
+                       testing: `retesting ${esc(dep.target)}`,
+                       waiting: `${esc(dep.target)} passed; waiting for idle lanes`,
+                       swapping: `swapping in ${esc(dep.target)}`,
+                       held: `held: ${esc(dep.target)}` + (dep.card ? ` (#${dep.card.number})` : "")}[dep.state] || "");
+  let pill = "ok", mode = "done";
+  if ((dep && dep.state === "held") || ci.state === "failing") { pill = "blocked"; mode = "blocked"; }
+  else if (dep && dep.state === "waiting") { pill = "busy"; mode = "waiting"; }
+  else if (dep && dep.state === "swapping") { pill = "busy"; mode = "pushing"; }
+  else if ((dep && dep.state !== "live") || ci.state === "running") { pill = "busy"; mode = "checking"; }
+  else if (ci.state === "unknown" && !dep) { pill = "unknown"; mode = "idle"; }
+  const link = (dep && dep.card && dep.card.url) || ci.url || "";
+  return {pill, mode, lines, link, deploys: !!dep};
+}
+function shipSVG(mode, pill) {
+  const c = `var(--${{working: "working", paused: "paused", needs_steve: "needs", idle: "idle"}[SHIP_PILL[pill][0]]})`;
+  let sign = "";
+  if (mode === "done") sign = `<path d="M58 22 l6 6 l12 -14" style="fill:none;stroke:${c};stroke-width:4"/>`;
+  if (mode === "checking") sign = `<circle class="dot" cx="58" cy="24" r="3" style="fill:${c}"/>
+      <circle class="dot d2" cx="67" cy="24" r="3" style="fill:${c}"/><circle class="dot d3" cx="76" cy="24" r="3" style="fill:${c}"/>`;
+  if (mode === "waiting") sign = `<g class="glass"><path d="M60 12 h14 l-7 10 l7 10 h-14 l7 -10 z" style="fill:${c}"/></g>`;
+  if (mode === "blocked") sign = `<g class="flag"><rect x="12" y="8" width="2" height="28" class="monitor"/>
+      <rect x="14" y="8" width="14" height="10" style="fill:${c}"/></g>`;
+  return `<svg class="sprite" viewBox="0 0 100 80" aria-hidden="true">
+    <rect class="desk-top" x="10" y="62" width="80" height="6" rx="1"/>
+    <g class="${mode === "pushing" ? "pushing" : ""}">
+      <rect x="52" y="38" width="30" height="24" rx="2" style="fill:${c};opacity:.35"/>
+      <rect x="52" y="38" width="30" height="24" rx="2" style="fill:none;stroke:${c};stroke-width:2"/>
+      <path d="M52 46 h30" style="stroke:${c};stroke-width:2"/></g>
+    <rect class="skin" x="24" y="22" width="16" height="16" rx="3"/>
+    <rect class="hair" x="24" y="20" width="16" height="6" rx="2"/>
+    <rect x="20" y="40" width="24" height="22" rx="3" style="fill:${c}"/>
+    <rect class="${mode === "pushing" ? "arm-typing" : ""}" x="42" y="46" width="10" height="5" rx="2" style="fill:${c}"/>
+    ${sign}</svg>`;
+}
+function shipHTML(ship) {
+  const st = shipState(ship);
+  const [cls, label] = SHIP_PILL[st.pill];
+  return `<a class="desk ship" href="${esc(st.link)}">
+    ${shipSVG(st.mode, st.pill)}
+    <div class="name">Ship</div>
+    <div class="unit">${st.deploys ? "CI and the box's deployer" : "CI on main"}</div>
+    <span class="pill ${cls}">${label}</span>
+    ${st.lines.map(l => `<div class="detail">${l}</div>`).join("")}
+  </a>`;
+}
+
 function deskHTML(d) {
   let detail = "";
   if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
-  return `<a class="desk" href="${esc(d.link)}">
-    ${spriteSVG(d.pill)}
+  const dispatcher = d.kind === "Triage";
+  return `<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}">
+    ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
     <div class="name">${esc(d.kind)}</div>
     <div class="unit">${esc(d.unit)}</div>
     <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
@@ -565,7 +782,7 @@ function render(state) {
       <h2><a href="${esc(p.board_url)}">${esc(p.name)}</a></h2>
       <div class="counts">Ready ${p.counts.ready} · In progress ${p.counts.in_progress} · Backlog ${p.counts.backlog}
         ${p.board_error ? `<span class="alert"> — board unreachable</span>` : ""}</div>
-      <div class="desks">${p.lanes.map(deskHTML).join("")}</div>
+      <div class="desks">${p.lanes.map(deskHTML).join("")}${shipHTML(p.ship)}</div>
     </section>`).join("");
 
   const tbody = document.querySelector("#recent tbody");
@@ -671,9 +888,14 @@ def main(argv):
     except ValueError:
         sys.exit(f"floor.py: {a} wants a number, got {argv[i]!r}")
 
+    deploy_state = os.environ.get("DEPLOY_STATE") or "/var/lib/watcher-deploy"
+    deploy_repo = watcher_repo(REPO_ROOT)
+
     def build():
         return build_state(projects_dir, state_root, fetch_board,
-                            unit_active_fn=systemctl_is_active, ask_fn=board_ask)
+                            unit_active_fn=systemctl_is_active, ask_fn=board_ask,
+                            ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
+                            deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo))
 
     cache = Cache(build, refresh_sec)
     stop_event = threading.Event()

@@ -99,9 +99,14 @@ worktree.
 always on (`watcher-floor.service`), that groups every lane in `projects/*.env` by the
 board it works and shows one of five states per lane — working (the card, its Stage,
 minutes since launch), idle (why), needs Steve (the card and the first line of its ask),
-paused, or sleeping after a failure — plus the last few ticks across every project. It
-reads `projects/*.env`, each lane's state directory, and one `board.py dump` per board
-(cached, refreshed about once a minute); it never changes anything. Read-only, LAN-only
+paused, or sleeping after a failure — plus the last few ticks across every project. Each
+board's lanes read in SDLC order — the triage lane drawn as a smaller dispatcher, then
+design, then build — and end at a **ship station**: the check runs on the newest `main`
+commit (`gh api`, REST only), and on the board whose repo is this checkout, the deployer's
+state from `/var/lib/watcher-deploy` (live, checking, testing, waiting, swapping, held — a
+held commit counts as needing Steve). It reads `projects/*.env`, each lane's state
+directory, one `board.py dump` per board and two REST calls per project (all cached,
+refreshed about once a minute); it never changes anything. Read-only, LAN-only
 (reached off-site over WireGuard), runs as the unprivileged `watcher` user.
 `bin/test-floor.py` is its offline suite: fixture state directories, a stubbed board.
 

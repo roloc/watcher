@@ -441,13 +441,94 @@ except ValueError:
 
 print("14. every desk has its character (card #40: the picture was missing on first ship)")
 html = floor.INDEX_HTML
-check("the page draws a character on every desk", "${spriteSVG(d.pill)}" in html)
+check("the page draws a character on every desk",
+      "dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)" in html)
 for pill in ("working", "idle", "needs_steve", "paused", "sleeping"):
     check(f"...with a colour for the {pill} pose", f"{pill}: \"--" in html.split("const PILL_COLOR")[1].split("};")[0])
 check("working types", "arm-typing" in html and "@keyframes type" in html)
 check("idle and sleeping doze", "@keyframes zz" in html)
 check("needs Steve waves a flag", 'class="flag"' in html and "@keyframes wave" in html)
 check("reduced motion stops every animation", "prefers-reduced-motion: reduce" in html)
+
+print("15. SDLC order: the dispatcher, then design, then build, then the ship station")
+state15 = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                            ask_fn=stub_ask, now=NOW, box_name="test-box")
+rm = next(p for p in state15["projects"] if p["name"] == "riffmap")
+check("riffmap's lanes read Triage, Design, Build", [l["kind"] for l in rm["lanes"]] == ["Triage", "Design", "Build"],
+      [l["kind"] for l in rm["lanes"]])
+check("every project has a ship station", all("ship" in p for p in state15["projects"]))
+check("with no CI fetcher the ship station says unknown, not a crash",
+      rm["ship"]["ci"]["state"] == "unknown")
+check("the page puts the ship station after the lanes", "${p.lanes.map(deskHTML).join(\"\")}${shipHTML(p.ship)}" in floor.INDEX_HTML)
+check("the triage lane is drawn as the dispatcher", "dispatcherSVG" in floor.INDEX_HTML and "desk.dispatcher" in floor.INDEX_HTML)
+
+print("16. CI on main, summarized")
+S = "a" * 40
+def summ(runs):
+    return floor.ci_summary({"sha": S, "runs": runs}, "roloc/x")
+check("all green is passing", summ([("verify", "completed", "success"), ("web", "completed", "skipped")])["state"] == "passing")
+check("a running check is running", summ([("verify", "in_progress", None), ("web", "completed", "success")])["state"] == "running")
+f = summ([("verify", "completed", "failure"), ("web", "in_progress", None)])
+check("a failed check beats a running one, and is named", f["state"] == "failing" and f["failing"] == ["verify"], f)
+check("no checks at all is none", summ([])["state"] == "none")
+check("the link is the commit", summ([])["url"] == f"https://github.com/roloc/x/commit/{S}")
+check("an unreachable CI is unknown", floor.ci_summary(None, "roloc/x") == {"state": "unknown"})
+
+print("17. the box's deployer, read from its own state files")
+DS = os.path.join(ROOT, "deploy-state"); os.makedirs(os.path.join(DS, "held"), exist_ok=True)
+os.makedirs(os.path.join(DS, "evals"), exist_ok=True)
+L, T = "1" * 40, "2" * 40
+def fake_git(live, target):
+    return lambda d, *a: {("rev-parse", "HEAD"): live, ("rev-parse", "origin/main"): target}.get(tuple(a), "")
+def dstate():
+    return floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(L, T))
+def reset():
+    for f_ in ("draining", "ready"):
+        try: os.remove(os.path.join(DS, f_))
+        except OSError: pass
+    for d_ in ("held", "evals"):
+        for f_ in os.listdir(os.path.join(DS, d_)): os.remove(os.path.join(DS, d_, f_))
+reset()
+check("the box on main's newest commit is live",
+      floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(L, L))["state"] == "live")
+check("behind with nothing recorded yet is checking", dstate()["state"] == "checking")
+open(os.path.join(DS, "evals", T), "w").write("fail 1")
+check("one suite failure is testing (the retry)", dstate()["state"] == "testing")
+open(os.path.join(DS, "ready"), "w").write(f"{L} 1790000000")
+check("ready and behind is waiting for idle lanes", dstate()["state"] == "waiting")
+open(os.path.join(DS, "draining"), "w").write(f"{T} {L} ")
+check("a drain in progress is swapping", dstate()["state"] == "swapping")
+open(os.path.join(DS, "held", T), "w").write("58")
+h = dstate()
+check("a held commit is held, with its card", h["state"] == "held" and h["card"]["number"] == 58
+      and h["card"]["url"] == "https://github.com/roloc/watcher/issues/58", h)
+check("a checkout that is not a repo shows no deployer", floor.deploy_status("/x", DS, "r/w", git=lambda d, *a: "") is None)
+
+state17 = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                            ask_fn=stub_ask, now=NOW, box_name="test-box",
+                            ci_fetcher=lambda repo: {"sha": S, "runs": [("verify", "completed", "success")]},
+                            deploy_fn=dstate, deploy_repo="roloc/riffmap")
+rm17 = next(p for p in state17["projects"] if p["name"] == "riffmap")
+others = [p for p in state17["projects"] if p["name"] != "riffmap"]
+check("the deployer shows on the project whose repo it ships, only", "deploy" in rm17["ship"]
+      and not any("deploy" in p["ship"] for p in others))
+check("a held deploy counts toward 'need Steve'",
+      state17["header"]["needs_steve_total"] == state15["header"]["needs_steve_total"] + 1)
+def keys(o):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            yield k; yield from keys(v)
+    elif isinstance(o, list):
+        for v in o: yield from keys(v)
+check("the ship station emits only allowed fields", set(keys(state17)) <= floor.ALLOWED_FIELDS,
+      set(keys(state17)) - floor.ALLOWED_FIELDS)
+def failing_ci(repo):
+    raise RuntimeError("gh: token ghp_notreal rejected")
+state17b = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                             ask_fn=stub_ask, now=NOW, box_name="test-box", ci_fetcher=failing_ci)
+check("a CI fetch that fails shows unknown, and its error text never reaches the page",
+      all(p["ship"]["ci"] == {"state": "unknown"} for p in state17b["projects"])
+      and "ghp_notreal" not in json.dumps(state17b))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 

@@ -5,7 +5,11 @@
 **The floor page** shows what every bot is doing right now, without asking anyone:
 `http://192.168.176.45:8787/` (the box's LAN address today — it's on DHCP, so `hostname -I`
 on the box is the source of truth if this ever stops loading), reached off-site over
-whatever WireGuard tunnel already reaches the box. Working, idle, needing you, paused, or
+whatever WireGuard tunnel already reaches the box. Each board reads left to right in the
+order work flows: the **dispatcher** (triage, sorting new cards to the right bot), then
+**design**, then **build**, then **ship** — the build check on `main`, and for the
+watcher's own board whether the newest version is live, being tested, waiting for the bots
+to be idle, or held (a red flag, with its card). Working, idle, needing you, paused, or
 asleep after a failure — one look, phone-friendly, light and dark. Read-only: it never
 changes a card.
 
