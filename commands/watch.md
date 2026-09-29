@@ -301,11 +301,14 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     pairing wherever it sits, so a `Refs #<n>` PR whose own prose pairs the *other*
     keyword with the same number to explain the choice — even a sentence built only to
     say that keyword is NOT what you used — still closes the card on merge, silently,
-    however deliberate the `Refs` line above it was. So: pick one of the two keywords for
-    a given PR body and never type the other one next to that card's number, in any
-    sentence, for any reason, contrast included. Describe a staying-open choice in words
-    that name neither keyword ("this stays open; the artifact has not moved") and save
-    the reasoning for the Stuck comment instead.
+    however deliberate the `Refs` line above it was. **And `Closes` is not the only word
+    that does it:** close, closes, closed, fix, fixes, fixed, resolve, resolves and
+    resolved all close the card — "fixes" most of all, because it is the word a PR reaches
+    for — and so does any of them next to a link to the card. So in a `Refs` PR body, the
+    only place the card's number appears is the `Refs #<n>` line itself, and no word from
+    that list ever sits next to it, in any sentence, for any reason, contrast included.
+    Say what the PR does without the card's number ("this stays open; the artifact has not
+    moved") and save the reasoning for the Stuck comment instead.
   - **A card with no observable symptom** — a refactor, a doc, a decision, a piece of
     tooling — is unaffected. There is nothing to fetch and nothing to re-check.
   - **The artifact cannot move until the merge deploys? Fetch it anyway — knowing why

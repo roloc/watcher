@@ -239,7 +239,7 @@ def gh_pr_checks(argv):
 
 
 CLOSES_RE = re.compile(
-    r"\b(?:closes?|fixes?|resolves?)\s*:?\s*(?:\[#(\d+)\]\([^)]*\)|#(\d+))", re.I
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*(?:\[#(\d+)\]\([^)]*\)|#(\d+))", re.I
 )
 
 
