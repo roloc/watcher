@@ -351,7 +351,9 @@ def failing_fetcher(owner, number):
 state2 = floor.build_state(PROJECTS, STATE, failing_fetcher, unit_active_fn=stub_unit_active,
                             ask_fn=stub_ask, now=NOW, box_name="test-box")
 riffmap2 = next(p for p in state2["projects"] if p["name"] == "riffmap")
-check("the failing project carries board_error", "rate limited" in riffmap2.get("board_error", ""))
+check("the failing project carries board_error", riffmap2.get("board_error") is True)
+check("…and never the error text (gh's stderr stays off the page)",
+      "rate limited" not in json.dumps(state2))
 check("its counts are just empty, not a crash", riffmap2["counts"] == {"ready": 0, "in_progress": 0, "backlog": 0})
 other_names = {p["name"] for p in state2["projects"]}
 check("every other project still rendered",

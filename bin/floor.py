@@ -103,6 +103,11 @@ def discover_lanes(projects_dir, state_root):
     `PROJECT_NAME`/`LANE_AGENTS`, because bash re-sources each file from scratch."""
     lanes = []
     for path in sorted(glob.glob(os.path.join(projects_dir, "*.env"))):
+        # A lane file is `<name>.env` with no dot in `<name>`, the deployer's rule
+        # (deploy/autodeploy.sh, is_lane_file): `<name>.detect.env` and the like are a
+        # project's own config, never a lane.
+        if "." in os.path.basename(path)[: -len(".env")]:
+            continue
         env = read_env_file(path)
         if not env.get("PROJECT_REPO") or not env.get("BOARD_OWNER"):
             continue  # not a real project file
@@ -325,7 +330,12 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
             board_error = None
         except Exception as e:
             items = []
-            board_error = str(e)
+            # The page says only "unreachable". The reason is gh's stderr, which the card
+            # keeps off the page (roloc/watcher#40, "never ... stderr"), so it goes to the
+            # service's journal instead.
+            board_error = True
+            print(f"floor: board {p['board_owner']}/{p['board_number']} unreachable: {e}",
+                  file=sys.stderr, flush=True)
         items_by_number = {it["number"]: it for it in items if it.get("number") is not None}
 
         lane_out = []
