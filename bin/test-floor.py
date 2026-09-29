@@ -439,6 +439,16 @@ except SystemExit as e:
 except ValueError:
     check("a non-numeric --port exits with a message, not an uncaught ValueError", False)
 
+print("14. every desk has its character (card #40: the picture was missing on first ship)")
+html = floor.INDEX_HTML
+check("the page draws a character on every desk", "${spriteSVG(d.pill)}" in html)
+for pill in ("working", "idle", "needs_steve", "paused", "sleeping"):
+    check(f"...with a colour for the {pill} pose", f"{pill}: \"--" in html.split("const PILL_COLOR")[1].split("};")[0])
+check("working types", "arm-typing" in html and "@keyframes type" in html)
+check("idle and sleeping doze", "@keyframes zz" in html)
+check("needs Steve waves a flag", 'class="flag"' in html and "@keyframes wave" in html)
+check("reduced motion stops every animation", "prefers-reduced-motion: reduce" in html)
+
 shutil.rmtree(ROOT, ignore_errors=True)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")

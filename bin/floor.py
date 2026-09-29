@@ -451,6 +451,24 @@ INDEX_HTML = """<!doctype html>
   .pill.paused { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
   .pill.sleeping { background: color-mix(in srgb, var(--sleep) 18%, transparent); color: var(--sleep); }
   .detail { font-size: 13px; margin-top: 6px; color: var(--dim); }
+  /* The characters (card #40: "a small character at a desk"): one pose per pill. */
+  .sprite { display: block; width: 100%; max-width: 150px; height: 84px; margin-bottom: 4px; }
+  .sprite .desk-top, .sprite .monitor { fill: var(--dim); }
+  .sprite .skin { fill: #e8a27c; }
+  .sprite .hair { fill: #3b3a36; }
+  .sprite .zz { fill: var(--dim); font: 700 12px sans-serif; }
+  @keyframes type { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes zz { 0% { opacity: 0; transform: translate(0, 0); } 50% { opacity: 1; }
+                  100% { opacity: 0; transform: translate(6px, -10px); } }
+  @keyframes wave { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } }
+  @keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+  .sprite .arm-typing { animation: type .45s infinite; transform-box: fill-box; }
+  .sprite .zz { animation: zz 2.4s infinite; }
+  .sprite .zz.late { animation-delay: 1.2s; }
+  .sprite .flag { animation: wave 1s infinite; transform-origin: bottom left; transform-box: fill-box; }
+  .sprite .body-breathe { animation: breathe 3s infinite; }
+  @media (prefers-reduced-motion: reduce) { .sprite * { animation: none !important; } }
+  .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   th { color: var(--dim); font-weight: 600; }
@@ -465,7 +483,7 @@ INDEX_HTML = """<!doctype html>
 <div id="projects"></div>
 <section class="project">
   <h2>Recent ticks</h2>
-  <table id="recent"><thead><tr><th>Project</th><th>Lane</th><th>Card</th><th>When</th><th>Quota</th></tr></thead><tbody></tbody></table>
+  <div class="table-wrap"><table id="recent"><thead><tr><th>Project</th><th>Lane</th><th>Card</th><th>When</th><th>Quota</th></tr></thead><tbody></tbody></table></div>
 </section>
 <script>
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
@@ -484,12 +502,50 @@ function relTime(iso) {
   return Math.round(d / 86400) + "d ago";
 }
 
+// One lane's character. Its shirt and screen take the pill's own colour, so the picture
+// and the pill always agree; the pose says the same thing the pill does.
+const PILL_COLOR = {working: "--working", idle: "--idle", needs_steve: "--needs",
+                    paused: "--paused", sleeping: "--sleep"};
+function spriteSVG(pill) {
+  const c = `var(${PILL_COLOR[pill] || "--idle"})`;
+  const screenLit = pill === "working" || pill === "needs_steve";
+  // Head position: upright at work, drooping when idle, face down on the desk when
+  // sleeping (drawn after the body then, or the body would hide it).
+  const headAt = {idle: [0, 4], sleeping: [16, 24]}[pill] || [0, 0];
+  const head = `<g transform="translate(${headAt[0]},${headAt[1]})">
+      <rect class="skin" x="24" y="22" width="16" height="16" rx="3"/>
+      <rect class="hair" x="24" y="20" width="16" height="6" rx="2"/></g>`;
+  const arm = pill === "working"
+    ? `<rect class="arm-typing" x="42" y="46" width="14" height="5" rx="2" style="fill:${c}"/>`
+    : `<rect x="40" y="52" width="12" height="5" rx="2" style="fill:${c}"/>`;
+  let extra = "";
+  if (pill === "idle" || pill === "sleeping")
+    extra = `<text class="zz" x="${pill === "sleeping" ? 44 : 44}" y="${pill === "sleeping" ? 34 : 22}">z</text>
+             <text class="zz late" x="52" y="${pill === "sleeping" ? 26 : 14}">z</text>`;
+  if (pill === "needs_steve")
+    extra = `<g class="flag"><rect x="12" y="6" width="2" height="30" class="monitor"/>
+             <rect x="14" y="6" width="14" height="10" style="fill:${c}"/></g>`;
+  if (pill === "paused")
+    extra = `<rect x="27" y="4" width="3" height="11" rx="1" style="fill:${c}"/>
+             <rect x="34" y="4" width="3" height="11" rx="1" style="fill:${c}"/>`;
+  return `<svg class="sprite" viewBox="0 0 100 80" aria-hidden="true">
+    <rect class="desk-top" x="10" y="62" width="80" height="6" rx="1"/>
+    <rect class="monitor" x="54" y="38" width="30" height="22" rx="2"/>
+    <rect x="57" y="41" width="24" height="16" style="fill:${screenLit ? c : "var(--line)"};opacity:${screenLit ? .55 : 1}"/>
+    <rect class="monitor" x="66" y="60" width="6" height="3"/>
+    <g class="${pill === "idle" ? "body-breathe" : ""}">${pill === "sleeping" ? "" : head}
+      <rect x="20" y="40" width="24" height="22" rx="3" style="fill:${c}"/>${arm}
+      ${pill === "sleeping" ? head : ""}</g>
+    ${extra}</svg>`;
+}
+
 function deskHTML(d) {
   let detail = "";
   if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   return `<a class="desk" href="${esc(d.link)}">
+    ${spriteSVG(d.pill)}
     <div class="name">${esc(d.kind)}</div>
     <div class="unit">${esc(d.unit)}</div>
     <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
