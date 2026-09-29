@@ -23,6 +23,9 @@ elif [ ! -d /opt/watcher ]; then
 fi
 chown -R watcher:watcher /opt/watcher
 chmod +x /opt/watcher/bin/*.sh /opt/watcher/deploy/*.sh
+# The chmod above must never read as a local change to git: the deployer refuses to update
+# a checkout with changes of its own (deploy/autodeploy.sh sets this too).
+su - watcher -c "git -C /opt/watcher config core.fileMode false" 2>/dev/null || true
 
 install -d -m 750 -o root -g watcher /etc/watcher
 [ -f /etc/watcher/env ] || { echo "CLAUDE_CODE_OAUTH_TOKEN=" > /etc/watcher/env; chown root:watcher /etc/watcher/env; chmod 640 /etc/watcher/env; }

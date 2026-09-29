@@ -48,6 +48,11 @@ EOF
 cat > "$BIN/board" <<'EOF'
 #!/usr/bin/env bash
 echo "board $* owner=${BOARD_OWNER:-} number=${BOARD_NUMBER:-}" >> "$CALLS"
+# $TMP/board-fails holds how many more moves fail (the board not caught up yet).
+if [ -s "$TMP/board-fails" ]; then
+  left="$(cat "$TMP/board-fails")"
+  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$TMP/board-fails"; exit 1; fi
+fi
 EOF
 printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/flock"
 chmod +x "$BIN"/*
@@ -89,7 +94,7 @@ mkdir -p "$(dirname "$BOX")"; git clone -q "$ORIGIN" "$BOX"
 STATE="$TMP/state"
 export WATCHER_DIR="$BOX" WATCHER_STATE_ROOT="$STATE" DEPLOY_STATE="$TMP/dstate" \
        DEPLOY_SCRATCH="$TMP/scratch" DEPLOY_CGROUP_ROOT="$TMP/no-cgroups" DEPLOY_USER="$(id -un)" \
-       DEPLOY_GRACE_SEC=0 DEPLOY_DRAIN_AFTER_MIN=240
+       DEPLOY_GRACE_SEC=0 DEPLOY_MOVE_RETRY_SEC=0 DEPLOY_DRAIN_AFTER_MIN=240
 
 # commit <path> <text>: a new commit on origin/main touching one file; prints its sha.
 commit() {
@@ -100,7 +105,7 @@ commit() {
 run()   { : > "$CALLS"; bash "$DEPLOY" > "$TMP/out" 2>&1; }
 head_() { git -C "$BOX" rev-parse HEAD; }
 fresh() {  # a clean slate between cases: box at origin/main, no state, idle lanes
-  rm -rf "$TMP/dstate" "$STATE" "$TMP/eval-fails" "$TMP/labels" "$TMP/next-issue"
+  rm -rf "$TMP/dstate" "$STATE" "$TMP/eval-fails" "$TMP/labels" "$TMP/next-issue" "$TMP/board-fails"
   git -C "$BOX" fetch -q origin; git -C "$BOX" reset -q --hard origin/main
   printf 'riffmap\nriffmap-design\nwatcher\n' > "$TMP/active"
   echo "completed success" > "$TMP/ci"
@@ -237,6 +242,18 @@ check "a dirty box checkout: held, not merged"         [ "$(head_)" != "$T" ]
 check "…with one card (the reason has an apostrophe)"  [ "$(count 'gh issue create')" = 1 ]
 echo deploy-anyway > "$TMP/labels"; run
 check "deploy-anyway on it: reset to the target"       [ "$(head_)" = "$T" ]
+
+# 12b. A file's executable bit changed on the box (install.sh chmods bin/) is not a change
+fresh; T="$(commit commands/watch.md v12b)"; chmod +x "$BOX/commands/watch.md"
+run
+check "a mode-only change on the box does not hold the deploy" [ "$(head_)" = "$T" ]
+check "…and files no card"                             not_called "issue create"
+
+# 12c. The move to Stuck is retried when the board has not caught up with the new item
+fresh; touch "$TMP/eval-fails"; echo 2 > "$TMP/board-fails"; T="$(commit commands/watch.md v12c)"
+run; run
+check "a held card still reaches Stuck when the first moves fail" [ "$(count 'board move 77 Stuck')" = 3 ]
+rm -f "$TMP/board-fails"
 
 # 13. A deploy closes the older held cards
 fresh; touch "$TMP/eval-fails"; H="$(commit commands/watch.md v13)"; run; run

@@ -204,9 +204,18 @@ EOF
   fi
   echo "$n" > "$DSTATE/held/$sha"
   # Onto the board by hand (auto-add is not relied on), then Stuck — board.py's move is what
-  # posts the Discord alert, after the change lands.
-  as_user "$(q gh project item-add "$board" --owner "$owner" --url "$url") >/dev/null 2>&1; $(q env BOARD_OWNER="$owner" BOARD_NUMBER="$board" board move "$n" 'Stuck - Needs help') >/dev/null 2>&1" \
-    && say "filed $url in Stuck" || say "filed $url but could not move it to Stuck"
+  # posts the Discord alert, after the change lands. The move is retried: GitHub's board
+  # index lags a just-added item by seconds, and on September 28, 2026 all four held cards
+  # were filed and never reached Stuck, so nobody heard about six hours of held deploys.
+  as_user "$(q gh project item-add "$board" --owner "$owner" --url "$url") >/dev/null 2>&1"
+  local try
+  for try in 1 2 3 4; do
+    sleep "${DEPLOY_MOVE_RETRY_SEC:-10}"
+    if as_user "$(q env BOARD_OWNER="$owner" BOARD_NUMBER="$board" board move "$n" 'Stuck - Needs help') >/dev/null 2>&1"; then
+      say "filed $url in Stuck"; return 0
+    fi
+  done
+  say "filed $url but could not move it to Stuck after 4 tries"
 }
 
 # close_held_except <sha>: a deployed commit supersedes every older held card.
@@ -295,6 +304,11 @@ swap() {
 # --- one run --------------------------------------------------------------------------------
 
 main() {
+  # install.sh chmods every script in bin/ and deploy/, so a file committed without its
+  # executable bit reads as a local change and every commit would be held as "the box's
+  # copy has changes of its own" (September 28, 2026: bin/test-deploy.sh held four
+  # commits for six hours). The mode is the installer's business, not git's.
+  wgit "config core.fileMode false" || true
   wgit "fetch -q origin $BRANCH" || { say_once fetch "fetch failed; trying again next run"; return 0; }
   local cur tgt drain="" from="" force=""
   cur="$(wgit 'rev-parse HEAD')"; tgt="$(wgit "rev-parse origin/$BRANCH")"
