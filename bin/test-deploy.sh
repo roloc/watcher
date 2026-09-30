@@ -90,11 +90,17 @@ echo "v1" > "$SEED/commands/watch.md"
 git -C "$SEED" add -A; git -C "$SEED" commit -qm v1
 git -C "$SEED" remote add origin "$ORIGIN"; git -C "$SEED" push -q origin main
 mkdir -p "$(dirname "$BOX")"; git clone -q "$ORIGIN" "$BOX"
+# A second, independent checkout (card #46) — cloned once here, like $BOX; a case that
+# wants LANE_CHANNEL=canary in play resets it to a known commit itself, the same way
+# `fresh` resets $BOX, since most cases have no canary lane at all and must never touch it.
+CANARY="$TMP/opt/watcher-canary"
+mkdir -p "$(dirname "$CANARY")"; git clone -q "$ORIGIN" "$CANARY"
 
 STATE="$TMP/state"
 export WATCHER_DIR="$BOX" WATCHER_STATE_ROOT="$STATE" DEPLOY_STATE="$TMP/dstate" \
        DEPLOY_SCRATCH="$TMP/scratch" DEPLOY_CGROUP_ROOT="$TMP/no-cgroups" DEPLOY_USER="$(id -un)" \
-       DEPLOY_GRACE_SEC=0 DEPLOY_MOVE_RETRY_SEC=0 DEPLOY_DRAIN_AFTER_MIN=240
+       DEPLOY_GRACE_SEC=0 DEPLOY_MOVE_RETRY_SEC=0 DEPLOY_DRAIN_AFTER_MIN=240 \
+       DEPLOY_CANARY_DIR="$CANARY" DEPLOY_CANARY_SOAK_TICKS=2 DEPLOY_CANARY_QUIET_MIN=60
 
 # commit <path> <text>: a new commit on origin/main touching one file; prints its sha.
 commit() {
@@ -114,6 +120,10 @@ fresh() {  # a clean slate between cases: box at origin/main, no state, idle lan
 called()     { grep -q -- "$1" "$CALLS"; }
 not_called() { ! grep -q -- "$1" "$CALLS"; }
 count()      { grep -c -- "$1" "$CALLS"; }
+# Exact-line variants: "systemctl restart watcher@riffmap" is a SUBSTRING of "…@riffmap-design",
+# so telling those two lanes apart (canary tests below) needs a full-line match, not called()'s.
+called_exact()     { grep -qxF -- "$1" "$CALLS"; }
+not_called_exact() { ! grep -qxF -- "$1" "$CALLS"; }
 
 echo "autodeploy"
 
@@ -260,6 +270,74 @@ fresh; touch "$TMP/eval-fails"; H="$(commit commands/watch.md v13)"; run; run
 rm -f "$TMP/eval-fails"; T="$(commit commands/watch.md v13b)"; run
 check "a later commit deploys past a held one"         [ "$(head_)" = "$T" ]
 check "…and closes the held card as superseded"        called "gh issue close 77"
+
+# ============================================================================
+echo "Canary channel (card #46): a lane whose project file sets LANE_CHANNEL=canary"
+echo "takes a commit first, on a second checkout, before it reaches every other lane"
+# ============================================================================
+# From here on, watcher.env carries LANE_CHANNEL=canary — the fixture equivalent of this
+# card's own projects/watcher.env. $CANARY (cloned once, above) is this section's own
+# checkout; every case resets it the same way `fresh` resets $BOX.
+cat > "$SEED/projects/watcher.env" <<'EOF'
+PROJECT_NAME=watcher
+PROJECT_REPO=roloc/watcher
+BOARD_OWNER=roloc
+BOARD_NUMBER=2
+LANE_CHANNEL=canary
+EOF
+git -C "$SEED" add -A; git -C "$SEED" commit -qm "watcher.env: LANE_CHANNEL=canary"; git -C "$SEED" push -q origin main
+
+canary_fresh() { fresh; git -C "$CANARY" fetch -q origin; git -C "$CANARY" reset -q --hard origin/main; }
+canary_head()  { git -C "$CANARY" rev-parse HEAD; }
+# canary_tick_log <subtype> — a result json for the watcher lane, dated now (after whatever
+# the most recent `run` set the soak's clock to).
+canary_tick_log() {
+  mkdir -p "$STATE/watcher/logs"
+  echo "{\"subtype\":\"$1\"}" > "$STATE/watcher/logs/card-$RANDOM-$RANDOM.json"
+}
+
+# A. A canary deploy restarts only the canary lane(s)
+canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-a)"
+run
+check "canary A: the suite ran before anything moved"     called "eval at $T box $OLD"
+check "canary A: the canary checkout reaches the target"  [ "$(canary_head)" = "$T" ]
+check "canary A: the canary lane restarts"                called_exact "systemctl restart watcher@watcher"
+check "canary A: riffmap's lane does not"                 not_called_exact "systemctl restart watcher@riffmap"
+check "canary A: riffmap-design's lane does not"          not_called_exact "systemctl restart watcher@riffmap-design"
+check "canary A: the stable checkout has not moved yet"   [ "$(head_)" != "$T" ]
+
+# B. A clean soak (DEPLOY_CANARY_SOAK_TICKS=2 in this fixture) promotes the rest
+canary_fresh; T="$(commit commands/watch.md canary-b)"
+run   # the canary swap; starts the soak clock
+canary_tick_log success; canary_tick_log success
+run   # sees 2 clean ticks, promotes
+check "canary B: a clean soak promotes the stable checkout too" [ "$(head_)" = "$T" ]
+check "canary B: the other lanes restart on promotion"          called "systemctl restart watcher@riffmap"
+
+# C. A canary tick that dies holds the commit and rolls the canary back
+canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-c)"
+run   # the canary swap
+canary_tick_log error_during_execution
+run   # sees the dead tick
+check "canary C: the canary checkout rolls back"        [ "$(canary_head)" = "$OLD" ]
+check "canary C: the commit is held, not promoted"      [ "$(head_)" != "$T" ]
+check "canary C: one card filed (talking-to-steve shape)" called "Deploy held: ${T:0:7} is not live"
+check "canary C: …and moved to Stuck"                   called "board move 77 Stuck - Needs help owner=roloc number=2"
+
+# D. A quiet canary (DEPLOY_CANARY_QUIET_MIN=60) promotes on time, with no ticks at all
+canary_fresh; T="$(commit commands/watch.md canary-d)"
+run   # the canary swap; no ticks logged
+echo "$T $(( $(date +%s) - 61 * 60 ))" > "$TMP/dstate/canary-soak"   # quiet for 61 min > 60
+run
+check "canary D: a quiet canary promotes on time" [ "$(head_)" = "$T" ]
+
+# E. A commit that skips the suite (nothing a model reads changed) promotes straight away,
+# canary lane configured or not — canary is additive, never a new gate of its own.
+canary_fresh; OLD_CANARY="$(canary_head)"; T="$(commit README.md canary-e)"
+run
+check "canary E: a docs-only commit still skips the suite" not_called "eval at"
+check "canary E: …and promotes directly"                   [ "$(head_)" = "$T" ]
+check "canary E: …never touching the canary checkout"       [ "$(canary_head)" = "$OLD_CANARY" ]
 
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi

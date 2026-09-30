@@ -126,6 +126,21 @@ default `/watch`) and **`LANE_WORKDIR`** (`card`, the default, runs the tick in 
 made for the card; `root` runs it in the main checkout with no worktree). The triage lane
 is `LANE_COMMAND=/triage LANE_WORKDIR=root` with a small turn and dollar cap.
 
+**`LANE_CHANNEL=canary`** (card #46) makes a lane run the watcher's own **second**
+checkout, `/opt/watcher-canary`, instead of the one every other lane shares — so a bad
+prompt reaches only the board that opted in before it reaches everyone else. `bin/spawn.sh`
+itself carries the mechanism: right after it reads the lane's project file, a canary lane
+re-execs into `/opt/watcher-canary/bin/spawn.sh` with its own `CLAUDE_CONFIG_DIR` (so a
+personal or project `commands/`/`agents/` cannot win over the checkout under test, the same
+trick `bin/eval.sh` uses) and a freshly-computed `WATCHER_HOME`. Same systemd unit, same
+pid — exec replaces the process image, not the process — so nothing about the pidfile lock
+or the deployer's own cgroup lookup changes; the only thing a canary lane does differently
+is which checkout's code it is actually running. `deploy/autodeploy.sh`'s own header
+comment documents the canary stage: it moves that second checkout onto a commit and
+decides when the soak is done, restarting only the canary lane(s) until it clears; a
+project with no canary lane is entirely unaffected. `projects/watcher.env` is the first
+one to opt in (see "The watcher's own board", below).
+
 What a lane shares with its sibling: the board, the repo, the main checkout, the worktree
 directory (one worktree per card, so never the same one), and `main`. What it does not:
 its state (`attempts/`, `parked/`, `current`, `PAUSE`, the pidfile, the logs), its poll
@@ -186,6 +201,13 @@ its own board"). The three things that make a loop editing itself safe enough:
 
 `WIP_MAX=1` there: one watcher card in flight at a time, so two changes to the loop's rules
 never race each other to `main`.
+
+Since card #46, `projects/watcher.env` also sets `LANE_CHANNEL=canary` (see "Lanes",
+above): a commit that touches what a model reads lands on the Watcher board's own lane
+first, soaks there, and only then reaches every other project's. The systemd unit still
+starts `/opt/watcher/bin/spawn.sh`; that copy's own re-exec shim is what hands the tick off
+to `/opt/watcher-canary`, so "one deploy moves `/opt/watcher` for every project" above is
+still true of the *entry point* — a canary lane just runs a second checkout once it is in.
 
 ## Dependencies
 

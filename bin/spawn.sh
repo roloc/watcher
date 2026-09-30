@@ -38,6 +38,12 @@
 #   WORKTREE_COPY_DIRS optional; the project's gitignored private inputs, space-separated
 #                    and relative to the checkout, copied into every card worktree
 #                    (default: riffmap's `docs/transcripts`). See bin/worktree.sh.
+#   LANE_CHANNEL     optional; `canary` makes this lane run the box's canary checkout
+#                    (default: `/opt/watcher-canary`, `WATCHER_CANARY_DIR` overrides) instead
+#                    of the one every other lane shares, with its own `CLAUDE_CONFIG_DIR` so
+#                    a personal or project `commands/`/`agents/` cannot win over it either.
+#                    Unset or `stable` (the default) runs the checkout this script is in, as
+#                    always. See deploy/autodeploy.sh, "the canary stage", and card #46.
 #
 # A card that GitHub says is blocked by an open issue (the issue's "Relationships" field,
 # or what /triage recorded from the card's own words) is skipped by every lane until the
@@ -88,6 +94,25 @@ export WATCHER_HOME="${WATCHER_HOME:-$(dirname "$WATCHER_HERE")}"
 if [ -n "${WATCHER_PROJECT:-}" ]; then
   # shellcheck disable=SC1090
   . "$WATCHER_PROJECT"
+fi
+# LANE_CHANNEL=canary (card #46): this lane runs the box's canary checkout, never the
+# stable one every other lane shares — a bad prompt only reaches the board that opted in.
+# The project file is always read from the stable checkout (its path is fixed by the
+# systemd unit), so this is the one place a canary lane's code diverges: re-exec into the
+# canary checkout's OWN spawn.sh, with its own docs (WATCHER_HOME) and its own Claude
+# config dir (CLAUDE_CONFIG_DIR — commands/ and agents/ resolve from there, the same trick
+# bin/eval.sh uses to test one checkout's prompts while the box runs another's). Same
+# systemd unit, same pid (exec replaces the image, not the process), so nothing about the
+# spawner's lock or the deployer's cgroup lookup changes. A stable lane (LANE_CHANNEL unset
+# or "stable") falls straight through; a canary lane whose checkout is not there yet (a box
+# that has not adopted this feature, or install.sh has not made it) falls through too,
+# rather than failing to start.
+WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
+if [ "${LANE_CHANNEL:-stable}" = canary ] && [ "$WATCHER_HERE" != "$WATCHER_CANARY_DIR/bin" ] \
+   && [ -x "$WATCHER_CANARY_DIR/bin/spawn.sh" ]; then
+  export CLAUDE_CONFIG_DIR="${WATCHER_CANARY_CLAUDE_CONFIG_DIR:-/home/watcher/.claude-canary}"
+  unset WATCHER_HOME
+  exec "$WATCHER_CANARY_DIR/bin/spawn.sh" "$@"
 fi
 WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 [ -n "$WATCHER_ROOT" ] || { echo "spawn.sh: set WATCHER_PROJECT=projects/<name>.env (or WATCHER_ROOT)" >&2; exit 64; }

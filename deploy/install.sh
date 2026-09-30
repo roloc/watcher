@@ -37,6 +37,29 @@ install -d -o watcher -g watcher /home/watcher/.claude /home/watcher/projects
 ln -sfn /opt/watcher/commands /home/watcher/.claude/commands
 ln -sfn /opt/watcher/agents   /home/watcher/.claude/agents
 chown -h watcher:watcher /home/watcher/.claude/commands /home/watcher/.claude/agents
+
+# The canary checkout (card #46): a lane whose project file sets LANE_CHANNEL=canary runs
+# from a second, independent clone — bin/spawn.sh's own shim re-execs into it — so a bad
+# prompt reaches only the board that opted in before it reaches every other lane on the
+# box. Created here, once; every later move onto a new commit is deploy/autodeploy.sh's
+# own job (the canary stage), exactly as /opt/watcher itself is never pulled here again
+# after its first clone (INSTALL_NO_PULL, above).
+if grep -qsx 'LANE_CHANNEL=canary' /opt/watcher/projects/*.env 2>/dev/null; then
+  # As root, same as /opt/watcher's own first clone above: the watcher user may not have a
+  # working gh/git login yet at first boot, and a public HTTPS clone needs none.
+  [ -d /opt/watcher-canary ] || git clone -q "$REPO_URL" /opt/watcher-canary \
+    || echo "warning: could not clone the canary checkout to /opt/watcher-canary" >&2
+  if [ -d /opt/watcher-canary/.git ]; then
+    chown -R watcher:watcher /opt/watcher-canary
+    chmod +x /opt/watcher-canary/bin/*.sh /opt/watcher-canary/deploy/*.sh 2>/dev/null
+    su - watcher -c "git -C /opt/watcher-canary config core.fileMode false" 2>/dev/null || true
+    install -d -o watcher -g watcher /home/watcher/.claude-canary
+    ln -sfn /opt/watcher-canary/commands /home/watcher/.claude-canary/commands
+    ln -sfn /opt/watcher-canary/agents   /home/watcher/.claude-canary/agents
+    chown -h watcher:watcher /home/watcher/.claude-canary/commands /home/watcher/.claude-canary/agents
+  fi
+fi
+
 cat > /usr/local/bin/board <<'B'
 #!/usr/bin/env bash
 exec python3 /opt/watcher/bin/board.py "$@"

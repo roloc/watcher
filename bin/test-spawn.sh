@@ -388,6 +388,7 @@ run() {
   WATCHER_MAX_POLLS="${WATCHER_MAX_POLLS:-}" \
   LANE_AGENTS="${LANE_AGENTS:-}" \
   LANE_COMMAND="${LANE_COMMAND:-/watch}" LANE_WORKDIR="${LANE_WORKDIR:-card}" \
+  LANE_CHANNEL="${LANE_CHANNEL:-}" WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-$TMP/no-canary-dir}" \
   GH_DEPS_DIR="${GH_DEPS_DIR:-}" GH_API_FAIL="${GH_API_FAIL:-0}" \
   GH_BODY_DIR="${GH_BODY_DIR:-}" GH_BODY_FAIL="${GH_BODY_FAIL:-0}" \
   GH_STATE_DIR="${GH_STATE_DIR:-}" GH_STATE_FAIL="${GH_STATE_FAIL:-0}" \
@@ -1018,6 +1019,65 @@ printf '301\tP1\tbuilder\tin-flight\tWaiting\tCard three-oh-one\n' > "$BOARD_QUE
 run --once >/dev/null 2>&1 || true
 if not_grepped "/watch 301"; then pass "an in-flight queue row is not launched"; else flunk "in-flight queue row launched"; fi
 unset BOARD_QUEUE_FILE
+
+# ============================================================================
+echo "29b. Canary channel (card #46): LANE_CHANNEL=canary re-execs into the canary checkout"
+# ============================================================================
+# The shim runs right after the project file is sourced, before WATCHER_ROOT is even
+# required — so this needs none of the board/claude stubs, only a second checkout to jump
+# into. The stub's own spawn.sh just records what it was handed and exits.
+CANARY="$TMP/canary-checkout"
+mkdir -p "$CANARY/bin"
+cat > "$CANARY/bin/spawn.sh" <<'STUB'
+#!/usr/bin/env bash
+# The same WATCHER_HOME line the real spawn.sh opens with, so this proves the shim really
+# unset it before the exec rather than leaving the stable checkout's value behind.
+WATCHER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export WATCHER_HOME="${WATCHER_HOME:-$(dirname "$WATCHER_HERE")}"
+echo "canary ran: WATCHER_HOME=$WATCHER_HOME CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR args=$*" >> "$CANARY_LOG"
+STUB
+chmod +x "$CANARY/bin/spawn.sh"
+CANARY_LOG="$TMP/canary.log"; : > "$CANARY_LOG"; export CANARY_LOG
+
+fresh_state
+LANE_CHANNEL=canary WATCHER_CANARY_DIR="$CANARY" run --dry-run >/dev/null 2>&1
+if grep -q "^canary ran:" "$CANARY_LOG"; then pass "LANE_CHANNEL=canary re-execs into the canary checkout's own spawn.sh"; else flunk "canary shim never ran" "$(cat "$CANARY_LOG")"; fi
+grep -q "WATCHER_HOME=$CANARY " "$CANARY_LOG" && pass "…with WATCHER_HOME recomputed for the canary checkout" || flunk "WATCHER_HOME not the canary checkout" "$(cat "$CANARY_LOG")"
+grep -q "CLAUDE_CONFIG_DIR=/home/watcher/.claude-canary" "$CANARY_LOG" && pass "…and its own Claude config dir, never the one every other lane shares" || flunk "CLAUDE_CONFIG_DIR not set" "$(cat "$CANARY_LOG")"
+grep -q "args=--dry-run" "$CANARY_LOG" && pass "…passed the same arguments spawn.sh itself was given" || flunk "args not forwarded" "$(cat "$CANARY_LOG")"
+
+: > "$CANARY_LOG"
+fresh_state
+board_list $'12\tP2\tbuilder\t-\tCard twelve'
+OUT="$(WATCHER_CANARY_DIR="$CANARY" run --dry-run)"
+if [ -z "$(cat "$CANARY_LOG")" ] && printf '%s' "$OUT" | grep -q '^pick: #12 '; then
+  pass "LANE_CHANNEL unset: the canary checkout is never touched, even though it exists"
+else
+  flunk "an unset LANE_CHANNEL still redirected" "canary log=[$(cat "$CANARY_LOG")] out=[$OUT]"
+fi
+
+: > "$CANARY_LOG"
+fresh_state
+board_list $'12\tP2\tbuilder\t-\tCard twelve'
+# WATCHER_CANARY_DIR pointed at THIS checkout (so "$WATCHER_CANARY_DIR/bin" IS $HERE) —
+# the guard against re-execing into itself when a canary lane's own spawn.sh runs this
+# same code with LANE_CHANNEL still set in its environment.
+OUT="$(LANE_CHANNEL=canary WATCHER_CANARY_DIR="$(dirname "$HERE")" run --dry-run)"
+if [ -z "$(cat "$CANARY_LOG")" ] && printf '%s' "$OUT" | grep -q '^pick: #12 '; then
+  pass "already the canary checkout: no re-exec loop, runs its own poll instead"
+else
+  flunk "re-exec loop guard failed" "canary log=[$(cat "$CANARY_LOG")] out=[$OUT]"
+fi
+
+fresh_state
+board_list $'12\tP2\tbuilder\t-\tCard twelve'
+OUT="$(LANE_CHANNEL=canary WATCHER_CANARY_DIR="$TMP/no-such-canary-checkout" run --dry-run)"
+if printf '%s' "$OUT" | grep -q '^pick: #12 '; then
+  pass "a canary lane whose checkout is not there yet falls through, not fails"
+else
+  flunk "missing canary checkout should fall through" "out=[$OUT]"
+fi
+unset CANARY_LOG
 
 # ============================================================================
 echo "30. Lanes: LANE_AGENTS partitions the board by agent label, so two instances of one"

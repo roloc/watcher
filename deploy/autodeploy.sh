@@ -18,6 +18,19 @@
 #      this tests the new prompts, not the ones lanes are already using. Skipped when the
 #      commits touch nothing a model reads. A fail is retried once (a live suite has flakes,
 #      roloc/watcher#44); a second fail holds the commit.
+#   4b. THE CANARY STAGE (card #46), only when the commit touches what a model reads and at
+#      least one active lane's project file sets LANE_CHANNEL=canary: move the canary
+#      checkout (/opt/watcher-canary — a second, independent clone; see bin/spawn.sh's own
+#      LANE_CHANNEL shim) onto the commit and restart ONLY its lane(s), before /opt/watcher
+#      moves at all. A run later sees the soak through: DEPLOY_CANARY_SOAK_TICKS clean ticks
+#      on those lanes promotes (falls through to step 5 below); DEPLOY_CANARY_QUIET_MIN
+#      minutes with no canary work at all promotes anyway, so a quiet Watcher board cannot
+#      hold every other project back forever; one tick that does not finish clean (killed, a
+#      subtype of error_during_execution, or parked after 2 attempts) rolls the canary
+#      checkout back to the commit before it and holds this one exactly like step 3/4 would.
+#      A project with no canary lane, or a commit that skips the suite in step 4, skips this
+#      stage entirely and promotes straight away — canary is additive, never a new gate on
+#      an ordinary deploy.
 #   5. Wait until no lane on the box is running a tick. Then pause every lane (a PAUSE file
 #      that says "deploy <sha>"), wait one poll interval so a spawner that was mid-poll
 #      cannot launch behind our back, and check again. If lanes stay busy for
@@ -26,9 +39,10 @@
 #      restart every running lane, start a lane this commit added, and remove only the
 #      PAUSE files this script wrote — a PAUSE Steve made himself stays.
 #
-# A HELD commit (red check, suite failing twice, a checkout that cannot fast-forward) gets
-# one card on the watcher's board in Stuck, in the talking-to-steve.md shape. Moving it to
-# In progress lets the watcher fix the cause; adding the `deploy-anyway` label ships it.
+# A HELD commit (red check, suite failing twice, a checkout that cannot fast-forward, or a
+# canary tick that did not finish clean) gets one card on the watcher's board in Stuck, in
+# the talking-to-steve.md shape. Moving it to In progress lets the watcher fix the cause;
+# adding the `deploy-anyway` label ships it (and skips both step 4 and the canary stage).
 # Nothing here ever signals a tick, force-pushes, or posts to Discord except through that
 # card's move (board.py posts the Stuck alert, as it does for every card).
 set -uo pipefail
@@ -48,12 +62,19 @@ DRAIN_AFTER="${DEPLOY_DRAIN_AFTER_MIN:-240}"   # lanes busy this long: pause and
 EVALS="${DEPLOY_EVALS:-1}"                     # 0 skips the replay suite entirely
 # What a model reads: a commit range touching none of these skips the suite.
 EVAL_PATHS="${DEPLOY_EVAL_PATHS:-commands agents docs evals bin/eval.sh CLAUDE.md}"
+# The canary checkout (card #46) — see bin/spawn.sh's own default for WATCHER_CANARY_DIR,
+# which this must match. SOAK_TICKS and QUIET_MIN are read together: whichever the canary
+# lane(s) reach first clears the way to promote.
+CANARY_DIR="${DEPLOY_CANARY_DIR:-/opt/watcher-canary}"
+CANARY_SOAK_TICKS="${DEPLOY_CANARY_SOAK_TICKS:-3}"
+CANARY_QUIET_MIN="${DEPLOY_CANARY_QUIET_MIN:-240}"
 
 say() { printf '%s autodeploy: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 as_user() { su - "$RUN_AS" -c "$1"; }
 # q <word>...: the words shell-quoted, for a command line that as_user runs.
 q() { local out="" w; for w in "$@"; do out+="$(printf '%q' "$w") "; done; printf '%s' "${out% }"; }
 wgit() { as_user "git -C '$WATCHER_DIR' $1"; }
+cgit() { as_user "git -C '$CANARY_DIR' $1"; }
 mkdir -p "$DSTATE/evals" "$DSTATE/held"
 
 # say_once <key> <line>: journal a waiting line once per state, not once per run.
@@ -270,6 +291,133 @@ evals_state() {
   case "$(cat "$rec")" in pass) echo pass ;; "fail 2") echo fail ;; *) echo retry ;; esac
 }
 
+# --- the canary stage (card #46) --------------------------------------------------------------
+
+has_canary() { [ -d "$CANARY_DIR/.git" ]; }
+
+# canary_lane <lane> — this lane's project file sets LANE_CHANNEL=canary. Always read from
+# $WATCHER_DIR: the systemd unit points WATCHER_PROJECT at the stable checkout's copy no
+# matter which checkout the lane's own spawn.sh ends up re-execing into (its own shim's
+# doc comment explains why), so this is the one place that fact is ever decided.
+canary_lane() {
+  local l="$1" f
+  f="$WATCHER_DIR/projects/$(project_of "$l").env"
+  [ -f "$f" ] && grep -qx 'LANE_CHANNEL=canary' "$f"
+}
+
+canary_lanes() { local l; for l in $(active_lanes); do canary_lane "$l" && echo "$l"; done; }
+
+# canary_needed <cur> <tgt> — is there a canary stage to run at all? A checkout to run it
+# in, a lane that opted in, and a commit that touches what a model reads — the same
+# EVAL_PATHS test evals_state already gated on, so a commit that skipped the suite entirely
+# (nothing here for a canary to catch that CI did not already) skips this stage too.
+canary_needed() {
+  local cur="$1" tgt="$2"
+  has_canary || return 1
+  [ -n "$(canary_lanes)" ] || return 1
+  # shellcheck disable=SC2086
+  [ -n "$(wgit "diff --name-only $cur $tgt -- $EVAL_PATHS")" ]
+}
+
+# canary_died <since_epoch> — true if a canary lane's own state shows a tick that has not
+# finished clean since the soak for the current commit started: a result file the tick
+# never got to write (killed by the watchdog or the box), one whose subtype is
+# error_during_execution, or a card the spawner parked after 2 attempts. Read entirely from
+# the lane's own state directory — the same files the spawner itself writes — never gh.
+canary_died() {
+  local since="$1" l dir
+  for l in $(canary_lanes); do
+    dir="$STATE_ROOT/$l"
+    if as_user "python3 -c \"
+import glob, json, os, sys
+since = $since
+for f in glob.glob('$dir/logs/*.json'):
+    if os.path.getmtime(f) < since:
+        continue
+    try:
+        d = json.load(open(f))
+    except Exception:
+        sys.exit(0)
+    if d.get('subtype') == 'error_during_execution':
+        sys.exit(0)
+sys.exit(1)
+\""; then
+      return 0
+    fi
+    as_user "find '$dir/parked' -newermt '@$since' -type f 2>/dev/null" | grep -q . && return 0
+  done
+  return 1
+}
+
+# canary_ticks <since_epoch> — how many result files the canary lane(s) have produced since.
+canary_ticks() {
+  local since="$1" l n=0
+  for l in $(canary_lanes); do
+    n=$(( n + $(as_user "find '$STATE_ROOT/$l/logs' -name '*.json' -newermt '@$since' 2>/dev/null | wc -l") ))
+  done
+  echo "$n"
+}
+
+# canary_stage <tgt> — advances the canary checkout for <tgt>, reported by exit status:
+#   0  clear to promote (a clean or quiet soak finished)
+#   1  wait (just swapped and starting the clock, or still soaking)
+#   2  died — rolled the canary checkout back; CANARY_HOLD_WHY/CANARY_HOLD_DETAILS are set
+#      for the caller to hold <tgt> with, exactly like a failed check or suite would
+# Never called from inside a command substitution: it logs with `say` on its own stdout,
+# same as every other step of a run, and reports only through its exit status and the two
+# globals above — mixing those into a captured "$(...)" string is exactly the bug
+# evals_state's own >&2 redirects exist to avoid.
+canary_stage() {
+  local tgt="$1" rec="$DSTATE/canary-soak" recorded_sha="" since="" prev lanes l
+
+  [ -f "$rec" ] && read -r recorded_sha since < "$rec"
+  if [ "$recorded_sha" != "$tgt" ]; then
+    # $tgt is only ever a commit $WATCHER_DIR already fetched (main's own fetch, at the top
+    # of this run) — this checkout is a separate clone, so it needs its own before either
+    # a fast-forward or the reset fallback can even see the commit object.
+    cgit "fetch -q origin $BRANCH" >/dev/null 2>&1
+    prev="$(cgit 'rev-parse HEAD')"
+    if ! cgit "merge -q --ff-only $tgt" >/dev/null 2>&1 && ! cgit "reset -q --hard $tgt" >/dev/null 2>&1; then
+      say "could not move the canary checkout to ${tgt:0:7}; trying again next run"
+      return 1
+    fi
+    cgit "config core.fileMode false" || true
+    as_user "chmod +x '$CANARY_DIR'/bin/*.sh '$CANARY_DIR'/deploy/*.sh" 2>/dev/null || true
+    lanes="$(canary_lanes | tr '\n' ' ')"
+    for l in $lanes; do systemctl restart "watcher@$l" && say "watcher@$l restarted on the canary checkout at ${tgt:0:7}"; done
+    since="$(date +%s)"
+    printf '%s %s\n' "$tgt" "$since" > "$rec"
+    echo "$prev" > "$DSTATE/canary-prev"
+    say "canary: ${tgt:0:7} is live for ${lanes% }; soaking"
+    return 1
+  fi
+
+  if canary_died "$since"; then
+    prev="$(cat "$DSTATE/canary-prev" 2>/dev/null)"
+    lanes="$(canary_lanes | tr '\n' ', ')"; lanes="${lanes%, }"
+    if [ -n "$prev" ]; then
+      cgit "reset -q --hard $prev" >/dev/null 2>&1
+      for l in $(canary_lanes); do systemctl restart "watcher@$l"; done
+      say "canary: a tick on ${tgt:0:7} did not finish clean; rolled the canary checkout back to ${prev:0:7}"
+    fi
+    rm -f "$rec" "$DSTATE/canary-prev"
+    CANARY_HOLD_WHY="a canary tick on it did not finish clean"
+    CANARY_HOLD_DETAILS="The canary lane(s) ($lanes) ran \`${tgt:0:7}\` and at least one tick did not finish clean (killed, \`error_during_execution\`, or parked after 2 attempts). The canary checkout is back on \`${prev:0:7}\`."
+    return 2
+  fi
+
+  local ticks; ticks="$(canary_ticks "$since")"
+  if [ "$ticks" -ge "$CANARY_SOAK_TICKS" ]; then
+    say "canary: ${tgt:0:7} had $ticks clean tick(s) on the canary lane(s); promoting"
+    return 0
+  fi
+  if [ $(( $(date +%s) - since )) -ge $(( CANARY_QUIET_MIN * 60 )) ]; then
+    say "canary: ${tgt:0:7} has been quiet on the canary lane(s) for over $CANARY_QUIET_MIN min; promoting anyway"
+    return 0
+  fi
+  return 1
+}
+
 # --- the swap -------------------------------------------------------------------------------
 
 swap() {
@@ -349,6 +497,16 @@ $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -
       esac
     fi
 
+    # 4b. The canary stage — skipped for a commit Steve said to ship, exactly like CI and
+    # the suite above, and for a commit/project canary_needed finds nothing to do for.
+    if ! overridden "$tgt" && canary_needed "$cur" "$tgt"; then
+      canary_stage "$tgt"
+      case $? in
+        1) return 0 ;;
+        2) hold "$tgt" "$CANARY_HOLD_WHY" "$CANARY_HOLD_DETAILS"; return 0 ;;
+      esac
+    fi
+
     # 5. Idle, or waited long enough: pause everything and give any mid-poll spawner a beat.
     # "Undeployed since": keyed on the commit the box is ON, so a stream of new commits on a
     # busy box does not restart the clock and put the forced drain off for ever.
@@ -385,6 +543,9 @@ $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -
   rm -f "$DSTATE/draining" "$DSTATE/ready"
   echo "$drain" > "$DSTATE/deployed"
   close_held_except "$drain"
+  # A canary soak record for the commit that just promoted has done its job; the next
+  # commit that needs one starts a fresh clock rather than reading this stale one.
+  [ "$(cut -d' ' -f1 "$DSTATE/canary-soak" 2>/dev/null)" = "$drain" ] && rm -f "$DSTATE/canary-soak" "$DSTATE/canary-prev"
   say "deployed ${drain:0:7}; every lane un-paused"
 }
 

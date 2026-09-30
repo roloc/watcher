@@ -223,17 +223,26 @@ run is one step, idempotent, so an interrupted one is picked up by the next:
 3. The replay suite (`bin/eval.sh`) green on it, **in a scratch clone at that commit**,
    before anything goes live. Skipped when the commits touch nothing a model reads
    (`commands/ agents/ docs/ evals/ bin/eval.sh CLAUDE.md`). One failure is retried.
-4. **Every lane on the box idle.** Then each lane is paused (a `PAUSE` that says `deploy
+4. **The canary stage** (card #46), only for a commit that touches what a model reads and
+   a project that has opted a lane into it (`LANE_CHANNEL=canary` — the Watcher board's own
+   lane is the first): `/opt/watcher-canary`, a second checkout, moves onto the commit
+   first and only that lane restarts. A clean soak, or a while with no work at all so a
+   quiet board cannot hold every other project back, promotes to everyone else below. One
+   tick that does not finish clean rolls the canary checkout back and holds the commit,
+   same as a failed check. No canary lane configured: this step does nothing.
+5. **Every lane on the box idle.** Then each lane is paused (a `PAUSE` that says `deploy
    <sha>`), and after one poll interval checked again. Lanes still busy after
    `DEPLOY_DRAIN_AFTER_MIN` (240) are paused anyway and their ticks finish on their own.
-5. `/opt/watcher` fast-forwards to exactly that commit, `install.sh` runs without its own
+6. `/opt/watcher` fast-forwards to exactly that commit, `install.sh` runs without its own
    pull, every running lane restarts, a lane file the commit added starts last, and only
    the deployer's own `PAUSE` files are removed. A `PAUSE` you made stays.
 
-A **held** commit — red `verify`, the suite failing twice, or a box checkout that cannot
-fast-forward — gets one card on the Watcher board in **Stuck**. Move it to In progress and
-the watcher fixes the cause; add the `deploy-anyway` label and the next run ships it. A
-later commit that deploys closes it as superseded. Nothing here ever signals a tick.
+A **held** commit — red `verify`, the suite failing twice, a canary tick that does not
+finish clean, or a box checkout that cannot fast-forward — gets one card on the Watcher
+board in **Stuck**. Move it to In progress and the watcher fixes the cause; add the
+`deploy-anyway` label and the next run ships it (skipping the suite and the canary stage
+both). A later commit that deploys closes it as superseded. Nothing here ever signals a
+tick.
 
     journalctl -u watcher-deploy -n 30        # what the deployer last did
     systemctl stop watcher-deploy.timer       # turn it off; `start` turns it back on
