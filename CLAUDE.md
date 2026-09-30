@@ -24,6 +24,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `bin/metrics.py` — a read-only weekly report over a lane's own tick logs (first-pass
   merge rate, park rate, deaths, turns/quota and time to Done), run by hand, never by the
   loop. `python3 bin/test-metrics.py` is its offline test; run it after touching the file.
+- `bin/tail.sh` and `bin/tail.py` — run by hand, on the box: which card a lane holds and
+  what its tick is doing right now, decoded live from the tick's own session transcript
+  (not the lane's own coarser `journalctl` line — see `bin/tail.sh`'s header). Read-only;
+  never touches the board or GitHub. `bash bin/test-tail.sh` is its offline test (CI runs
+  it); run it after touching either file.
 - `bin/eval.sh` — the replay suite: real past failures against `commands/watch.md`,
   `commands/triage.md` and `agents/reviewer.md`, each a case under `evals/cases/` run with a
   live `claude -p` against `evals/fakehub.py` (a closed, offline stand-in for `gh` and

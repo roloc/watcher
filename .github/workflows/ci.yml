@@ -49,7 +49,7 @@ jobs:
       # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/worktree.sh bin/detect.sh bin/doctor.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh; do
+          for f in bin/spawn.sh bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 
@@ -67,3 +67,6 @@ jobs:
 
       - name: The floor page suite
         run: python3 bin/test-floor.py
+
+      - name: The lane-tail suite
+        run: bash bin/test-tail.sh

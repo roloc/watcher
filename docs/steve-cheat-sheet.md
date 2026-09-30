@@ -190,7 +190,14 @@ several to see them side by side. `--weeks N` sets how many weeks the weekly tab
 touch ~watcher/.local/state/watcher/riffmap/PAUSE
 rm    ~watcher/.local/state/watcher/riffmap/PAUSE
 
-# what is a lane doing right now
+# what a lane's tick is doing right now, one line per tool call — the card it holds,
+# then a live stream (Ctrl-C to stop); --no-follow prints what's there now and exits
+/opt/watcher/bin/tail.sh riffmap
+/opt/watcher/bin/tail.sh riffmap-design
+/opt/watcher/bin/tail.sh riffmap-triage
+/opt/watcher/bin/tail.sh watcher           # the watcher's own lane
+
+# coarser: when a lane polled, launched or exited a tick — not what the tick itself did
 journalctl -u watcher@riffmap -f
 journalctl -u watcher@riffmap-design -f
 journalctl -u watcher@riffmap-triage -f
