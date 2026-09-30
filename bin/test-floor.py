@@ -9,6 +9,7 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -550,6 +551,9 @@ for snippet in (
     '<td><a href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}</a></td>',
 ):
     check(f"...{snippet[:40]}...", snippet in floor.INDEX_HTML)
+anchors = re.findall(r"<a\b[^>]*>", floor.INDEX_HTML)
+check("...and every anchor on the page carries it, so a future link can't slip through",
+      anchors and all('target="_blank"' in a for a in anchors), anchors)
 
 shutil.rmtree(ROOT, ignore_errors=True)
 
