@@ -542,6 +542,15 @@ check("a CI fetch that fails shows unknown, and its error text never reaches the
       all(p["ship"]["ci"] == {"state": "unknown"} for p in state17b["projects"])
       and "ghp_notreal" not in json.dumps(state17b))
 
+print("18. every clickable link opens in a new tab (card #62)")
+for snippet in (
+    '<a class="desk ship" href="${esc(st.link)}" target="_blank" rel="noopener">',
+    '<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}" target="_blank" rel="noopener">',
+    '<h2><a href="${esc(p.board_url)}" target="_blank" rel="noopener">${esc(p.name)}</a></h2>',
+    '<td><a href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}</a></td>',
+):
+    check(f"...{snippet[:40]}...", snippet in floor.INDEX_HTML)
+
 shutil.rmtree(ROOT, ignore_errors=True)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")

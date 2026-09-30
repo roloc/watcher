@@ -756,7 +756,7 @@ function shipSVG(mode, pill) {
 function shipHTML(ship) {
   const st = shipState(ship);
   const [cls, label] = SHIP_PILL[st.pill];
-  return `<a class="desk ship" href="${esc(st.link)}">
+  return `<a class="desk ship" href="${esc(st.link)}" target="_blank" rel="noopener">
     ${shipSVG(st.mode, st.pill)}
     <div class="name">Ship</div>
     <div class="unit">${st.deploys ? "CI and the box's deployer" : "CI on main"}</div>
@@ -771,7 +771,7 @@ function deskHTML(d) {
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   const dispatcher = d.kind === "Triage";
-  return `<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}">
+  return `<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}" target="_blank" rel="noopener">
     ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
     <div class="name">${esc(d.kind)}</div>
     <div class="unit">${esc(d.unit)}</div>
@@ -789,7 +789,7 @@ function render(state) {
   const projects = document.getElementById("projects");
   projects.innerHTML = state.projects.map(p => `
     <section class="project">
-      <h2><a href="${esc(p.board_url)}">${esc(p.name)}</a></h2>
+      <h2><a href="${esc(p.board_url)}" target="_blank" rel="noopener">${esc(p.name)}</a></h2>
       <div class="counts">Ready ${p.counts.ready} · In progress ${p.counts.in_progress} · Backlog ${p.counts.backlog}
         ${p.board_error ? `<span class="alert"> — board unreachable</span>` : ""}</div>
       <div class="desks">${p.lanes.map(deskHTML).join("")}${shipHTML(p.ship)}</div>
@@ -798,7 +798,7 @@ function render(state) {
   const tbody = document.querySelector("#recent tbody");
   tbody.innerHTML = state.recent.map(r => `
     <tr><td>${esc(r.project)}</td><td>${esc(r.lane)}</td>
-      <td><a href="${esc(r.card.url)}">#${r.card.number}</a></td>
+      <td><a href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}</a></td>
       <td>${relTime(r.when)}</td><td>${esc(r.quota)}</td></tr>`).join("");
 }
 
