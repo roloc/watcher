@@ -108,7 +108,14 @@ fi
 # that has not adopted this feature, or install.sh has not made it) falls through too,
 # rather than failing to start.
 WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
-if [ "${LANE_CHANNEL:-stable}" = canary ] && [ "$WATCHER_HERE" != "$WATCHER_CANARY_DIR/bin" ] \
+# Resolved the same way WATCHER_HERE itself was, above: a raw string compare against
+# WATCHER_CANARY_DIR would miss a trailing slash or a symlink (a canary lane's own
+# spawn.sh, re-launched with LANE_CHANNEL still set in its environment, comparing its real
+# location against a path that names the same directory differently) and exec into itself
+# forever. Never resolved when the directory does not exist — nothing to compare against,
+# and the existence check right below falls through the same as always.
+WATCHER_CANARY_RESOLVED="$(cd "$WATCHER_CANARY_DIR" 2>/dev/null && pwd)" || true
+if [ "${LANE_CHANNEL:-stable}" = canary ] && [ "$WATCHER_HERE" != "${WATCHER_CANARY_RESOLVED:-$WATCHER_CANARY_DIR}/bin" ] \
    && [ -x "$WATCHER_CANARY_DIR/bin/spawn.sh" ]; then
   export CLAUDE_CONFIG_DIR="${WATCHER_CANARY_CLAUDE_CONFIG_DIR:-/home/watcher/.claude-canary}"
   unset WATCHER_HOME

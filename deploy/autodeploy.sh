@@ -324,9 +324,17 @@ canary_needed() {
 # never got to write (killed by the watchdog or the box), one whose subtype is
 # error_during_execution, or a card the spawner parked after 2 attempts. Read entirely from
 # the lane's own state directory — the same files the spawner itself writes — never gh.
+#
+# A lane with a tick still running is skipped entirely, not judged: bin/spawn.sh creates
+# its result json by redirection AT LAUNCH (`launch_tick`), so it sits at 0 bytes for the
+# tick's whole run — indistinguishable, by content alone, from a tick the watchdog killed
+# before it could write anything. `tick_running` (already used by busy_lanes) is what the
+# deployer everywhere else uses to tell "still going" from "gone"; once it says gone, THEN
+# an empty or unparseable file really does mean killed, and is judged as such below.
 canary_died() {
   local since="$1" l dir
   for l in $(canary_lanes); do
+    tick_running "$l" && continue
     dir="$STATE_ROOT/$l"
     if as_user "python3 -c \"
 import glob, json, os, sys
@@ -349,20 +357,52 @@ sys.exit(1)
   return 1
 }
 
-# canary_ticks <since_epoch> — how many result files the canary lane(s) have produced since.
+# canary_ticks <since_epoch> — how many result files the canary lane(s) have COMPLETED
+# (written something) since. `-size +0c` excludes the in-progress tick's own still-empty
+# file (see canary_died above) — without it a soak could clear on a tick that never
+# actually finished.
 canary_ticks() {
-  local since="$1" l n=0
+  local since="$1" l n=0 c
   for l in $(canary_lanes); do
-    n=$(( n + $(as_user "find '$STATE_ROOT/$l/logs' -name '*.json' -newermt '@$since' 2>/dev/null | wc -l") ))
+    c="$(as_user "find '$STATE_ROOT/$l/logs' -name '*.json' -size +0c -newermt '@$since' 2>/dev/null | wc -l")"
+    n=$(( n + ${c:-0} ))
   done
   echo "$n"
 }
 
+# canary_busy — the canary lane(s) currently running a tick, same predicate busy_lanes uses.
+canary_busy() { local l; for l in $(canary_lanes); do tick_running "$l" && echo "$l"; done; }
+
+# canary_pause/canary_unpause <sha> — pause_all/unpause_ours, scoped to only the canary
+# lane(s): moving the canary checkout out from under a card in flight is exactly the
+# restart-kills-the-cleanup bug active_lanes' own comment warns about, so a lane with a
+# tick running is never restarted — it is paused (stops picking up new work) and waited on,
+# the same shape the stable promote below already uses for every lane.
+canary_pause() {
+  local sha="$1" l p
+  for l in $(canary_lanes); do
+    p="$STATE_ROOT/$l/PAUSE"
+    if [ -f "$p" ] && ! ours "$p"; then
+      say "watcher@$l was already paused by hand; leaving its PAUSE as it is"
+      continue
+    fi
+    mkdir -p "$STATE_ROOT/$l"
+    echo "deploy $sha" > "$p"; chown "$RUN_AS:$RUN_AS" "$STATE_ROOT/$l" "$p" 2>/dev/null
+  done
+}
+canary_unpause() {
+  local l p
+  for l in $(canary_lanes); do
+    p="$STATE_ROOT/$l/PAUSE"
+    ours "$p" && rm -f "$p"
+  done
+}
+
 # canary_stage <tgt> — advances the canary checkout for <tgt>, reported by exit status:
 #   0  clear to promote (a clean or quiet soak finished)
-#   1  wait (just swapped and starting the clock, or still soaking)
-#   2  died — rolled the canary checkout back; CANARY_HOLD_WHY/CANARY_HOLD_DETAILS are set
-#      for the caller to hold <tgt> with, exactly like a failed check or suite would
+#   1  wait (idle lane(s) pending, just swapped and starting the clock, or still soaking)
+#   2  died, or could not move at all — CANARY_HOLD_WHY/CANARY_HOLD_DETAILS are set for the
+#      caller to hold <tgt> with, exactly like a failed check or suite would
 # Never called from inside a command substitution: it logs with `say` on its own stdout,
 # same as every other step of a run, and reports only through its exit status and the two
 # globals above — mixing those into a captured "$(...)" string is exactly the bug
@@ -370,21 +410,40 @@ canary_ticks() {
 canary_stage() {
   local tgt="$1" rec="$DSTATE/canary-soak" recorded_sha="" since="" prev lanes l
 
+  # A commit already rolled back once is never retried on its own: without this, the very
+  # next run reads no soak record (died, below, clears it), sees recorded_sha != tgt again,
+  # and swaps the canary checkout right back onto the commit that just failed it — forever,
+  # restarting the canary lane every deploy tick. Only a newer commit, or Steve's own
+  # deploy-anyway (which skips this whole stage), ever moves past it.
+  if [ "$(cat "$DSTATE/canary-died" 2>/dev/null)" = "$tgt" ]; then
+    CANARY_HOLD_WHY="a canary tick on it did not finish clean"
+    CANARY_HOLD_DETAILS="The canary checkout already rolled back off \`${tgt:0:7}\` once; it will not be tried again on its own. Fix the cause and push a new commit, or add \`deploy-anyway\` to ship this one regardless."
+    return 2
+  fi
+
   [ -f "$rec" ] && read -r recorded_sha since < "$rec"
   if [ "$recorded_sha" != "$tgt" ]; then
+    canary_pause "$tgt"
+    if [ -n "$(canary_busy)" ]; then
+      say "canary: waiting for the canary lane(s) to go idle before moving to ${tgt:0:7}"
+      return 1
+    fi
     # $tgt is only ever a commit $WATCHER_DIR already fetched (main's own fetch, at the top
     # of this run) — this checkout is a separate clone, so it needs its own before either
     # a fast-forward or the reset fallback can even see the commit object.
     cgit "fetch -q origin $BRANCH" >/dev/null 2>&1
     prev="$(cgit 'rev-parse HEAD')"
     if ! cgit "merge -q --ff-only $tgt" >/dev/null 2>&1 && ! cgit "reset -q --hard $tgt" >/dev/null 2>&1; then
-      say "could not move the canary checkout to ${tgt:0:7}; trying again next run"
-      return 1
+      canary_unpause
+      CANARY_HOLD_WHY="the canary checkout could not be moved onto it"
+      CANARY_HOLD_DETAILS="\`git merge --ff-only\` and \`git reset --hard\` both failed moving \`$CANARY_DIR\` to \`${tgt:0:7}\`. Something is wrong with that checkout; fix it by hand, or add \`deploy-anyway\` to skip the canary stage for this commit."
+      return 2
     fi
     cgit "config core.fileMode false" || true
     as_user "chmod +x '$CANARY_DIR'/bin/*.sh '$CANARY_DIR'/deploy/*.sh" 2>/dev/null || true
     lanes="$(canary_lanes | tr '\n' ' ')"
     for l in $lanes; do systemctl restart "watcher@$l" && say "watcher@$l restarted on the canary checkout at ${tgt:0:7}"; done
+    canary_unpause
     since="$(date +%s)"
     printf '%s %s\n' "$tgt" "$since" > "$rec"
     echo "$prev" > "$DSTATE/canary-prev"
@@ -401,6 +460,7 @@ canary_stage() {
       say "canary: a tick on ${tgt:0:7} did not finish clean; rolled the canary checkout back to ${prev:0:7}"
     fi
     rm -f "$rec" "$DSTATE/canary-prev"
+    echo "$tgt" > "$DSTATE/canary-died"
     CANARY_HOLD_WHY="a canary tick on it did not finish clean"
     CANARY_HOLD_DETAILS="The canary lane(s) ($lanes) ran \`${tgt:0:7}\` and at least one tick did not finish clean (killed, \`error_during_execution\`, or parked after 2 attempts). The canary checkout is back on \`${prev:0:7}\`."
     return 2
@@ -411,7 +471,7 @@ canary_stage() {
     say "canary: ${tgt:0:7} had $ticks clean tick(s) on the canary lane(s); promoting"
     return 0
   fi
-  if [ $(( $(date +%s) - since )) -ge $(( CANARY_QUIET_MIN * 60 )) ]; then
+  if [ $(( $(date +%s) - ${since:-0} )) -ge $(( CANARY_QUIET_MIN * 60 )) ]; then
     say "canary: ${tgt:0:7} has been quiet on the canary lane(s) for over $CANARY_QUIET_MIN min; promoting anyway"
     return 0
   fi
@@ -544,8 +604,12 @@ $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -
   echo "$drain" > "$DSTATE/deployed"
   close_held_except "$drain"
   # A canary soak record for the commit that just promoted has done its job; the next
-  # commit that needs one starts a fresh clock rather than reading this stale one.
+  # commit that needs one starts a fresh clock rather than reading this stale one. Any
+  # earlier canary-died commit is moot too, now that a newer, good one is live — it would
+  # never be retried anyway (nothing ever fetches an older commit again), but a stale file
+  # naming a superseded sha is one less thing to wonder about in the state directory.
   [ "$(cut -d' ' -f1 "$DSTATE/canary-soak" 2>/dev/null)" = "$drain" ] && rm -f "$DSTATE/canary-soak" "$DSTATE/canary-prev"
+  rm -f "$DSTATE/canary-died"
   say "deployed ${drain:0:7}; every lane un-paused"
 }
 

@@ -339,6 +339,43 @@ check "canary E: a docs-only commit still skips the suite" not_called "eval at"
 check "canary E: …and promotes directly"                   [ "$(head_)" = "$T" ]
 check "canary E: …never touching the canary checkout"       [ "$(canary_head)" = "$OLD_CANARY" ]
 
+# F. A tick still in progress (its result json exists but is still empty — bin/spawn.sh
+# creates it by redirection at launch, before the tick has written anything) is never read
+# as died: only a lane with NO tick running is judged on its log files at all.
+canary_fresh; T="$(commit commands/watch.md canary-f)"
+run   # the canary swap
+mkdir -p "$STATE/watcher/logs"; : > "$STATE/watcher/logs/still-running.json"
+echo 950 > "$STATE/watcher/current"   # tick_running("watcher") now true
+run
+check "canary F: an in-progress tick is not judged"       [ "$(canary_head)" = "$T" ]
+check "canary F: …the commit is not held"                 not_called "issue create"
+rm -f "$STATE/watcher/current"
+
+# G. A commit already rolled back once is never retried on its own — the flip-flop a died
+# soak used to cause, restarting the canary lane onto the same bad commit every run.
+canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-g)"
+run   # the canary swap
+canary_tick_log error_during_execution
+run   # dies, rolls back, files the one card
+run; run   # two more deploy ticks — `run` resets $CALLS each time, so these check that
+           # NEITHER later tick repeats the swap or files a second card, not a cumulative count
+check "canary G: the canary checkout stays rolled back"   [ "$(canary_head)" = "$OLD" ]
+check "canary G: a later tick never re-swaps onto it"     not_called "systemctl restart"
+check "canary G: …or files a second card"                 not_called "gh issue create"
+
+# H. A canary lane with a tick in flight is paused and waited on, never restarted out from
+# under it — restarting `watcher@<lane>` mid-tick kills the spawner's own exit handling.
+canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-h)"
+echo 960 > "$STATE/watcher/current"
+run
+check "canary H: a busy canary lane is not moved onto the commit yet" [ "$(canary_head)" = "$OLD" ]
+check "canary H: …and is not restarted"                                not_called_exact "systemctl restart watcher@watcher"
+check "canary H: …but is paused so it takes no new work meanwhile"    grep -q "^deploy $T" "$STATE/watcher/PAUSE"
+rm -f "$STATE/watcher/current"
+run
+check "canary H: once idle, the swap and restart go ahead"            [ "$(canary_head)" = "$T" ]
+check "canary H: …and the pause is lifted"                             [ ! -e "$STATE/watcher/PAUSE" ]
+
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi
 exit "$fail"
