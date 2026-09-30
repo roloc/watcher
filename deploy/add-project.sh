@@ -88,8 +88,13 @@ esac
 
 # --- the board: find-or-copy, then link the repo ------------------------------------------
 say "the board"
-existing="$($WATCHER_GH project list --owner "$BOARD_OWNER" --format json \
-  --jq ".projects[] | select(.title == \"$NAME\") | .number" | head -1)"
+existing="$($WATCHER_GH project list --owner "$BOARD_OWNER" --format json | python3 -c '
+import json, sys
+name = sys.argv[1]
+for p in json.load(sys.stdin)["projects"]:
+    if p["title"] == name:
+        print(p["number"]); break
+' "$NAME")"
 if [ -n "$existing" ]; then
   BOARD_NUMBER="$existing"
   echo "  board \"$NAME\" already exists for $BOARD_OWNER: #$BOARD_NUMBER (unchanged)"
@@ -147,10 +152,24 @@ fi
 if [ "$already_set" = 1 ]; then
   echo "  already set: \"$REQUIRED_CHECK\" required, PR required, 0 approvals, admins not enforced (unchanged)"
 else
+  # Keep any OTHER required checks already on the branch — this only ever ADDS
+  # $REQUIRED_CHECK, never drops a context some other setup put there.
+  context_args=(-f "required_status_checks[contexts][]=$REQUIRED_CHECK")
+  if [ -n "$current" ]; then
+    while IFS= read -r ctx; do
+      [ -n "$ctx" ] && [ "$ctx" != "$REQUIRED_CHECK" ] && context_args+=(-f "required_status_checks[contexts][]=$ctx")
+    done < <(python3 -c '
+import json, sys
+d = json.loads(sys.argv[1])
+rsc = d.get("required_status_checks") or {}
+for c in sorted({c.get("context") for c in (rsc.get("checks") or []) if c.get("context")} | set(rsc.get("contexts") or [])):
+    print(c)
+' "$current")
+  fi
   $WATCHER_GH api -X PUT "repos/$REPO/branches/main/protection" \
     -H "Accept: application/vnd.github+json" \
     -F 'required_status_checks[strict]=false' \
-    -f "required_status_checks[contexts][]=$REQUIRED_CHECK" \
+    "${context_args[@]}" \
     -F 'enforce_admins=false' \
     -F 'required_pull_request_reviews[required_approving_review_count]=0' \
     -F 'restrictions=null' >/dev/null

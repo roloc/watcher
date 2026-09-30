@@ -2,10 +2,11 @@
 #
 # doctor.sh — read-only check that a project is wired up for the watcher, before any tick
 # ever runs against it. Run by deploy/install.sh right after cloning a project, and by
-# bin/spawn.sh before a lane's daemon loop starts (main, before run_daemon/--once). Prints
-# "doctor: ok" and exits 0 when everything checks out; otherwise prints one "doctor: ..."
-# line per failing check to stderr and exits 1 — install.sh stops, and spawn.sh logs it and
-# exits without entering the poll loop (systemd's RestartSec retries it).
+# bin/spawn.sh's tick_once, once per process, before a lane's first tick (see run_doctor
+# there). Prints "doctor: ok" and exits 0 when everything checks out; otherwise prints one
+# "doctor: ..." line per failing check to stderr and exits 1 — install.sh holds that
+# project out of its "Next, by hand" list, and spawn.sh logs it and never launches a tick
+# this poll (retried automatically; see run_doctor's own comment for the cadence).
 #
 # Reads what spawn.sh already resolved from the project file, so it never re-derives it:
 #   BOARD_OWNER, BOARD_NUMBER   exported by spawn.sh already (board.py reads the same two)
@@ -124,7 +125,14 @@ if [ ! -f "$CLAUDE_MD" ]; then
   problem "$PROJECT_ROOT has no CLAUDE.md"
 else
   CHECK_NAME="$(grep -ioE 'required CI check is `[^`]+`' "$CLAUDE_MD" | head -1 | sed -E 's/.*`([^`]+)`.*/\1/')"
-  [ -n "$CHECK_NAME" ] || problem "$PROJECT_ROOT/CLAUDE.md does not say what the required CI check is (the exact words: required CI check is \`<name>\`)"
+  # Best-effort, not a failure: this is one specific phrasing ("required CI check is
+  # `<name>`", this repo's own CLAUDE.md), and a project that names its check some other
+  # way (riffmap's CLAUDE.md: "for CI `verify`") would otherwise have every one of its
+  # lanes refused, forever, over a wording mismatch doctor cannot tell apart from a genuine
+  # gap. Found exactly this way, reviewing this file (PR #64): riffmap's CLAUDE.md does not
+  # use the exact phrase, and every riffmap lane would have stalled the next time
+  # spawn.sh restarted.
+  [ -n "$CHECK_NAME" ] || warn "$PROJECT_ROOT/CLAUDE.md does not use the exact words \"required CI check is \`<name>\`\" — could not confirm main requires one (templates/project-CLAUDE.md uses that phrase; consider matching it)"
 fi
 if [ -n "$CHECK_NAME" ]; then
   if PROTECTION_JSON="$($WATCHER_GH api "repos/$PROJECT_REPO/branches/main/protection" 2>"$ERR")"; then

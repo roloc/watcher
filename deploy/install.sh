@@ -113,17 +113,17 @@ for p in "$@"; do
 done
 
 MISSING=()
-grep -qE '^CLAUDE_CODE_OAUTH_TOKEN=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  1. Token:   claude setup-token   (on a machine with a browser); put the printed value in
+grep -qE '^CLAUDE_CODE_OAUTH_TOKEN=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  Token:      claude setup-token   (on a machine with a browser); put the printed value in
               /etc/watcher/env as CLAUDE_CODE_OAUTH_TOKEN=…")
-grep -qE '^DISCORD_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  1b. Discord: optional; put the channel's webhook in the same file as DISCORD_WEBHOOK_URL=…
+grep -qE '^DISCORD_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  Discord:    optional; put the channel's webhook in the same file as DISCORD_WEBHOOK_URL=…
               (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)")
-su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  2. GitHub:  su - watcher; gh auth login   (the bot account); gh auth setup-git")
+su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su - watcher; gh auth login   (the bot account); gh auth setup-git")
 if [ $# -eq 0 ]; then
-  MISSING+=("  3. Project: install.sh <project>  clones it; drop its .env.local / private inputs in place.")
-  MISSING+=("  4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f")
+  MISSING+=("  Project:    deploy/add-project.sh <name> <owner/repo>, then install.sh <project> clones it; drop its .env.local / private inputs in place.")
+  MISSING+=("  Start:      systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f")
 else
   for p in "${NOT_STARTED[@]}"; do
-    MISSING+=("  4. Start:   systemctl enable --now watcher@$p; journalctl -u watcher@$p -f")
+    MISSING+=("  Start:      systemctl enable --now watcher@$p; journalctl -u watcher@$p -f")
   done
 fi
 

@@ -308,7 +308,7 @@ chmod +x "$BIN/worktree.sh"
 # the real script's own checks.
 cat > "$BIN/doctor.sh" <<'STUB'
 #!/usr/bin/env bash
-echo "doctor.sh [PROJECT_REPO=${PROJECT_REPO:-} PROJECT_ROOT=${PROJECT_ROOT:-}]" >> "$TEST_LOG"
+echo "doctor.sh [PROJECT_REPO=${PROJECT_REPO:-} PROJECT_ROOT=${PROJECT_ROOT:-} BOARD_OWNER=${BOARD_OWNER:-} BOARD_NUMBER=${BOARD_NUMBER:-}]" >> "$TEST_LOG"
 if [ "${DOCTOR_FAIL:-0}" = 1 ]; then
   echo "doctor: ${DOCTOR_FAIL_REASON:-the board has no Stage field}" >&2
   exit 1
@@ -377,6 +377,7 @@ run() {
   GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" GH_PR_LIST_FAIL="${GH_PR_LIST_FAIL:-0}" \
   DOCTOR_FAIL="${DOCTOR_FAIL:-0}" DOCTOR_FAIL_REASON="${DOCTOR_FAIL_REASON:-}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
+  BOARD_OWNER="${BOARD_OWNER:-test-owner}" BOARD_NUMBER="${BOARD_NUMBER:-7}" \
   WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
   WATCHER_DOCTOR="$BIN/doctor.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
@@ -622,7 +623,7 @@ board_list $'75\tP1\tbuilder\t-\tCard seventy-five'
 run --once >/dev/null 2>"$TMP/doctor.err"; RC=$?
 DOCTOR_FAIL=0 DOCTOR_FAIL_REASON=""
 if [ "$RC" != 0 ]; then pass "a failing doctor is a non-success exit"; else flunk "expected non-zero exit" "rc=$RC"; fi
-if grepped "doctor.sh [PROJECT_REPO=owner/proj PROJECT_ROOT=$FAKE_ROOT]"; then pass "doctor runs with the project's repo and root"; else flunk "doctor call missing or wrong env" "$(cat "$TESTLOG")"; fi
+if grepped "doctor.sh [PROJECT_REPO=owner/proj PROJECT_ROOT=$FAKE_ROOT BOARD_OWNER=test-owner BOARD_NUMBER=7]"; then pass "doctor runs with the project's repo, root, board owner and board number"; else flunk "doctor call missing or wrong env" "$(cat "$TESTLOG")"; fi
 if not_grepped "board.py list" && not_grepped "claude " && not_grepped "worktree.sh new"; then
   pass "board is never polled and no tick launches when doctor fails"
 else
