@@ -77,13 +77,14 @@ systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
   && systemctl restart watcher-floor.service \
   || echo "warning: could not start watcher-floor.service" >&2
 
+NOT_STARTED=()
 for p in "$@"; do
   f="/opt/watcher/projects/$p.env"
   [ -f "$f" ] || { echo "no project file $f" >&2; exit 1; }
   # Clear what we read from the file before sourcing the next one: several projects share
   # this one shell, and a value left over from the previous project would silently stand in
   # for a file that simply does not set it.
-  unset PROJECT_ROOT PROJECT_REPO BOARD_OWNER
+  unset PROJECT_ROOT PROJECT_REPO BOARD_OWNER BOARD_NUMBER
   # shellcheck disable=SC1090
   . "$f"
   [ -n "${PROJECT_ROOT:-}" ] || { echo "$f sets no PROJECT_ROOT" >&2; exit 1; }
@@ -97,19 +98,42 @@ for p in "$@"; do
       || { echo "clone of $repo failed — is the watcher user logged in to gh, and is that the right repo? (su - watcher; gh auth login)" >&2; exit 1; }
   fi
   echo "project $p at $PROJECT_ROOT ($repo)"
+  # doctor.sh (card #39): read-only, run as the bot. Never fatal to install.sh itself —
+  # one misconfigured project must not stop the others in the same run — so a failure here
+  # only holds this project out of the "Next, by hand" list below: its own lines on stderr
+  # are what say not to start the service yet.
+  DOCTOR_OK=1
+  if [ -n "${BOARD_OWNER:-}" ] && [ -n "${BOARD_NUMBER:-}" ]; then
+    su - watcher -c "PROJECT_REPO='$repo' PROJECT_ROOT='$PROJECT_ROOT' BOARD_OWNER='$BOARD_OWNER' BOARD_NUMBER='$BOARD_NUMBER' /opt/watcher/bin/doctor.sh" \
+      || { DOCTOR_OK=0; echo "doctor found a problem with $p (above) — fix it, then re-run install.sh $p before starting watcher@$p" >&2; }
+  fi
+  if [ "$DOCTOR_OK" = 1 ] && ! systemctl is-enabled --quiet "watcher@$p" 2>/dev/null; then
+    NOT_STARTED+=("$p")
+  fi
 done
 
-cat <<'NEXT'
+MISSING=()
+grep -qE '^CLAUDE_CODE_OAUTH_TOKEN=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  1. Token:   claude setup-token   (on a machine with a browser); put the printed value in
+              /etc/watcher/env as CLAUDE_CODE_OAUTH_TOKEN=…")
+grep -qE '^DISCORD_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  1b. Discord: optional; put the channel's webhook in the same file as DISCORD_WEBHOOK_URL=…
+              (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)")
+su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  2. GitHub:  su - watcher; gh auth login   (the bot account); gh auth setup-git")
+if [ $# -eq 0 ]; then
+  MISSING+=("  3. Project: install.sh <project>  clones it; drop its .env.local / private inputs in place.")
+  MISSING+=("  4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f")
+else
+  for p in "${NOT_STARTED[@]}"; do
+    MISSING+=("  4. Start:   systemctl enable --now watcher@$p; journalctl -u watcher@$p -f")
+  done
+fi
 
-Next, by hand:
-  1. Token:   claude setup-token   (on a machine with a browser); put the printed value in
-              /etc/watcher/env as CLAUDE_CODE_OAUTH_TOKEN=…
-  1b. Discord: optional; put the channel's webhook in the same file as DISCORD_WEBHOOK_URL=…
-              (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)
-  2. GitHub:  su - watcher; gh auth login   (the bot account); gh auth setup-git
-  3. Project: install.sh <project>  clones it; drop its .env.local / private inputs in place.
-  4. Start:   systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f
-  Pause:      touch ~watcher/.local/state/watcher/<project>/PAUSE
-  Detector:   optional (card #36). Drop in projects/<project>.detect.env and re-run
-              install.sh (or wait for the next deploy) — the timer starts on its own.
-NEXT
+echo
+if [ "${#MISSING[@]}" -gt 0 ]; then
+  echo "Next, by hand:"
+  printf '%s\n' "${MISSING[@]}"
+else
+  echo "Nothing left by hand: token, GitHub login and every named project's service are set."
+fi
+echo "  Pause:      touch ~watcher/.local/state/watcher/<project>/PAUSE"
+echo "  Detector:   optional (card #36). Drop in projects/<project>.detect.env and re-run"
+echo "              install.sh (or wait for the next deploy) — the timer starts on its own."

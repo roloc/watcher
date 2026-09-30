@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+#
+# add-project.sh <name> <owner/repo> — puts a new project on the watcher: the board, the
+# labels, main's branch protection, and projects/<name>.env. Card #39: setting up this
+# repo's own board (PR #38) took a dozen hand steps, written down in three places, found
+# one at a time by failing. This replaces that list with one idempotent script: every step
+# checks first and does only what is missing, so a run that stops partway — or one you
+# simply run again later — is always safe to run again.
+#
+# Run from Steve's Mac (or wherever), authenticated as YOURSELF (`gh auth login`) — the
+# account that will own the repo and the new board — never as the bot. Two of the steps
+# below (setting main's branch protection, and the one-time grants the ask-first list
+# names) need admin on the repo and ownership of the board; the bot never has either, on
+# purpose (bin/doctor.sh's own header explains why). Run it from inside a checkout of this
+# repo (projects/<name>.env is written next to this script's own projects/ directory).
+#
+#   deploy/add-project.sh riffmap roloc/riffmap
+#
+# Env (TEMPLATE_BOARD is required; the rest have sane defaults):
+#   TEMPLATE_BOARD     <owner>/<number> of a clean, existing board to copy — Status
+#                      (Backlog/Ready/In progress/In review/Done/Stuck - Needs help),
+#                      Stage and Priority already set up, no live cards on it. `gh project
+#                      copy` works on any project the caller can read; it does not need to
+#                      be marked as a GitHub "template" (mark-template is organization-only
+#                      anyway — a personal board like this one's can never carry that flag).
+#   BOARD_OWNER        who owns the new board                   (default: the owner in <owner/repo>)
+#   BOT_LOGIN           the bot account the watcher runs as      (default: riffmap-bot)
+#   REQUIRED_CHECK      the CI check name to require on main     (default: verify)
+#   ADD_PROJECT_YES     1 = treat every "have you done this?" confirmation as yes, and
+#                        never prompt — for a non-interactive run (scripting, this script's
+#                        own test)                               (default: 0; prompts when
+#                                                                  stdin is a terminal, else
+#                                                                  requires this)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WATCHER_ROOT="$(dirname "$HERE")"
+WATCHER_GH="${WATCHER_GH:-gh}"
+
+usage() { echo "usage: deploy/add-project.sh <name> <owner/repo>" >&2; exit 64; }
+[ $# -eq 2 ] || usage
+NAME="$1"
+REPO="$2"
+case "$REPO" in */*) ;; *) echo "add-project.sh: <owner/repo> must contain a /, got '$REPO'" >&2; exit 64 ;; esac
+REPO_OWNER="${REPO%%/*}"
+
+BOARD_OWNER="${BOARD_OWNER:-$REPO_OWNER}"
+BOT_LOGIN="${BOT_LOGIN:-riffmap-bot}"
+REQUIRED_CHECK="${REQUIRED_CHECK:-verify}"
+ADD_PROJECT_YES="${ADD_PROJECT_YES:-0}"
+[ -n "${TEMPLATE_BOARD:-}" ] || { echo "add-project.sh: set TEMPLATE_BOARD=<owner>/<number> (a clean board to copy)" >&2; exit 64; }
+TEMPLATE_OWNER="${TEMPLATE_BOARD%%/*}"
+TEMPLATE_NUMBER="${TEMPLATE_BOARD##*/}"
+
+say() { printf '\n== %s ==\n' "$*"; }
+
+# confirm <question> — "have you done this?" gate. A tty gets a real prompt; a
+# non-interactive run needs ADD_PROJECT_YES=1 (never assumes yes by default — the whole
+# point of asking first is that a script must not guess it was done).
+confirm() {
+  if [ "$ADD_PROJECT_YES" = 1 ]; then return 0; fi
+  if [ ! -t 0 ]; then
+    echo "add-project.sh: '$1' needs confirming, and stdin is not a terminal — re-run with ADD_PROJECT_YES=1 once it's true" >&2
+    return 1
+  fi
+  local reply
+  read -r -p "$1 [y/N] " reply
+  case "$reply" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+# --- ask first: the one step this script cannot do unasked --------------------------------
+# Granting access is the board/repo owner's alone — GitHub gives no API a script can use to
+# invite a collaborator onto a Projects v2 board, and a repo collaborator grant is exactly
+# the kind of standing access decision that stays a human's, not something to script past.
+say "ask first — $BOT_LOGIN needs access"
+perm="$($WATCHER_GH api "repos/$REPO/collaborators/$BOT_LOGIN/permission" --jq .permission 2>/dev/null || true)"
+case "$perm" in
+  admin|maintain|write) echo "  repo: $BOT_LOGIN already has '$perm' on $REPO" ;;
+  *)
+    cat >&2 <<EOF
+add-project.sh: $BOT_LOGIN does not have write access to $REPO (permission: '${perm:-none}').
+Grant it, then run this script again:
+  $REPO → Settings → Collaborators → Add people → $BOT_LOGIN → Write
+EOF
+    exit 1
+    ;;
+esac
+
+# --- the board: find-or-copy, then link the repo ------------------------------------------
+say "the board"
+existing="$($WATCHER_GH project list --owner "$BOARD_OWNER" --format json \
+  --jq ".projects[] | select(.title == \"$NAME\") | .number" | head -1)"
+if [ -n "$existing" ]; then
+  BOARD_NUMBER="$existing"
+  echo "  board \"$NAME\" already exists for $BOARD_OWNER: #$BOARD_NUMBER (unchanged)"
+else
+  BOARD_NUMBER="$($WATCHER_GH project copy "$TEMPLATE_NUMBER" --source-owner "$TEMPLATE_OWNER" \
+    --target-owner "$BOARD_OWNER" --title "$NAME" --format json --jq .number)"
+  echo "  copied $TEMPLATE_OWNER/#$TEMPLATE_NUMBER → $BOARD_OWNER/#$BOARD_NUMBER, titled \"$NAME\""
+fi
+$WATCHER_GH project link "$BOARD_NUMBER" --owner "$BOARD_OWNER" --repo "$REPO" >/dev/null
+echo "  linked to $REPO"
+
+# --- ask first, part 2: only checkable now that the board exists --------------------------
+# Neither of these has an API: board collaborator access is the same undocumented gap as
+# above, and the GraphQL `workflows` field exposes only a workflow's name and whether it is
+# on — never its filter (bin/doctor.sh's own header, and card #39's "Details": the Auto-add
+# workflow does not survive `gh project copy` at all, so this is never a no-op).
+say "ask first — board access and Auto-add"
+cat <<EOF
+  1. Board access: $BOARD_OWNER/#$BOARD_NUMBER → ⋯ menu → Settings → Manage access → add
+     $BOT_LOGIN with Write.
+  2. Auto-add: same board → ⋯ menu → Workflows → Auto-add to project → turn it on, filter
+     "is:issue is:open" (NOT GitHub's own "is:issue,pr is:open label:bug" example — a board
+     copy carries no cards across silently on that default; card #39, September 28, 2026).
+EOF
+confirm "Both of those done?" || { echo "add-project.sh: stopping here — re-run once they are" >&2; exit 1; }
+
+# --- labels on the repo ---------------------------------------------------------------------
+say "labels"
+$WATCHER_GH label create in-flight --repo "$REPO" --color fef2c0 \
+  --description "A tick is working this card right now" --force >/dev/null
+$WATCHER_GH label create blocked --repo "$REPO" --color 000000 \
+  --description "Straight to Stuck" --force >/dev/null
+$WATCHER_GH label create steve-decision --repo "$REPO" --color d4c5f9 \
+  --description "A product decision: Steve's, never a tick's" --force >/dev/null
+echo "  in-flight, blocked, steve-decision: ensured on $REPO"
+
+# --- main's branch protection --------------------------------------------------------------
+say "branch protection on main"
+current="$($WATCHER_GH api "repos/$REPO/branches/main/protection" 2>/dev/null || true)"
+already_set=0
+if [ -n "$current" ]; then
+  already_set="$(python3 -c '
+import json, sys
+d = json.loads(sys.argv[1])
+check = sys.argv[2]
+rsc = d.get("required_status_checks") or {}
+checks = {c.get("context") for c in (rsc.get("checks") or []) if c.get("context")} | set(rsc.get("contexts") or [])
+prr = d.get("required_pull_request_reviews") or {}
+ok = (check in checks
+      and prr.get("required_approving_review_count") == 0
+      and not (d.get("enforce_admins") or {}).get("enabled"))
+print(1 if ok else 0)
+' "$current" "$REQUIRED_CHECK")"
+fi
+if [ "$already_set" = 1 ]; then
+  echo "  already set: \"$REQUIRED_CHECK\" required, PR required, 0 approvals, admins not enforced (unchanged)"
+else
+  $WATCHER_GH api -X PUT "repos/$REPO/branches/main/protection" \
+    -H "Accept: application/vnd.github+json" \
+    -F 'required_status_checks[strict]=false' \
+    -f "required_status_checks[contexts][]=$REQUIRED_CHECK" \
+    -F 'enforce_admins=false' \
+    -F 'required_pull_request_reviews[required_approving_review_count]=0' \
+    -F 'restrictions=null' >/dev/null
+  echo "  set: \"$REQUIRED_CHECK\" required, PR required, 0 approvals, admins not enforced"
+fi
+
+# --- projects/<name>.env --------------------------------------------------------------------
+say "projects/$NAME.env"
+ENV_FILE="$WATCHER_ROOT/projects/$NAME.env"
+if [ -f "$ENV_FILE" ]; then
+  echo "  $ENV_FILE already exists — left unchanged (edit it by hand, or remove it and re-run)"
+else
+  copy_dirs=""
+  if confirm "Does $REPO have gitignored, in-tree private inputs a tick should read (transcripts, fixtures)? (No → empty)"; then
+    if [ -t 0 ]; then
+      read -r -p "  WORKTREE_COPY_DIRS (space-separated, relative to the checkout): " copy_dirs
+    else
+      echo "  stdin is not a terminal — leaving WORKTREE_COPY_DIRS empty; set it by hand in $ENV_FILE"
+    fi
+  fi
+  cat > "$ENV_FILE" <<EOF
+PROJECT_NAME=$NAME
+PROJECT_ROOT=/home/watcher/projects/$NAME
+PROJECT_REPO=$REPO
+BOARD_OWNER=$BOARD_OWNER
+BOARD_NUMBER=$BOARD_NUMBER
+WORKTREE_COPY_DIRS="$copy_dirs"
+EOF
+  echo "  wrote $ENV_FILE"
+fi
+
+say "done"
+cat <<EOF
+Next:
+  - Commit and push projects/$NAME.env (git add/commit/push — this script does not).
+  - On the box: deploy/install.sh $NAME; systemctl enable --now watcher@$NAME
+  - bin/doctor.sh (run by install.sh) is the read-only check that everything above landed.
+EOF

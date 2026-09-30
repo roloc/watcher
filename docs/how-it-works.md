@@ -426,6 +426,10 @@ A project keeps its own `CLAUDE.md` (hard rules, the required CI check, standing
 its own `.claude/agents/`, its own CI, and can override `/watch` with its own
 `.claude/commands/watch.md`. The generic `/watch` reads the project's `CLAUDE.md` for the
 names it needs (the CI check, the contracts it must not touch, the spend receipt if any).
+`templates/project-CLAUDE.md` (card #39) is that section with a blank for each one, built
+straight from what `/watch`, `/triage` and the reviewer read; `deploy/add-project.sh` and
+`bin/doctor.sh` are the rest of putting a project on the watcher — see README, "Add a
+project".
 
 Deploying a new watcher version happens by itself: `watcher-deploy.timer` runs
 `deploy/autodeploy.sh`, which ships `main` when `verify` and the replay suite pass on the

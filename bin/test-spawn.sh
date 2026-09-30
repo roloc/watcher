@@ -302,6 +302,22 @@ exit 0
 STUB
 chmod +x "$BIN/worktree.sh"
 
+# doctor.sh (card #39): logs the call, then exits 0 silently unless $DOCTOR_FAIL=1, in
+# which case it prints the one line a real failing check would and exits 1 — so a test
+# only has to assert spawn.sh reacted to that line and to the exit code, never re-implement
+# the real script's own checks.
+cat > "$BIN/doctor.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "doctor.sh [PROJECT_REPO=${PROJECT_REPO:-} PROJECT_ROOT=${PROJECT_ROOT:-}]" >> "$TEST_LOG"
+if [ "${DOCTOR_FAIL:-0}" = 1 ]; then
+  echo "doctor: ${DOCTOR_FAIL_REASON:-the board has no Stage field}" >&2
+  exit 1
+fi
+echo "doctor: ok"
+exit 0
+STUB
+chmod +x "$BIN/doctor.sh"
+
 # fake-tick.sh: NOT one of spawn.sh's overridable commands — a standalone helper the tests
 # themselves background directly, with argv chosen so its command line contains
 # "watch <n> --dangerously-skip-permissions", matching reconcile_stale_current's own
@@ -359,8 +375,10 @@ run() {
   CLAUDE_PROBE_FAIL_OTHER="${CLAUDE_PROBE_FAIL_OTHER:-}" \
   WORKTREE_NEW_FAIL="${WORKTREE_NEW_FAIL:-0}" \
   GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" GH_PR_LIST_FAIL="${GH_PR_LIST_FAIL:-0}" \
+  DOCTOR_FAIL="${DOCTOR_FAIL:-0}" DOCTOR_FAIL_REASON="${DOCTOR_FAIL_REASON:-}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
   WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
+  WATCHER_DOCTOR="$BIN/doctor.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
   WATCHER_CLAUDE_JSON="${CLAUDE_JSON_PATH:-$TMP/unused-claude.json}" \
   WATCHER_TICK_TIMEOUT_SEC="${WATCHER_TICK_TIMEOUT_SEC:-}" \
@@ -595,6 +613,31 @@ touch "$STATE/PAUSE"
 board_list $'70\tP1\tbuilder\t-\tCard seventy'
 run --once >/dev/null
 if [ ! -s "$TESTLOG" ]; then pass "PAUSE present: board.py never invoked"; else flunk "PAUSE should stop the poll before board.py" "$(cat "$TESTLOG")"; fi
+
+# ============================================================================
+echo "7b. doctor.sh (card #39): a failing check blocks the poll before board.py, and is retried, never launching a tick"
+fresh_state
+DOCTOR_FAIL=1 DOCTOR_FAIL_REASON="the board has no Stage field"
+board_list $'75\tP1\tbuilder\t-\tCard seventy-five'
+run --once >/dev/null 2>"$TMP/doctor.err"; RC=$?
+DOCTOR_FAIL=0 DOCTOR_FAIL_REASON=""
+if [ "$RC" != 0 ]; then pass "a failing doctor is a non-success exit"; else flunk "expected non-zero exit" "rc=$RC"; fi
+if grepped "doctor.sh [PROJECT_REPO=owner/proj PROJECT_ROOT=$FAKE_ROOT]"; then pass "doctor runs with the project's repo and root"; else flunk "doctor call missing or wrong env" "$(cat "$TESTLOG")"; fi
+if not_grepped "board.py list" && not_grepped "claude " && not_grepped "worktree.sh new"; then
+  pass "board is never polled and no tick launches when doctor fails"
+else
+  flunk "doctor failure should block everything after it" "$(cat "$TESTLOG")"
+fi
+if grep -q "doctor failed.*not launching" "$TMP/doctor.err"; then pass "the spawner logs that it is refusing to launch a tick"; else flunk "no log line for the doctor failure" "$(cat "$TMP/doctor.err")"; fi
+
+echo "7c. …and a passing doctor runs exactly once across a daemon's repeated polls, never once PAUSE lifts"
+fresh_state
+board_list $'76\tP2\tbuilder\tin-flight\tnothing claimable — keeps the loop from launching a real tick'
+WATCHER_MAX_POLLS=3
+run >/dev/null 2>&1
+WATCHER_MAX_POLLS=""
+doctor_calls="$(grep -c '^doctor.sh ' "$TESTLOG" || true)"
+[ "$doctor_calls" = 1 ] && pass "doctor.sh called exactly once across 3 polls of the daemon loop" || flunk "expected 1 doctor.sh call, got $doctor_calls" "$(cat "$TESTLOG")"
 
 # ============================================================================
 echo "8. B2: the watchdog TERM reaches the tick process itself, not a wrapper subshell"

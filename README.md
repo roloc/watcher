@@ -24,6 +24,12 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify/dump/ask (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
+    bin/doctor.sh         read-only sanity check that a project is wired up; deploy/install.sh and
+                          bin/spawn.sh both run it before a lane's first tick (see "Add a project")
+    deploy/add-project.sh the dozen hand steps of putting a new project on the watcher, as one
+                          idempotent script — run from Steve's Mac, never by a tick (see below)
+    templates/project-CLAUDE.md  the section a project's own CLAUDE.md needs for /watch to run
+                          against it, built from what watch.md/triage.md/reviewer.md actually read
     bin/detect.sh         the product detector: a metric, a rolling baseline, fixed bands (see below)
     bin/floor.py          the floor page: what every lane on the box is doing, live and read-only (see below); bin/test-floor.py checks it offline
     bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
@@ -164,8 +170,10 @@ Then by hand, once:
    `DISCORD_WEBHOOK_URL=…` goes in the same file if you want the channel (see above).
 2. **GitHub:** `su - watcher`, `gh auth login` as the bot account, `gh auth setup-git`. The bot
    needs write access to the repo and access to the Projects board.
-3. **Project:** `deploy/install.sh riffmap` clones it under `/home/watcher/projects/`; drop its
-   `.env.local` and any private inputs in place.
+3. **Project:** `deploy/add-project.sh riffmap roloc/riffmap` (from your own machine, see
+   "Add a project" below) sets up the board, the labels, and `projects/riffmap.env`; commit
+   and push that file, then `deploy/install.sh riffmap` clones the repo under
+   `/home/watcher/projects/` and drop its `.env.local` and any private inputs in place.
 4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design
    watcher@riffmap-triage` (the build, design and triage lanes — without the triage lane
    an unlabeled card is nobody's); `journalctl -u watcher@riffmap -f` follows one.
@@ -245,10 +253,39 @@ timer back on only when it deployed `main`. After a branch, run it again for `ma
 
 ## Add a project
 
-Add `projects/<name>.env`, run `deploy/install.sh <name>`, `systemctl enable --now
-watcher@<name>`. The project needs a board with the columns
-`Backlog | Ready | In progress | In review | Done | Stuck - Needs help`, an `in-flight`
-label, and CI that is a required check on `main`.
+Putting a project on the watcher used to be a dozen hand steps, written down in three
+places, most of them found only when they broke (card #39 — setting up this repo's own
+board, PR #38, is what surfaced them). Now it is one idempotent script, run from Steve's
+Mac (or wherever), authenticated as **yourself** — never as the bot, since two of its steps
+(main's branch protection, the board itself) need admin/ownership the bot is never given:
+
+    TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
+
+`TEMPLATE_BOARD` is a clean, existing board to copy — `gh project copy` works on any board
+the caller can read, so it does not have to be a GitHub "template" (that flag is
+organization-only anyway). The script checks each step before doing it, so running it again
+after fixing something is the normal way to finish a partial run — it prints "unchanged"
+for everything already in place. It copies the board, links the repo, creates the `in-
+flight` / `blocked` / `steve-decision` labels, sets `main`'s branch protection (the named
+check required, PR required, 0 approvals, admins not enforced), and writes
+`projects/<name>.env`. Two things it cannot do for you — GitHub gives no API for either —
+it prints as an ask-first checklist and waits for a yes: granting `riffmap-bot` access to
+the new board, and turning on the board's **Auto-add to project** workflow with the filter
+`is:issue is:open` (`gh project copy` does not carry that workflow across at all, and a
+board whose filter is still GitHub's own `label:bug` example silently adds no cards — both
+found by failing, card #39, September 28, 2026).
+
+Then commit and push `projects/<name>.env` (the script writes it but does not push it), and
+paste `templates/project-CLAUDE.md`'s section into the project's own `CLAUDE.md` — it is
+built from what `/watch`, `/triage` and the reviewer actually read out of a project's
+`CLAUDE.md`, with a blank for each one. Finally: `deploy/install.sh <name>` (clones the repo,
+runs `bin/doctor.sh` — the same read-only check, confirming the board reads, Status/Stage/
+Priority are there, the labels exist, Auto-add is on, and the project's `CLAUDE.md` names a
+required check that `main` actually requires — and tells you if something above is still
+missing before you start the service), then `systemctl enable --now watcher@<name>`.
+`bin/spawn.sh` runs the same `doctor.sh` itself, once, before a lane's first tick ever
+launches — so a project that drifts out of shape after setup (a label deleted, Auto-add
+turned off) is refused, not silently worked wrong, the next time the service restarts.
 
 Nothing here is riffmap-shaped, but two settings are worth knowing before the first run:
 

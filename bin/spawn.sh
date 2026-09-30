@@ -51,6 +51,7 @@
 #   WATCHER_ROOT       the project checkout                     (default: $PROJECT_ROOT)
 #   WATCHER_CLAUDE     claude binary/command                    (default: claude)
 #   WATCHER_GH         gh binary/command                        (default: gh)
+#   WATCHER_DOCTOR     bin/doctor.sh invocation                 (default: <here>/doctor.sh)
 #   WATCHER_BOARD      board.py invocation                      (default: python3 <here>/board.py)
 #   WATCHER_WORKTREE   worktree.sh invocation                   (default: <here>/worktree.sh)
 #   WATCHER_STATE      state dir                                (default: ~/.local/state/watcher/<name>)
@@ -104,6 +105,7 @@ PROJECT_REPO="${PROJECT_REPO:-$(git -C "$WATCHER_ROOT" remote get-url origin 2>/
 [ -n "$PROJECT_REPO" ] && export GH_REPO="$PROJECT_REPO"
 WATCHER_CLAUDE="${WATCHER_CLAUDE:-claude}"
 WATCHER_GH="${WATCHER_GH:-gh}"
+WATCHER_DOCTOR="${WATCHER_DOCTOR:-$WATCHER_HERE/doctor.sh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"
 WATCHER_WORKTREE="${WATCHER_WORKTREE:-$WATCHER_HERE/worktree.sh}"
 export WORKTREE_ROOT="$WATCHER_ROOT"
@@ -162,6 +164,7 @@ WORKTREE_BASE="$(dirname "$WATCHER_ROOT")/$(basename "$WATCHER_ROOT")-worktrees"
 PIDFILE="$WATCHER_STATE/spawn.pid"
 PAUSEFILE="$WATCHER_STATE/PAUSE"
 CURRENTFILE="$WATCHER_STATE/current"
+DOCTOR_OK=""  # set by run_doctor the first time tick_once gets past a PAUSE (see run_doctor)
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 
@@ -194,6 +197,23 @@ parse_args() {
     esac
     shift
   done
+}
+
+# run_doctor — bin/doctor.sh (card #39): a project whose board or CLAUDE.md is not wired
+# up for the watcher never gets a tick launched against it. Checked by tick_once, once per
+# process (the DOCTOR_OK global, declared beside PIDFILE/PAUSEFILE above), on the first
+# poll that gets past a PAUSE — a paused lane makes no external call at all, doctor
+# included (test 7's own contract: PAUSE means silence). doctor.sh already names which
+# check failed on its own stderr; this only adds the one line saying the run is refusing
+# to start, and returning 1 here is read by tick_once's caller the same as any other
+# failed poll — a 10-minute retry, forever, until whatever doctor named is fixed.
+run_doctor() {
+  if PROJECT_REPO="$PROJECT_REPO" PROJECT_ROOT="$WATCHER_ROOT" WATCHER_GH="$WATCHER_GH" $WATCHER_DOCTOR; then
+    return 0
+  else
+    log "doctor failed (see lines above); not launching any tick this poll"
+    return 1
+  fi
 }
 
 # --- section 1, step 1: the single-process guard ---------------------------------------
@@ -1275,6 +1295,13 @@ tick_once() {
   if [ -f "$PAUSEFILE" ]; then
     log "paused ($PAUSEFILE present); idling"
     return 0
+  fi
+
+  if [ -z "$DOCTOR_OK" ]; then
+    # Return 1, not 2: run_daemon's own case statement already waits 10 minutes on any
+    # non-2 failure (rc=2 is poll_board's, which sleeps 5 min itself) — this reuses that
+    # instead of sleeping twice.
+    if run_doctor; then DOCTOR_OK=1; else return 1; fi
   fi
 
   if ! poll_board; then
