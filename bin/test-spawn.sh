@@ -436,7 +436,7 @@ if grepped "worktree.sh new card-20" && grepped "/watch 20"; then pass "worktree
 if grepped "claude-env background-tasks-disabled=1"; then pass "the tick runs with background tasks disabled (a headless CI wait must block)"; else flunk "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS not passed to the tick" "$(cat "$TESTLOG")"; fi
 if not_grepped "board.py unclaim 20"; then pass "no unclaim: in-flight was never on the card"; else flunk "unexpected unclaim"; fi
 if not_grepped "worktree.sh remove card-20"; then pass "worktree kept: card is still OPEN"; else flunk "worktree should not be removed"; fi
-if not_grepped "board.py notify"; then pass "no Discord post from the spawner: an ordinary tick is not an event (board.py posts the tick's own moves)"; else flunk "unexpected board.py notify" "$(cat "$TESTLOG")"; fi
+if not_grepped "board.py notify"; then pass "no Discord post from the spawner: an ordinary tick is not an event"; else flunk "unexpected board.py notify" "$(cat "$TESTLOG")"; fi
 [ "$(cat "$STATE/attempts/20" 2>/dev/null)" = 1 ] && pass "attempts/20 = 1 after one launch" || flunk "attempts/20" "$(cat "$STATE/attempts/20" 2>/dev/null)"
 
 echo "2b. …same, but the card is CLOSED → worktree removed"
@@ -446,7 +446,7 @@ board_show '{"number":21,"state":"CLOSED","status":"Done","labels":[]}'
 run --once >/dev/null
 if grepped "board.py stage 21 -"; then pass "stage cleared: a closed card leaves no stale Stage on the grouped view"; else flunk "stage clear on close" "$(cat "$TESTLOG")"; fi
 if grepped "worktree.sh remove card-21"; then pass "worktree removed: card is CLOSED"; else flunk "worktree remove" "$(cat "$TESTLOG")"; fi
-if grepped "board.py notify 21 shipped"; then pass "Discord: a card that closed is reported as shipped (board.py downgrades it to 'closed' if no PR merged)"; else flunk "expected board.py notify 21 shipped" "$(cat "$TESTLOG")"; fi
+if not_grepped "board.py notify"; then pass "Discord: a card that shipped posts nothing (the floor page shows it; the channel is for stuck and broken)"; else flunk "unexpected board.py notify for a closed card" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "3. --once: stub claude exits 143 (killed), in-flight STILL on the card → unclaim + sweeper comment with the right numbers"
@@ -511,11 +511,10 @@ if printf '%s' "$comment_line" | grep -q 'quota used' \
 else
   flunk "quota wording in the sweeper comment" "$comment_line"
 fi
-released_line="$(grep 'board.py notify 31 released' "$TESTLOG" || true)"
-if printf '%s' "$released_line" | grep -q 'PR #52 is up' && ! printf '%s' "$released_line" | grep -q 'without finishing'; then
-  pass "Discord: 'released' names the PR, not a death"
+if not_grepped "board.py notify"; then
+  pass "Discord: nothing posted — a PR waiting for the next poll to merge it is not broken"
 else
-  flunk "board.py notify 31 released" "$released_line"
+  flunk "unexpected board.py notify for a run that left its PR open" "$(grep 'board.py notify' "$TESTLOG")"
 fi
 [ "$(cat "$STATE/attempts/31" 2>/dev/null)" = 1 ] && pass "attempts/31 = 1: still one of the two tries (a second such exit parks it)" || flunk "attempts/31" "$(cat "$STATE/attempts/31" 2>/dev/null)"
 

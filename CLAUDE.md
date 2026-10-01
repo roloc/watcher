@@ -19,7 +19,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `agent:` label on an unlabeled card, record what it waits on, stop. Generic the same way.
 - `agents/reviewer.md` — the one review pass. Read-only, blocking findings only, one round.
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
-- `bin/notify.py` — Discord posts, called only from `board.py` (`move`, `stage`, `notify`).
+- `bin/notify.py` — Discord posts, called only from `board.py` (a `move` to Stuck, and
+  `notify`). It posts when a card is stuck or something broke, and for nothing else.
   `python3 bin/test-notify.py` is its offline test; run it after touching either file.
 - `bin/metrics.py` — a read-only weekly report over a lane's own tick logs (first-pass
   merge rate, park rate, deaths, turns/quota and time to Done), run by hand, never by the
@@ -105,7 +106,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - No permission prompts exist on the box. Nothing in the tick may depend on one.
 - Discord is a repeater, never a record: a post happens after the board change lands, a
   failed post is one stderr line and nothing else, and no message goes out per poll or
-  per tick. The webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
+  per tick. **It is for stuck and broken only** — a move to Stuck, a run that died, a card
+  the detector filed. A new kind of post needs one of those two words to be true of it;
+  progress belongs on the floor page (October 1, 2026). The webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
 - American English in every file. Dates like September 7, 2026.
 
 ## When the watcher works its own board

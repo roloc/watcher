@@ -142,6 +142,10 @@ echo "$iss" > "$FILED"
 if gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" >/dev/null 2>&1 \
    && board move "$iss" Backlog >/dev/null 2>&1; then
   say "filed $url in Backlog"
+  # A large breach is the product broken, which is one of the two things Discord is for.
+  # After the card lands, never before, and best-effort: board.py's notify exits 0 whether
+  # or not a webhook is set, and a post that fails must not look like a failed run here.
+  board notify "$iss" breach "$DETECT_WHAT: now $value, averaging $avg over the last $count readings (the limit is $DETECT_LARGE_BAND). The card is in Backlog with the evidence.${DETECT_LOOK_URL:+ Look: $DETECT_LOOK_URL}" >/dev/null 2>&1 || true
 else
   say "filed $url but could not put it on the board (it still exists — check it by hand)"
 fi

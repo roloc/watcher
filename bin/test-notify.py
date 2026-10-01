@@ -43,7 +43,7 @@ def embed():
 
 # --- notify.build shapes -------------------------------------------------------------
 print("1. every kind names the card and links to it")
-for kind in ("status", "stage", "stuck", "shipped", "closed", "released"):
+for kind in ("stuck", "released", "breach"):
     sent.clear()
     notify.post(kind, CARD, detail="Building", pr=PR, board_url="https://github.com/users/o/projects/1")
     p = last()
@@ -69,70 +69,103 @@ os.environ["DISCORD_MENTION"] = "<@123>"
 sent.clear()
 notify.post("stuck", CARD)
 check("DISCORD_MENTION is prepended to the alert", last()["content"].startswith("<@123> 🚨"))
-sent.clear()
-notify.post("status", CARD, detail="In review")
-check("...but not to an ordinary status move", "<@123>" not in last()["content"])
+for kind in ("released", "breach"):
+    sent.clear()
+    notify.post(kind, CARD)
+    check(f"...but not to '{kind}': broken is a line, stuck is the ping",
+          "<@123>" not in last()["content"])
 del os.environ["DISCORD_MENTION"]
 
-print("3. off switch and unknown kinds")
+print("3. the two 'something broke' posts")
+sent.clear()
+notify.post("released", CARD, detail="The run ended after 12 min without finishing.")
+check("a died run: says the run ended, carries the spawner's line, orange",
+      "the run ended without finishing" in last()["content"]
+      and "12 min" in embed()["description"] and embed()["color"] == notify.ORANGE)
+sent.clear()
+notify.post("breach", CARD, detail="Health probes failing: now 1, averaging 0.7500.")
+check("a product breach: says something broke, carries the detector's line, orange",
+      "Something broke" in last()["content"]
+      and "averaging 0.7500" in embed()["description"] and embed()["color"] == notify.ORANGE)
+
+print("4. off switch, and everything that is not stuck or broken")
 saved = os.environ.pop("DISCORD_WEBHOOK_URL")
 sent.clear()
 check("no webhook → not enabled, nothing sent", notify.post("stuck", CARD) is False and not sent)
 os.environ["DISCORD_WEBHOOK_URL"] = saved
 check("an unknown kind is not posted", notify.post("bogus", CARD) is False and not sent)
+for kind in ("status", "stage", "shipped", "closed"):
+    check(f"'{kind}' is no longer a post: the floor page shows it",
+          notify.build(kind, CARD, detail="Building", pr=PR) is None
+          and notify.post(kind, CARD, detail="Building", pr=PR) is False and not sent)
 check("an unknown card gets no empty embed url",
       "url" not in notify.build("released", {"number": 5, "title": "", "url": ""})["embeds"][0])
 check("content stays under Discord's limit",
-      len(notify.build("status", {"number": 1, "title": "x" * 3000, "url": ""}, "In review")["content"]) <= 2000)
+      len(notify.build("stuck", {"number": 1, "title": "x" * 3000, "url": ""}, "ask")["content"]) <= 2000)
 
 # --- board.py hooks ------------------------------------------------------------------
-print("4. board.py: move and stage post after the change lands")
+print("5. board.py: only a move to Stuck posts; every other move and every stage is silent")
 calls = []
+pr_lookups = []
 board.set_option = lambda issue, field, value: (calls.append((field, value)) or (value, dict(CARD)))
-board.pr_for = lambda issue: PR
+board.pr_for = lambda issue: pr_lookups.append(issue) or PR
 board.needs_steve_ask = lambda issue: "Needs Steve: pick where speaker names live."
 
-sent.clear(); board.cmd_move("87", "In review")
-check("move → a 'status' post naming the new column", "**In review**" in last()["content"])
-check("In review carries the PR link", PR["url"] in embed()["description"])
+for column in ("Backlog", "Ready", "In progress", "In review", "Done"):
+    sent.clear(); calls.clear(); pr_lookups.clear()
+    board.cmd_move("87", column)
+    check(f"move → {column}: the board changes, Discord hears nothing",
+          calls == [("Status", column)] and not sent)
+    check(f"move → {column}: no PR lookup spent on a post that is not sent", not pr_lookups)
 sent.clear(); board.cmd_move("87", "Stuck - Needs help")
 check("move to Stuck → the alert, quoting the card's Needs Steve comment",
-      "Needs Steve" in last()["content"] and "speaker names" in embed()["description"])
+      len(sent) == 1 and "Needs Steve" in last()["content"] and "speaker names" in embed()["description"])
+check("the Stuck alert carries the PR link", PR["url"] in embed()["description"])
 sent.clear(); board.cmd_move("87", "Stuck - Needs help", "--why", "This card failed 2 attempts, so I parked it.")
 check("--why overrides the comment lookup (the spawner's park)",
       "failed 2 attempts" in embed()["description"] and "speaker names" not in embed()["description"])
-sent.clear(); board.cmd_stage("87", "Building")
-check("stage → a 'stage' post", "**Building**" in last()["content"] and embed()["color"] == notify.GRAY)
-sent.clear(); board.cmd_stage("87", "Parked")
-check("stage Parked posts nothing (the Stuck move already did)", not sent)
-sent.clear(); board.cmd_stage("87", "PR open")
-check("PR open carries the PR link", PR["url"] in embed()["description"])
+for stage in ("Claimed", "Designing", "Building", "Testing", "Reviewing", "PR open", "Merging", "Parked"):
+    sent.clear(); calls.clear()
+    board.cmd_stage("87", stage)
+    check(f"stage {stage}: the board changes, Discord hears nothing",
+          calls == [("Stage", stage)] and not sent)
 try:
     board.cmd_move("87", "In review", "--bogus")
     check("move rejects stray arguments", False)
 except SystemExit as e:
     check("move rejects stray arguments", "unexpected arguments" in str(e))
 
-print("5. board.py notify: the spawner's events")
-board.items = lambda: [dict(CARD, state="CLOSED", status="Done")]
-board.pr_for = lambda issue: {"url": PR["url"], "state": "MERGED"}
-sent.clear(); board.cmd_notify("87", "shipped")
-check("shipped with a merged PR → green 'shipped'", "shipped" in last()["content"] and embed()["color"] == notify.GREEN)
-board.pr_for = lambda issue: None
-sent.clear(); board.cmd_notify("87", "shipped")
-check("shipped with no merged PR → 'closed without a merge'", "closed without a merge" in last()["content"])
+print("6. board.py notify: a died run and a product breach, and nothing else")
+board.items = lambda: [dict(CARD, state="OPEN", status="In progress")]
 sent.clear(); board.cmd_notify("87", "released", "The run ended after 12 min without finishing.")
-check("released carries the spawner's detail", "12 min" in embed()["description"])
-try:
-    board.cmd_notify("87", "bogus")
-    check("unknown event exits 1", False)
-except SystemExit as e:
-    check("unknown event exits 1", "unknown event" in str(e))
+check("released carries the spawner's detail", len(sent) == 1 and "12 min" in embed()["description"])
+check("released names the card and links it",
+      "#87 Add speaker names" in last()["content"] and embed()["url"] == CARD["url"])
+sent.clear(); board.cmd_notify("87", "breach", "Health probes failing: now 1, averaging 0.7500.")
+check("breach carries the detector's detail",
+      len(sent) == 1 and "Something broke" in last()["content"] and "0.7500" in embed()["description"])
+
+
+def board_down():
+    sys.exit("board.py: gh failed: outage")
+
+
+board.items = board_down
+sent.clear()
+check("a board outage does not stop the post; it goes out without a title",
+      board.cmd_notify("87", "released", "died") == 0 and len(sent) == 1 and "#87" in last()["content"])
+for kind in ("shipped", "closed", "bogus"):
+    sent.clear()
+    try:
+        board.cmd_notify("87", kind)
+        check(f"notify {kind} exits 1: not an event any more", False)
+    except SystemExit as e:
+        check(f"notify {kind} exits 1: not an event any more", "unknown event" in str(e) and not sent)
 os.environ.pop("DISCORD_WEBHOOK_URL")
 sent.clear()
-check("notify with no webhook is a silent no-op, exit 0", board.cmd_notify("87", "shipped") == 0 and not sent)
+check("notify with no webhook is a silent no-op, exit 0", board.cmd_notify("87", "released") == 0 and not sent)
 
-print("6. board.py sweep-stages: a closed card does not keep its Stage")
+print("7. board.py sweep-stages: a closed card does not keep its Stage")
 os.environ["DISCORD_WEBHOOK_URL"] = "https://discord.example/webhook"
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post a card's major events to a Discord channel, through a webhook.
+"""Tell Steve's Discord channel when a card is stuck or something broke. Nothing else.
 
 Imported by `board.py`; never called by a tick directly. Every message names the card
 and links to it, so Steve can tap through from his phone. Configuration is one env var:
@@ -10,16 +10,17 @@ and links to it, so Steve can tap through from his phone. Configuration is one e
 
 What gets posted (and by whom):
 
-    status     `board move`   — the card changed column (In progress, In review, ...)
     stuck      `board move`   — the card landed in Stuck - Needs help: the alert
-    stage      `board stage`  — the tick crossed into a new step (Building, Testing, ...)
-    shipped    `board notify` — the spawner saw the card close with a merged PR
-    closed     `board notify` — the spawner saw the card close without one
     released   `board notify` — a run died holding the card; the spawner released it
+    breach     `board notify` — the product detector filed a card for a large breach
 
-Nothing is posted per tick or per poll, and nothing for a quiet tick. A post that fails
-(network, a bad URL, Discord down) prints one `notify: ...` line on stderr and returns —
-a notification is never allowed to fail a board command.
+That is the whole list. A card changing column, crossing into a new stage, shipping or
+being closed posts nothing: the floor page shows all of that live, and a channel that
+repeats it is a channel nobody reads when the alert comes (October 1, 2026: "Can we only
+hit the discord when something is stuck or broken?"). Nothing is posted per tick or per
+poll either. A post that fails (network, a bad URL, Discord down) prints one
+`notify: ...` line on stderr and returns — a notification is never allowed to fail a
+board command.
 
 `python3 bin/notify.py <kind> <number> <title> <url> [detail]` sends one message by hand
 (smoke-testing a new webhook, say). `python3 bin/test-notify.py` checks the shapes offline.
@@ -34,10 +35,7 @@ TIMEOUT_SEC = 8
 
 # Discord embed colors (decimal RGB). One per meaning, so the color says it before the text.
 RED = 0xE74C3C       # stuck: Steve has to act
-GREEN = 0x2ECC71     # shipped
-BLUE = 0x3498DB      # a status move
-GRAY = 0x95A5A6      # a stage step
-ORANGE = 0xE67E22    # a run died, a card closed without shipping
+ORANGE = 0xE67E22    # broken: a run died, a product check crossed its limit
 
 
 def webhook_url():
@@ -55,9 +53,9 @@ def card_label(card):
 def build(kind, card, detail="", pr=None, board_url=""):
     """Return the webhook payload for one event, or None for a kind that is not posted.
 
-    `card` is {"number", "title", "url"}; `detail` is the one line that varies (the new
-    status or stage, the Needs Steve ask, the spawner's reason); `pr` is {"url", "state"}
-    when a pull request for the card is known.
+    `card` is {"number", "title", "url"}; `detail` is the one line that varies (the
+    Needs Steve ask, the spawner's reason, the detector's reading); `pr` is
+    {"url", "state"} when a pull request for the card is known.
     """
     label = card_label(card)
     url = card.get("url") or ""
@@ -66,15 +64,7 @@ def build(kind, card, detail="", pr=None, board_url=""):
         state = (pr.get("state") or "").lower()
         pr_line = f"\nPR: {pr['url']}" + (f" ({state})" if state else "")
 
-    if kind == "status":
-        content = f"📋 {label} → **{detail}**"
-        embed = {"title": label, "url": url, "color": BLUE,
-                 "description": f"Moved to **{detail}**.{pr_line}"}
-    elif kind == "stage":
-        content = f"🔧 {label} → **{detail}**"
-        embed = {"title": label, "url": url, "color": GRAY,
-                 "description": f"Stage: **{detail}**.{pr_line}"}
-    elif kind == "stuck":
+    if kind == "stuck":
         mention = (os.environ.get("DISCORD_MENTION") or "").strip()
         content = f"🚨 **Needs Steve:** {label} is stuck."
         if mention:
@@ -85,18 +75,15 @@ def build(kind, card, detail="", pr=None, board_url=""):
         if board_url:
             desc += f"\nBoard: {board_url}"
         embed = {"title": label, "url": url, "color": RED, "description": desc}
-    elif kind == "shipped":
-        content = f"✅ {label} shipped."
-        embed = {"title": label, "url": url, "color": GREEN,
-                 "description": f"Merged and closed.{pr_line}"}
-    elif kind == "closed":
-        content = f"🗂️ {label} was closed without a merge."
-        embed = {"title": label, "url": url, "color": ORANGE,
-                 "description": (detail or "Closed on GitHub; nothing shipped.") + pr_line}
     elif kind == "released":
         content = f"⚠️ {label}: the run ended without finishing."
         embed = {"title": label, "url": url, "color": ORANGE,
                  "description": (detail or "Released; the next poll may retry once.") + pr_line}
+    elif kind == "breach":
+        content = f"📉 **Something broke:** {label}"
+        embed = {"title": label, "url": url, "color": ORANGE,
+                 "description": (detail or "A product check crossed its limit. "
+                                           "The card has the numbers.") + pr_line}
     else:
         return None
 

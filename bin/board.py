@@ -11,15 +11,16 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py sweep-stages           # empty the Stage on closed cards
     python3 scripts/board.py show <issue>
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
-    python3 scripts/board.py notify <issue> shipped|closed|released ["<detail>"]
+    python3 scripts/board.py notify <issue> released|breach ["<detail>"]
     python3 scripts/board.py dump                   # every open+closed item, as JSON (one call)
     python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
 
-Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), `move` and `stage` post the
-change to the channel after it lands, a move to Stuck posts the alert (with the ask taken
-from the card's latest `Needs Steve` comment, or from `--why`), and `notify` posts the
-events only the spawner sees (a card shipped, a run that died). A failed post is one
-stderr line, never a non-zero exit — the board is the record, Discord is the pager.
+Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), a move to Stuck posts the alert
+after it lands (with the ask taken from the card's latest `Needs Steve` comment, or from
+`--why`), and `notify` posts the two things that mean something broke (a run that died
+holding a card, a product check the detector filed a card for). Every other `move`, and
+every `stage`, is silent: the floor page shows those. A failed post is one stderr line,
+never a non-zero exit — the board is the record, Discord is the pager.
 
 Every failure exits 1 with a one-line `board.py: ...` message on stderr; only a
 successful command exits 0. A caller may therefore treat any non-zero exit as "do not
@@ -170,8 +171,8 @@ def set_option(issue, field_name, value):
 
 def pr_for(issue):
     """The card's pull request, found by its branch (`card-<n>`, worktree.sh's naming).
-    Returns {"url", "state"} or None. One `gh pr list`, so only called for the events
-    where a PR link is worth showing."""
+    Returns {"url", "state"} or None. One `gh pr list`, so only called for the Stuck
+    alert, where the PR is usually the thing Steve has to look at."""
     n = issue_num(issue)
     try:
         r = subprocess.run(["gh", "pr", "list", "--head", f"card-{n}", "--state", "all",
@@ -202,11 +203,10 @@ def needs_steve_ask(issue):
     return ""
 
 
-def announce(kind, card, detail="", with_pr=False, pr=None):
+def announce(kind, card, detail="", with_pr=False):
     if not notify.enabled():
         return
-    if with_pr and pr is None:
-        pr = pr_for(card["number"])
+    pr = pr_for(card["number"]) if with_pr else None
     notify.post(kind, card, detail=detail, pr=pr,
                 board_url=BOARD_URL if kind == "stuck" else "")
 
@@ -242,15 +242,10 @@ def cmd_move(issue, status, *rest):
         sys.exit(f"board.py: move: unexpected arguments {rest!r}")
     name, it = set_option(issue, STATUS_FIELD, status)
     print(f"#{issue} → {name}")
+    # Stuck is the only column that reaches Discord. Every other move is on the floor page.
     if name == STUCK_STATUS:
         announce("stuck", it, detail=why or needs_steve_ask(issue), with_pr=True)
-    else:
-        announce("status", it, detail=name, with_pr=name in ("In review", "Done"))
     return 0
-
-
-# Stage values whose Discord post would only repeat a status move that already posted.
-QUIET_STAGES = {"Parked"}
 
 
 CLEAR_FIELD = """mutation($p:ID!,$i:ID!,$f:ID!){ clearProjectV2ItemFieldValue(input:{
@@ -303,23 +298,23 @@ def cmd_sweep_stages():
 def cmd_stage(issue, stage):
     """What the tick is doing right now: Claimed | Designing | Building | Testing |
     Reviewing | PR open | Merging | Parked. Status says who owns the card; Stage says
-    where it is. A board view grouped by Stage shows the columns Steve asked for.
-    `-` empties it (clear_stage)."""
+    where it is. A board view grouped by Stage shows the columns Steve asked for, and the
+    floor page shows it on the lane's desk. Quiet — no Discord post. `-` empties it
+    (clear_stage)."""
     if stage == "-":
         return clear_stage(issue)
     name, it = set_option(issue, STAGE_FIELD, stage)
     print(f"#{issue} stage → {name}")
-    if name not in QUIET_STAGES:
-        announce("stage", it, detail=name, with_pr=name in ("PR open", "Merging"))
     return 0
 
 
 def cmd_notify(issue, kind, detail=""):
-    """Post an event the board itself never sees (the spawner's exit handling):
-    `shipped` (closed by a merged PR), `closed` (closed without one), `released` (a run
-    died holding the card). Exits 0 whether or not Discord is configured or reachable."""
-    if kind not in ("shipped", "closed", "released"):
-        sys.exit(f"board.py: notify: unknown event {kind!r} (shipped | closed | released)")
+    """Post an event that is not a move to Stuck but still means something broke:
+    `released` (a run died holding the card; the spawner's exit handling) or `breach`
+    (the product detector filed the card for a large breach; bin/detect.sh). Exits 0
+    whether or not Discord is configured or reachable."""
+    if kind not in ("released", "breach"):
+        sys.exit(f"board.py: notify: unknown event {kind!r} (released | breach)")
     if not notify.enabled():
         return 0
     try:
@@ -328,14 +323,7 @@ def cmd_notify(issue, kind, detail=""):
         it = None
     if not it:
         it = {"number": issue_num(issue), "title": "", "url": ""}
-    pr = None
-    if kind in ("shipped", "closed"):
-        pr = pr_for(issue)
-        # The spawner only knows the card closed. "Shipped" means a merged PR did it;
-        # a card Steve closed by hand (option C on a park) is reported as what it is.
-        if kind == "shipped" and (pr or {}).get("state") != "MERGED":
-            kind = "closed"
-    announce(kind, it, detail=detail, pr=pr)
+    announce(kind, it, detail=detail)
     return 0
 
 

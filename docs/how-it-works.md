@@ -14,7 +14,7 @@ short version.
 | **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the one review a change gets; blocking findings only |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
-| **Discord** | `bin/notify.py` | imported by the board CLI | posts a card's stage and column changes, and the Stuck alert, to Steve's channel — when a webhook is configured |
+| **Discord** | `bin/notify.py` | imported by the board CLI | posts to Steve's channel when a card is stuck or something broke, and for nothing else — when a webhook is configured |
 | **Metrics** | `bin/metrics.py` | run by hand, on the box | read-only report over a lane's own logs: first-pass merge rate, park rate, deaths, turns/quota and time to Done, per week |
 | **Floor page** | `bin/floor.py` | `watcher-floor.service`, always on | live, read-only page: what every lane is working on, idle, needing Steve, paused or asleep after a failure, plus recent ticks across every project; a Peek button on every lane's desk opens that lane's session — live while it works, its last one when it does not — decoded the same way `bin/tail.sh` decodes it; the ship station's Peek lists every step CI ran on main's newest commit, the commits before it, and the deployer's last lines (from its `history` file) |
 | **A browser** | `bin/browse.py` | run by a tick or by hand | headless Chrome, for looking at a page the way its reader does: `check` (did the page's own code fail?), `text`, `shot`. `curl` fetches what the server sent; a page that draws itself is only seen by running it |
@@ -63,7 +63,7 @@ Labels and fields the bots read:
    **If nothing there is claimable** it tries the Waiting stage, and then — only with
    `READY_PULL=1`, and only while the In progress column holds fewer than `WIP_MAX` open
    cards — the top row of **Ready**, which it moves to In progress before launching, so
-   Status stays truthful and Discord shows the card starting. See "Self-pull" below.
+   Status stays truthful and the floor page shows the card starting. See "Self-pull" below.
 3. **A worktree** `../<repo>-worktrees/card-<n>` is created (or reused) on branch `card-<n>`.
 4. **The tick starts:** `claude -p "/watch <n>" --dangerously-skip-permissions --max-turns 400
    --max-budget-usd 15`, with a 150 minute watchdog that kills the whole process group.
@@ -81,8 +81,8 @@ Labels and fields the bots read:
 ## The In review sweep
 
 The spawner's input is In progress, so In review used to be a column nothing read: a card
-there waited for Steve to notice it, and the Discord line for the move is an ordinary 📋
-post, not an alert. Two riffmap cards sat there for most of a day on September 17, 2026
+there waited for Steve to notice it, and a move to In review is not an alert (it posts
+nothing to Discord). Two riffmap cards sat there for most of a day on September 17, 2026
 (watcher#18) — one whose tick ran out of budget before its review, one dropped there by
 hand with no PR. So every poll, after the board read and before the pick, `spawn.sh`'s
 `sweep_in_review` lists In review and, for the cards that are this lane's by label:
@@ -365,25 +365,30 @@ money he had been charged (September 19, 2026). The number was never a bill.
 
 ## Discord
 
-Steve does not sit on the board; he gets pinged. When `DISCORD_WEBHOOK_URL` is set (in
-`/etc/watcher/env` for the box, or in a project's env file), `board.py` posts to the
-channel **after** a change lands, so the board is always the record and Discord only ever
-repeats it. Every post names the card, links to it, and links the PR when one exists.
+Steve does not sit on the board; he gets pinged — **only when a card is stuck or
+something broke.** When `DISCORD_WEBHOOK_URL` is set (in `/etc/watcher/env` for the box, or
+in a project's env file), `board.py` posts to the channel **after** a change lands, so the
+board is always the record and Discord only ever repeats it. Every post names the card and
+links to it.
 
 | Event | Posted by | Looks like |
 |---|---|---|
-| a column change (`board move`) | whoever moved it: the tick, or the spawner taking a Waiting card | 📋 `#87 Add speaker names → In review` |
-| a stage step (`board stage`) | the tick, at every step | 🔧 `#87 … → Building` |
-| **a move to Stuck** | the tick (comment first, then move) or the spawner's park | 🚨 **Needs Steve:** the ask, quoted from the card, red; `DISCORD_MENTION` pings someone |
-| the card closed | the spawner, at the tick's exit | ✅ `shipped` with the merged PR, or 🗂️ `closed without a merge` |
+| **a move to Stuck** | the tick (comment first, then move), the spawner's park, or the deployer's held card | 🚨 **Needs Steve:** the ask, quoted from the card, red, with the PR when there is one; `DISCORD_MENTION` pings someone |
 | a run died holding the card | the spawner's sweeper or reconciliation | ⚠️ `the run ended without finishing`; the next poll may retry |
-| a run ended with the card's PR open, unmerged | the spawner's sweeper | ⚠️ `PR #52 is up, but the run ended before merging it`; the next poll merges it once green |
+| the product detector filed a card | `bin/detect.sh`, after the card lands in Backlog | 📉 **Something broke:** the metric, the reading and the average, and the page to look at |
 
-Nothing is posted per poll, per tick, or for a quiet tick; `Parked` as a stage is silent
-because the Stuck alert already covered it. A post that fails is one line on stderr and
-nothing else — a notification can never fail a board command or a tick. `python3
-bin/test-notify.py` checks the shapes offline; `python3 bin/notify.py stuck 1 "smoke test"
-https://example.com` sends one by hand.
+That is the whole list. A card changing column, crossing into a new stage, shipping, or
+being closed by hand posts nothing, and neither does a run that ended with its PR open
+(the next poll merges it): the floor page shows all of that live. Until October 1, 2026
+every one of them posted, and Steve asked for the channel back: "Now that we have the
+floor page I don't think we need to be so verbose to discord. Can we only hit the discord
+when something is stuck or broken?" A channel that repeats every step is a channel nobody
+is reading when the alert comes.
+
+Nothing is posted per poll, per tick, or for a quiet tick. A post that fails is one line
+on stderr and nothing else — a notification can never fail a board command or a tick.
+`python3 bin/test-notify.py` checks the shapes offline; `python3 bin/notify.py stuck 1
+"smoke test" https://example.com` sends one by hand.
 
 ## Watching the product
 
@@ -408,10 +413,10 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   triage lane routes it the same as anything else he might have filed. It names the
   artifact that shows the problem (`DETECT_LOOK_URL`, when the project has one) — the same
   "look before you diagnose" rule `commands/watch.md` §2 holds every tick to.
-- **Discord stays a repeater.** `bin/detect.sh` never posts; filing the card ends with an
-  ordinary `board move <n> Backlog`, so the post — if one goes out — happens because a card
-  landed, never because a check ran. Nothing is posted for a small breach, or for a clean
-  run.
+- **Discord stays a repeater.** `bin/detect.sh` never talks to Discord itself; once the
+  card is in Backlog it calls `board notify <n> breach`, so the 📉 post happens because a
+  card landed, never because a check ran, and never when the card could not be put on the
+  board. Nothing is posted for a small breach, or for a clean run.
 - **Opt-in, per project, off until its config exists.** `deploy/install.sh` installs
   `watcher-detect@.service`/`.timer` for every box, then enables `watcher-detect@<p>.timer`
   for every `projects/<p>.detect.env` it finds (the `.service` carries no `[Install]` — it

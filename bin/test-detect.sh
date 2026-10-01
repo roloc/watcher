@@ -105,6 +105,14 @@ out_lacks() { ! grep -q -- "$1" "$TMP/out"; }
 called()     { grep -q -- "$1" "$CALLS"; }
 not_called() { ! grep -q -- "$1" "$CALLS"; }
 count()      { grep -c -- "$1" "$CALLS"; }
+# discord_after_move <n>: the breach post for card <n> was made, and only after its move
+# into Backlog — Discord repeats a card that landed, it never runs ahead of the board.
+discord_after_move() {
+  local move post
+  move="$(grep -n -- "board move $1 Backlog" "$CALLS" | head -1 | cut -d: -f1)"
+  post="$(grep -n -- "board notify $1 breach" "$CALLS" | head -1 | cut -d: -f1)"
+  [ -n "$move" ] && [ -n "$post" ] && [ "$post" -gt "$move" ]
+}
 fresh() {
   rm -rf "$STATE" "$TMP/issue-state" "$TMP/next-issue" "$TMP/item-add-fails" "$TMP/last-body" \
          "$TMP/board-move-fails"
@@ -140,6 +148,7 @@ run
 check "small breach: logs a line"                       out_has "SMALL BREACH"
 check "small breach: nothing else — no card"            not_called "issue create"
 check "small breach: not even added to the board"        not_called "project item-add"
+check "small breach: nothing to Discord"                 not_called "board notify"
 
 # 5. Large breach: files one card, on the board, in Backlog
 fresh; conf 5 1 0.3 0.6 "https://example.test/look"; metric 1; next_issue 701
@@ -148,7 +157,9 @@ check "large breach: logs it"                           out_has "LARGE BREACH"
 check "large breach: files a card"                      called "gh issue create -R roloc/testproj"
 check "large breach: title names the metric and value"  called "the test metric: 1"
 check "large breach: put on the right board"            called "gh project item-add 9 --owner roloc"
-check "large breach: moved into Backlog (the Discord post)" called "board move 701 Backlog"
+check "large breach: moved into Backlog"                 called "board move 701 Backlog"
+check "large breach: told to Discord, after the card landed" discord_after_move 701
+check "large breach: the Discord line has the reading and the Look url" called "board notify 701 breach the test metric: now 1, averaging .* Look: https://example.test/look"
 check "large breach: the card names the Look url"       grep -q "https://example.test/look" "$TMP/last-body"
 
 # 5b. The board move fails after the card is filed: says so, does not lie about Backlog
@@ -157,6 +168,7 @@ run
 check "board move fails: the card still exists"         called "gh issue create -R roloc/testproj"
 check "board move fails: does not claim it landed"      out_lacks "filed .* in Backlog"
 check "board move fails: says to check by hand"         out_has "could not put it on the board"
+check "board move fails: nothing to Discord (the card did not land)" not_called "board notify"
 
 # 6. Still breaching, same card still open: no second card
 fresh; conf 5 1 0.3 0.6 "https://example.test/look"; metric 1; next_issue 701; run

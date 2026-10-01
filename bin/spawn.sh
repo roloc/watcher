@@ -125,9 +125,10 @@ WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 [ -n "$WATCHER_ROOT" ] || { echo "spawn.sh: set WATCHER_PROJECT=projects/<name>.env (or WATCHER_ROOT)" >&2; exit 64; }
 PROJECT_NAME="${PROJECT_NAME:-$(basename "$WATCHER_ROOT")}"
 export BOARD_OWNER="${BOARD_OWNER:-}" BOARD_NUMBER="${BOARD_NUMBER:-}"
-# Discord is board.py's job (notify.py): every `board move` / `board stage` posts by itself,
-# from this script and from inside the tick alike, so the webhook only has to reach
-# board.py's environment. A project file may set it; /etc/watcher/env usually does.
+# Discord is board.py's job (notify.py), and it only hears about a card that is stuck or a
+# run that broke: a `board move` to Stuck posts the alert by itself, from this script and
+# from inside the tick alike, so the webhook only has to reach board.py's environment. A
+# project file may set it; /etc/watcher/env usually does.
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}" DISCORD_MENTION="${DISCORD_MENTION:-}"
 # The repo the cards live in. `gh` infers a repo from the cwd, and this script's cwd is
 # /opt/watcher — a checkout of the WATCHER, not the project — so on the first night every
@@ -1063,8 +1064,8 @@ except Exception:
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
 - Agent quota used: ~\$${total_cost:-0} equivalent (subscription — not billed)" \
         || log "sweeper comment failed for #$n"
-      $WATCHER_BOARD notify "$n" released "PR #${pr%% *} is up, but the run ended after ${elapsed_min} min before merging it. I released the card; the next poll merges it once the checks are green." \
-        || log "discord notify failed for #$n"
+      # No Discord post: nothing is broken — the work is done and the next poll merges it.
+      # A second exit like this one parks the card, and the park is what alerts.
     else
       # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve here — the card is
       # released and the next poll may retry it; two of these in a row become a park.
@@ -1075,7 +1076,8 @@ except Exception:
 - Log: $(basename "$json")" \
         || log "sweeper comment failed for #$n"
       # Discord, if configured (board.py notify is a no-op otherwise). A retry is not an
-      # alert — the park, if it comes, is — but a died run is rare enough to be worth a line.
+      # alert — the park, if it comes, is — but a died run is something broken, and that
+      # and a stuck card are the two things the channel is for.
       $WATCHER_BOARD notify "$n" released "The run ended after ${elapsed_min} min without finishing (${subtype}). I released the card; the next poll may retry once." \
         || log "discord notify failed for #$n"
     fi
@@ -1102,10 +1104,8 @@ except Exception:
   fi
 
   if [ "$is_closed" = yes ]; then
-    # Done is the one column nothing moves a card into through board.py — the merge's
-    # `Closes #n` does it — so the "shipped" post has to come from here. board.py checks
-    # the card's PR and posts "closed without a merge" instead when there is none.
-    $WATCHER_BOARD notify "$n" shipped || log "discord notify failed for #$n"
+    # No Discord post for a card that shipped or was closed: the floor page shows it, and
+    # the channel is for stuck and broken only.
     $WATCHER_BOARD stage "$n" - >/dev/null 2>&1 || log "stage clear failed for #$n"
     rm -f "$WATCHER_STATE/inreview/$n.requeued"   # sweep_in_review's one-turn marker; the card is done
     if [ "$LANE_WORKDIR" = root ]; then

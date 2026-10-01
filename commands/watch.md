@@ -586,11 +586,11 @@ The rules behind the shape (full version in `talking-to-steve.md`):
 - **Say how to answer.** The last line above the fold is always the reply-and-move line.
 - A reviewer finding headed to Steve arrives with its own `For Steve` block; paste it in.
 
-**Discord is not your job.** When the box has a webhook configured, `board move` and
-`board stage` post the change to Steve's channel by themselves, with a link to the card,
-and a move to Stuck posts the alert. Never post to Discord directly, never mention it in a
-comment, and never skip a `board stage` call because "it would be noisy" — the stage
-posts are the updates Steve asked for.
+**Discord is not your job.** When the box has a webhook configured, a move to Stuck posts
+the alert to Steve's channel by itself, quoting your ask and linking the card; nothing
+else you do posts there. Never post to Discord directly and never mention it in a
+comment. And never skip a `board stage` call — it is silent, and the Stage is what the
+floor page and the board show Steve while you work.
 
 ## 4b. Declined — the card says not to do it yet
 

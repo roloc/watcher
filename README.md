@@ -22,7 +22,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
 
     bin/spawn.sh          the loop (systemd runs it); --dry-run / --once
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify/dump/ask (BOARD_OWNER, BOARD_NUMBER)
-    bin/notify.py         Discord: posts card events through a webhook (DISCORD_WEBHOOK_URL); bin/test-notify.py checks the shapes
+    bin/notify.py         Discord: posts through a webhook (DISCORD_WEBHOOK_URL) when a card is stuck or something broke; bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
     bin/doctor.sh         read-only sanity check that a project is wired up; deploy/install.sh and
                           bin/spawn.sh both run it before a lane's first tick (see "Add a project")
@@ -138,12 +138,13 @@ He answers by replying on the card and moving it. Moving a parked card back to
 ## Discord
 
 Set `DISCORD_WEBHOOK_URL` in `/etc/watcher/env` (a channel webhook; a secret, so it stays
-out of git) and the board CLI posts to that channel after every change it makes: a card
-changing column (📋), a card crossing into a new stage (🔧), a card shipped (✅), a run that
-died (⚠️), and — the one that matters — a card landing in **Stuck - Needs help** (🚨, red,
-quoting the ask from the card). Every post names the card and links to it, and to its PR
-when there is one. Nothing is posted per poll or per tick. `DISCORD_MENTION` (`<@id>` or
-`@here`) makes the Stuck alert ping someone. Unset the URL and it is all silent again.
+out of git) and the board CLI posts to that channel when a card is stuck or something
+broke, and for nothing else: a card landing in **Stuck - Needs help** (🚨, red, quoting the
+ask from the card), a run that died holding a card (⚠️), and a card the product detector
+filed (📉). Every post names the card and links to it. A card changing column, crossing
+into a new stage or shipping posts nothing — the floor page shows those — and nothing is
+posted per poll or per tick. `DISCORD_MENTION` (`<@id>` or `@here`) makes the Stuck alert
+ping someone. Unset the URL and it is all silent again.
 
 ## Watching the product
 
