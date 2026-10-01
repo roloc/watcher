@@ -82,7 +82,7 @@ gets (rule 1). The file list is for the PR body and for `reviewer`, not for him:
 ```
 
 **`You get` comes first, and it names a place the asker can actually open.** A card is a
-request from a person who will go and use the result, so before the file list, say what
+request from a person who will go and use the result, so before anything else, say what
 that person ends up with and where they find it: a page and what is on it, a message in
 their channel, a column on the board. The project's `CLAUDE.md` says where its people are;
 when it does not, assume a phone and the board — **never a shell on the box**. Writing this
@@ -323,7 +323,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
 - **If §2 gave the card a plan, the PR body carries it too**, under `## Plan` — the real
-  file list and check this time, not the plain-word version from the FYI comment. Diverged
+  file list and the real check this time: the FYI comment left the files out and put
+  the check in plain words. Diverged
   from it while building? Update `## Plan` in place with the one-line reason, rather than
   leaving the original text to go stale.
 - **A symptom card is not done until the symptom is checked again.** A card that reports
