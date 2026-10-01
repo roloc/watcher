@@ -73,6 +73,12 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   dry-run drift apart.
 - Comment bodies passed to `gh issue comment --body` may be multi-line. The test stub logs
   each call on one line, so assertions can grep the whole body.
+- **The offline suites have to pass on a Mac as well as on Linux**, because "run it here
+  first" happens on a Mac (BSD tools, `/bin/bash` 3.2) and CI only ever checks Linux. In a
+  script a suite runs, no spelling that is GNU's alone: `find -newermt '@<epoch>'` cost two
+  cases in `test-deploy.sh` that way, and `date -d`, `stat -c` and a bare `sed -i` are the
+  same trap. A command a stock Mac does not ship (`timeout`, `flock`) gets a stand-in in
+  the suite, the way `test-deploy.sh` stubs `flock`, not a fallback in the script.
 - No permission prompts exist on the box. Nothing in the tick may depend on one.
 - Discord is a repeater, never a record: a post happens after the board change lands, a
   failed post is one stderr line and nothing else, and no message goes out per poll or

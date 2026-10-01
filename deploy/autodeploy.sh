@@ -332,7 +332,7 @@ canary_needed() {
 # deployer everywhere else uses to tell "still going" from "gone"; once it says gone, THEN
 # an empty or unparseable file really does mean killed, and is judged as such below.
 canary_died() {
-  local since="$1" l dir
+  local since="$1" l dir parked
   for l in $(canary_lanes); do
     tick_running "$l" && continue
     dir="$STATE_ROOT/$l"
@@ -352,19 +352,47 @@ sys.exit(1)
 \""; then
       return 0
     fi
-    as_user "find '$dir/parked' -newermt '@$since' -type f 2>/dev/null" | grep -q . && return 0
+    parked="$(files_since "$since" "$dir/parked" '' 0)"
+    [ "${parked:-0}" -gt 0 ] && return 0
   done
   return 1
 }
 
+# files_since <since_epoch> <dir> <suffix> <min_bytes> — how many regular files anywhere
+# under <dir> have a name ending in <suffix>, hold at least <min_bytes>, and were modified
+# after <since_epoch>. A missing <dir> is 0. This is what GNU
+# `find <dir> -type f -name '*<suffix>' -newermt '@<since>'` counts, to the nanosecond, and
+# it is python because that spelling is GNU's alone: BSD find cannot parse '@<epoch>', and
+# with its stderr thrown away the error read as "no such files" — a soak that never
+# cleared and a parked card that never held, on a Mac, which is where bin/test-deploy.sh
+# runs before a push. stderr is left alone here for the same reason.
+files_since() {
+  as_user "python3 -c \"
+import os, stat, sys
+since_ns, top, suffix, least = int(sys.argv[1]) * 10**9, sys.argv[2], sys.argv[3], int(sys.argv[4])
+n = 0
+for d, _, names in os.walk(top):
+    for name in names:
+        if not name.endswith(suffix):
+            continue
+        try:
+            st = os.lstat(os.path.join(d, name))
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode) and st.st_size >= least and st.st_mtime_ns > since_ns:
+            n += 1
+print(n)
+\" $(q "$@")"
+}
+
 # canary_ticks <since_epoch> — how many result files the canary lane(s) have COMPLETED
-# (written something) since. `-size +0c` excludes the in-progress tick's own still-empty
-# file (see canary_died above) — without it a soak could clear on a tick that never
-# actually finished.
+# (written something) since. The 1-byte floor excludes the in-progress tick's own
+# still-empty file (see canary_died above) — without it a soak could clear on a tick that
+# never actually finished.
 canary_ticks() {
   local since="$1" l n=0 c
   for l in $(canary_lanes); do
-    c="$(as_user "find '$STATE_ROOT/$l/logs' -name '*.json' -size +0c -newermt '@$since' 2>/dev/null | wc -l")"
+    c="$(files_since "$since" "$STATE_ROOT/$l/logs" .json 1)"
     n=$(( n + ${c:-0} ))
   done
   echo "$n"

@@ -49,6 +49,23 @@ echo "board $*" >> "$CALLS"
 [ "$1" = move ] && [ -f "$TMP/board-move-fails" ] && exit 1
 exit 0
 EOF
+# timeout: detect.sh caps the metric command with coreutils' `timeout`, which a stock Mac
+# does not ship — there every reading came back empty and the suite failed 14 cases before
+# it tested anything. Only a host with none gets this stand-in, so Linux (CI, the box)
+# still runs the real one; it keeps the limit and GNU's exit status 124 rather than
+# dropping them, so a case about a hung metric would mean the same thing on both.
+if ! command -v timeout >/dev/null 2>&1; then
+  cat > "$BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+exec python3 -c '
+import subprocess, sys
+try:
+    sys.exit(subprocess.run(sys.argv[2:], timeout=float(sys.argv[1])).returncode)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+' "$@"
+EOF
+fi
 chmod +x "$BIN"/*
 export PATH="$BIN:$PATH"
 

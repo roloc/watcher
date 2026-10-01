@@ -124,6 +124,8 @@ count()      { grep -c -- "$1" "$CALLS"; }
 # so telling those two lanes apart (canary tests below) needs a full-line match, not called()'s.
 called_exact()     { grep -qxF -- "$1" "$CALLS"; }
 not_called_exact() { ! grep -qxF -- "$1" "$CALLS"; }
+# What the deployer said on its last run, for the cases where what it decided leaves no call.
+out_lacks() { ! grep -q -- "$1" "$TMP/out"; }
 
 echo "autodeploy"
 
@@ -375,6 +377,54 @@ rm -f "$STATE/watcher/current"
 run
 check "canary H: once idle, the swap and restart go ahead"            [ "$(canary_head)" = "$T" ]
 check "canary H: …and the pause is lifted"                             [ ! -e "$STATE/watcher/PAUSE" ]
+
+# I. A card the spawner parked during the soak (two attempts, no progress) holds the commit
+# like a dead tick does. The marker is an empty file under the lane's parked/, so this is
+# the "modified since" read with no result json to lean on — the half of canary_died that
+# no case reached, and that a BSD find answered "nothing" to, silently, every time.
+canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-i)"
+run   # the canary swap
+mkdir -p "$STATE/watcher/parked"; : > "$STATE/watcher/parked/970"
+run   # sees the parked card
+check "canary I: a card parked during the soak rolls the canary back" [ "$(canary_head)" = "$OLD" ]
+check "canary I: …the commit is held, not promoted"                   [ "$(head_)" != "$T" ]
+check "canary I: …with one card filed"                                called "Deploy held: ${T:0:7} is not live"
+
+# J. Only what happened since the soak began counts, on either side. Two result jsons
+# that were there before this commit reached the canary do not clear its soak…
+canary_fresh; T="$(commit commands/watch.md canary-j)"
+canary_tick_log success; canary_tick_log success
+touch -t 202601010000 "$STATE"/watcher/logs/*.json
+run   # the canary swap
+run   # nothing new since: still soaking
+check "canary J: ticks from before the soak do not clear it"          out_lacks "promoting"
+check "canary J: …the stable checkout has not moved"                  [ "$(head_)" != "$T" ]
+# …and a card parked before it does not hold it.
+canary_fresh; T="$(commit commands/watch.md canary-j2)"
+mkdir -p "$STATE/watcher/parked"; : > "$STATE/watcher/parked/971"
+touch -t 202601010000 "$STATE/watcher/parked/971"
+run   # the canary swap
+run
+check "canary J: a card parked before the soak does not hold it"      not_called "issue create"
+check "canary J: …and the canary stays on the commit"                 [ "$(canary_head)" = "$T" ]
+
+# K. What counts as a clean tick is a result json with something in it, and nothing else
+# in logs/. A finished tick's own stderr file is not a second one, and neither is the
+# running tick's still-empty result (F's shape): the soak stays one short of
+# DEPLOY_CANARY_SOAK_TICKS=2 until that tick finishes.
+canary_fresh; T="$(commit commands/watch.md canary-k)"
+run   # the canary swap
+canary_tick_log success
+echo "a warning the tick printed" > "$STATE/watcher/logs/card-979-1.stderr"
+run
+check "canary K: a tick's stderr file is not a second clean tick"     out_lacks "promoting"
+: > "$STATE/watcher/logs/still-running.json"; echo 980 > "$STATE/watcher/current"
+run
+check "canary K: a still-empty result is not counted either"          out_lacks "promoting"
+check "canary K: …so the stable checkout has not moved"               [ "$(head_)" != "$T" ]
+echo '{"subtype":"success"}' > "$STATE/watcher/logs/still-running.json"; rm -f "$STATE/watcher/current"
+run
+check "canary K: once that tick finishes, the soak clears"            [ "$(head_)" = "$T" ]
 
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi
