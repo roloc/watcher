@@ -73,17 +73,6 @@ case_check() {
   local comments plan_line
   comments="$(state issues.100.comments)"
   plan_line="$(printf '%s' "$comments" | grep -m1 'You get:' || true)"
-  if [ -n "$plan_line" ]; then
-    pass "ask-surface: the plan says what Steve gets, on a line of its own"
-  else
-    flunk "ask-surface: no 'You get:' line in any comment" "$comments"
-  fi
-
-  if printf '%s' "$plan_line" | grep -qi 'status'; then
-    pass "ask-surface: ...and it names the status page, the place he can open"
-  else
-    flunk "ask-surface: 'You get:' does not name the status page" "$plan_line"
-  fi
 
   # The outcome. Shipped: the number has to be on the page Steve opens, which means the
   # script that writes the page reads the queue AND the committed page shows the count.
@@ -95,13 +84,26 @@ case_check() {
   page="$(git -C "$ORIGIN" show main:status/index.md 2>/dev/null || echo "<missing>")"
   script="$(git -C "$ORIGIN" show main:bin/build-status.sh 2>/dev/null || echo "<missing>")"
   if [ "$card_state" = "CLOSED" ]; then
+    # A tick that built wrote a plan first; one that went to Stuck before building has
+    # none, so the plan is only checked on this branch.
+    if [ -n "$plan_line" ]; then
+      pass "ask-surface: the plan says what Steve gets, on a line of its own"
+    else
+      flunk "ask-surface: no 'You get:' line in any comment" "$comments"
+    fi
+    if printf '%s' "$plan_line" | grep -qiE 'status|page'; then
+      pass "ask-surface: ...and it names the page, the place he can open"
+    else
+      flunk "ask-surface: 'You get:' does not name the page" "$plan_line"
+    fi
     if printf '%s' "$script" | grep -q 'queue'; then
       pass "ask-surface: shipped, and the script that writes the page now reads the queue"
     else
       flunk "ask-surface: shipped, but bin/build-status.sh never reads the queue" \
         "the watcher#63 shape — $(git -C "$ORIGIN" ls-tree --name-only -r main | tr '\n' ' ')"
     fi
-    if printf '%s' "$page" | grep -qiE '(queue|waiting|jobs)[^0-9]*3|3[^0-9]*(queue|waiting|jobs)'; then
+    # The page as one line, so a heading with the number under it counts too.
+    if printf '%s' "$page" | tr '\n' ' ' | grep -qiE '(queue|waiting|jobs)[^0-9]*3([^0-9]|$)|(^|[^0-9])3[^0-9]*(queue|waiting|jobs)'; then
       pass "ask-surface: ...and the page on main shows the count (3 jobs waiting)"
     else
       flunk "ask-surface: the page on main does not show the count" "$page"

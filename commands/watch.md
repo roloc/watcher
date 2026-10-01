@@ -67,15 +67,16 @@ decision card gets a written decision in `docs/`, an implementation card gets co
 tests. Use the project's own subagents (`.claude/agents/`) when the card's `agent:` label
 names one; otherwise you are the builder.
 
-**Write the plan before the first edit.** Before you touch a file, write down: the files
-that will change, in order; the test or check that proves the card is done (for a symptom
-card, the artifact you will re-fetch, §3); and the one risk you expect. Tell Steve you're
-starting — plain words, no paths above the fold (`docs/talking-to-steve.md` rule 7):
+**Write the plan before the first edit.** Before you touch a file, write down: what the
+person who asked ends up with, and where; the files that will change, in order; the test
+or check that proves the card is done (for a symptom card, the artifact you will re-fetch,
+§3); and the one risk you expect. Tell Steve you're starting — plain words, no paths above
+the fold (`docs/talking-to-steve.md` rule 7), and three bullets, which is all an `FYI:`
+gets (rule 1). The file list is for the PR body and for `reviewer`, not for him:
 
 ```
 🤖 **FYI:** plan for this card.
 - You get: <what Steve will see or be able to do when this is done, and where he opens it>
-- Files: <what's changing, in a sentence>
 - Test: <what proves it's done, in a sentence>
 - Risk: <the one thing most likely to go wrong>
 ```
@@ -96,7 +97,8 @@ the title alone will not tell you which. Then:
 - **Both are, and they are different products: that is one question for Stuck (§4),
   before anything is built** — the two readings as the lettered options, the one you would
   build first. A wrong guess here costs a whole second tick and a reopened card; the
-  question costs one letter.
+  question costs one letter. This is the rare case: most cards have one reading that
+  lands where the asker is, and you build it without asking.
 
 (watcher [#63](https://github.com/roloc/watcher/issues/63), September 30, 2026: "Build a
 way to tail the log for a lane to see what each one is working on", body "see title". The
@@ -266,10 +268,12 @@ reader. If that sentence is "most of it is in one grey bucket", you have not fix
 chart, you have removed one: stop, and file the designer card instead. The `reviewer`
 treats a screen change with no picture as blocking. Tests, lint and a green build are
 not a look — they passed on [#359](https://github.com/roloc/riffmap/issues/359).
-**A project with no screenshot script is not exempt; it is missing one.** If the project's
-`CLAUDE.md` names no way to render the screen you are changing, the change has no gate at
-all, so say that on the card and build the smallest way to run the page first (or go to
-Stuck if you cannot) — never ship a screen that nothing has drawn. (watcher
+**A screen that runs code, in a project with no way to run it, is not exempt; the project
+is missing a check.** When what you are changing is a page's own script or a template with
+logic in it — not plain text or a document — and the project's `CLAUDE.md` names no way to
+render it, the change has no gate at all: say that on the card and build the smallest way
+to run the page first (or go to Stuck if you cannot). Never ship code that only runs in a
+browser and that no browser has run. (watcher
 [#70](https://github.com/roloc/watcher/pull/70), October 1, 2026: a page's script that did
 not parse merged with every check green, because every check read the source and none ran
 it. The page drew nothing.)

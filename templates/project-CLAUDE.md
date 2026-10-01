@@ -27,6 +27,21 @@ though a human reading the file would say it obviously does.
   it, `watch.md` §2 already covers what a tick does next (ask for exactly that, build
   nothing meanwhile) — this section only has to say what the legitimate way in IS.
 
+- **Where its people are.** <Where does the person who files cards actually open this
+  project's results — an app, a page, the board, a channel — and on what device? Say what
+  they never use (a shell on the box, a log file). `watch.md` §2 makes the first line of
+  every plan `You get:` and builds for the place the asker can open; without this bullet a
+  tick assumes a phone and the board.>
+
+- **Looking at a screen.** <If the project has anything a person looks at that runs code —
+  a web app, a page with its own script — name the command that renders it and writes a
+  picture (riffmap: `cd web && npm run shots`; the watcher: `python3
+  bin/test-floor-browser.py --shots <dir>`), and the one that loads a live URL the way a
+  browser does (the watcher: `python3 bin/browse.py check <url>`). `watch.md` and
+  `reviewer.md` treat a change to such a screen that nothing rendered as not shippable, and
+  a page fetched with `curl` as not looked at. Delete this bullet if the project has no
+  screen.>
+
 - **The merge gate** is <list the files/paths: the CI workflow, a pre-commit or pre-push
   hook, `agents/reviewer.md` if the project keeps its own, any replay/eval suite>. A change
   to any of it always gets the reviewer pass, even when it reads as prose or config, and
