@@ -426,6 +426,27 @@ echo '{"subtype":"success"}' > "$STATE/watcher/logs/still-running.json"; rm -f "
 run
 check "canary K: once that tick finishes, the soak clears"            [ "$(head_)" = "$T" ]
 
+# The history file: what the deployer said, where the floor page can read it (the page's
+# user cannot read the journal).
+fresh; T="$(commit bin/spawn.sh history-1)"
+run
+H="$TMP/dstate/history"
+check "history: a deploy leaves its lines in a plain file"            grep -q "deployed ${T:0:7}" "$H"
+check "history: each line is a UTC stamp, then what was said"         grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z deployed ${T:0:7}" "$H"
+check "history: the journal line is unchanged"                        grep -qE "Z autodeploy: deployed ${T:0:7}" "$TMP/out"
+run; run
+check "history: a quiet run that says nothing new adds nothing"       [ "$(grep -c "live at" "$H")" = 1 ]
+i=0; while [ "$i" -lt 30 ]; do echo "2026-01-01T00:00:00Z filler $i" >> "$H"; i=$((i + 1)); done
+T2="$(commit bin/spawn.sh history-2)"
+DEPLOY_HISTORY_LINES=10 run
+check "history: trimmed to the newest lines once it is twice the cap" [ "$(wc -l < "$H")" -le 20 ]
+check "history: ...and the newest line survives the trim"             grep -q "deployed ${T2:0:7}" "$H"
+chmod 000 "$H"; T3="$(commit bin/spawn.sh history-3)"
+run
+chmod 644 "$H"
+check "history: a file it cannot write never stops a deploy"          [ "$(head_)" = "$T3" ]
+check "history: ...and adds no noise of its own to the journal"       out_lacks "ermission denied"
+
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi
 exit "$fail"

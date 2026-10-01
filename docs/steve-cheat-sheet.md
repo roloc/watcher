@@ -16,8 +16,10 @@ changes a card.
 **Peek** at any desk to see what that bot is actually doing, not just which card it holds.
 Every desk has a **Peek** button, busy or not: on a working desk it opens that bot's
 session live, one short line at a time, updating as it works; on a quiet desk it shows the
-bot's last session, and says so. Close it with the ×, or tap outside it — nothing there can
-change a card either. If the page ever shows a red line saying its own code hit an error,
+bot's last session, and says so. The **Ship** desk has one too: every step the build check
+ran on the newest change, with a ✓ or a ✗ on each, the changes before it, and — on the
+watcher's own board — the last things the deployer did. Close it with the ×, or tap outside
+it — nothing there can change a card either. If the page ever shows a red line saying its own code hit an error,
 that is the page telling you it is broken: file a card.
 
 ## The columns

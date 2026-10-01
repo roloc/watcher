@@ -190,8 +190,36 @@ class QuietServer(ThreadingHTTPServer):
         pass  # case 10 breaks the data endpoint on purpose; its traceback is not news
 
 
+# The ship stations: canned CI runs through the real `ship_lines`. alpha's CI is green and
+# alpha is the repo "this box deploys", so it also gets the deployer's lines; beta's is red.
+def ci_step(name, conclusion="success", sec=0):
+    return {"name": name, "status": "completed", "conclusion": conclusion,
+            "started": "2026-10-01T17:15:00Z", "completed": "2026-10-01T17:15:%02dZ" % sec}
+
+
+def ci_run(sha, title, steps, conclusion="success"):
+    return {"id": 1, "name": "CI", "sha": sha * 40, "title": title, "status": "completed",
+            "conclusion": conclusion, "started": "2026-10-01T17:15:00Z", "updated": "x",
+            "jobs": [{"name": "verify", "status": "completed", "conclusion": conclusion,
+                      "started": "2026-10-01T17:15:00Z", "completed": "2026-10-01T17:16:01Z", "steps": steps}]}
+
+
+CI_RUNS = {
+    "roloc/alpha": [ci_run("a", "Peek on every desk", [ci_step("Set up job"), ci_step("The spawner suite", sec=28),
+                                                         ci_step("The floor page, in a real browser", sec=7)]),
+                    {"id": 2, "name": "CI", "sha": "b" * 40, "title": "The commit before", "status": "completed",
+                     "conclusion": "success", "started": "2026-10-01T15:00:00Z", "updated": "x"}],
+    "roloc/beta": [ci_run("c", "Broke the build", [ci_step("Run npm test", "failure", sec=19)], "failure")],
+}
+ship_lookup = floor.make_ship_lookup(
+    lambda: {"alpha": "roloc/alpha", "beta": "roloc/beta"}, lambda repo: CI_RUNS[repo],
+    deploy_repo="roloc/alpha", deploy_fn=lambda: {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa"},
+    history_fn=lambda: [(floor.datetime(2026, 10, 1, 17, 59, tzinfo=floor.timezone.utc),
+                         "deployed aaaaaaa; every lane un-paused")],
+    cache_sec=0)
+
 cache = LiveCache()
-server = QuietServer(("127.0.0.1", 0), floor.make_handler(cache, tail_lookup))
+server = QuietServer(("127.0.0.1", 0), floor.make_handler(cache, tail_lookup, ship_lookup))
 URL = f"http://127.0.0.1:{server.server_address[1]}/"
 threading.Thread(target=server.serve_forever, daemon=True).start()
 
@@ -236,8 +264,8 @@ try:
             check(f"{lane}: a Peek button, drawn and big enough to hit",
                   b.eval(f"""(() => {{ const r = document.querySelector('{peek_button(lane)}')
                           ?.getBoundingClientRect(); return !!r && r.width >= 40 && r.height >= 24; }})()"""))
-        check("the ship stations have none: nothing there works a card",
-              b.eval("document.querySelectorAll('.desk.ship .peek-btn').length") == 0)
+        check("each ship station has one too: what CI did last (asked for after card #63)",
+              b.eval("document.querySelectorAll('.desk.ship .peek-btn[data-peek-ship]').length") == 2)
         check("no Peek button sits inside a link, where a click could also follow the link",
               b.eval("[...document.querySelectorAll('.peek-btn')].every(x => !x.closest('a'))"))
 
@@ -266,7 +294,7 @@ try:
                                                  "Opening the pull request now."], b.eval(PANEL_TEXT))
         check("the page redrawing its desks under the panel leaves the panel open",
               b.eval("refresh().then(() => true)") and b.eval(PANEL_OPEN)
-              and b.eval("document.querySelectorAll('.peek-btn').length") == 4)
+              and b.eval("document.querySelectorAll('.peek-btn').length") == 6)
 
         print("6. the panel closes: Escape, the close button, a click beside it")
         b.key("Escape")
@@ -299,6 +327,39 @@ try:
         b.key("Escape")
         check("still no errors after all of that", b.errors == [], b.errors)
 
+        print("7b. Peek on a ship station: what CI did on the newest commit, and what came before")
+        b.click('.peek-btn[data-peek-ship="alpha"]')
+        check("the panel opens with the newest commit and each step CI ran, marked",
+              b.wait_for(PANEL_TEXT + ".includes('The floor page, in a real browser')")
+              and "aaaaaaa  Peek on every desk" in b.eval(PANEL_TEXT)
+              and "    ✓ The spawner suite · 28s" in b.eval(PANEL_TEXT), b.eval(PANEL_TEXT))
+        check("it is headed Ship, and says in words how CI stands",
+              b.eval("document.getElementById('peek-title').textContent") == "Ship (alpha)"
+              and b.eval(PANEL_SUB).startswith("CI on main: passed"), b.eval(PANEL_SUB))
+        check("the commit before it is there, one line",
+              "Before that on main" in b.eval(PANEL_TEXT) and "bbbbbbb  The commit before" in b.eval(PANEL_TEXT))
+        check("the board this box deploys also shows the deployer's last lines",
+              "The box's deployer" in b.eval(PANEL_TEXT)
+              and "deployed aaaaaaa; every lane un-paused" in b.eval(PANEL_TEXT))
+        check("each step is on its own line (the line break reached the page as a line break)",
+              len(b.eval(PANEL_TEXT).split("\n")) >= 8, b.eval(PANEL_TEXT))
+        check("the click opened no new tab", b.new_tabs == [] and b.eval(PAGE_URL) == URL)
+        shot(b, "ship-peek-desktop.png", full_page=False)
+        b.key("Escape")
+        b.click('.peek-btn[data-peek-ship="beta"]')
+        check("a red build: the head says which job is failing, the step carries the cross",
+              b.wait_for(PANEL_TEXT + ".includes('✗ Run npm test')")
+              and b.eval(PANEL_SUB) == "CI on main: failing — verify", (b.eval(PANEL_SUB), b.eval(PANEL_TEXT)))
+        check("a board this box does not deploy shows no deployer",
+              "deployer" not in b.eval(PANEL_TEXT))
+        b.key("Escape")
+        b.click(peek_button("alpha"))
+        check("going from a ship station back to a lane shows the lane's session, not CI",
+              b.wait_for(PANEL_TEXT + ".includes('Opening the pull request now.')")
+              and "Before that on main" not in b.eval(PANEL_TEXT), b.eval(PANEL_TEXT))
+        b.key("Escape")
+        check("still no errors", b.errors == [], b.errors)
+
         print("8. on a phone: nothing runs off the side, and Peek still works")
         b.resize(390, 844)
         b.goto(URL)
@@ -314,6 +375,13 @@ try:
               b.eval("""(() => { const r = document.getElementById('peek-panel').getBoundingClientRect();
                       return r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight; })()"""))
         shot(b, "peek-phone.png", full_page=False)  # the panel is fixed to the screen
+        b.key("Escape")
+        b.click('.peek-btn[data-peek-ship="alpha"]')
+        check("the ship station's Peek fits the phone too",
+              b.wait_for(PANEL_TEXT + ".includes('The spawner suite')")
+              and b.eval("""(() => { const r = document.getElementById('peek-panel').getBoundingClientRect();
+                      return r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight; })()"""))
+        shot(b, "ship-peek-phone.png", full_page=False)
         b.key("Escape")
 
     print("9. this suite fails on the page #70 shipped (card #71): a script that does not parse")

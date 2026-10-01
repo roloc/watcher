@@ -17,7 +17,9 @@ Code session transcript, the same way `bin/tail.sh` decodes it on the command li
 like") — live while the lane is working, its last session when it is not — polled only
 while a human has it open, never while the panel is closed. (Until October 1, 2026 the
 button existed only on a desk that was working at that moment, so on a quiet floor there
-was no sign the feature had shipped at all.)
+was no sign the feature had shipped at all.) The **ship station** has a Peek too: every
+step CI ran on main's newest commit, the commits before it, and — on the board whose repo
+this box deploys — what the deployer is doing and the last things it said.
 
 Where the data comes from (`how-it-works.md`, "State on disk" and "Lanes"):
 - `projects/*.env`, sourced with bash exactly as `spawn.sh` sources them (they use shell
@@ -38,7 +40,10 @@ anything else. The JSON endpoint (`/api/state.json`) serves exactly the fields i
 `ALLOWED_FIELDS` below — never a raw file, an env value, a log's `result` text, or stderr.
 `/api/tail.json` (Peek) is a separate, narrower contract: `tail_status`'s own docstring
 says exactly what it returns — one short decoded line at a time, the same ones `tail.py`
-would print, never a raw file or a tool's full output.
+would print, never a raw file or a tool's full output. `/api/ship.json` (the ship
+station's Peek) is `ship_lines`'s output: names, marks and times of CI's steps from
+GitHub's REST API (two or three calls, shared by every poll for `SHIP_CACHE_SEC`), and the
+deployer's own `history` file — never a CI log, and only for a project already on the page.
 
 `bin/test-floor.py` is the offline suite: fixture state directories and a stubbed board,
 no network, no real systemd. It checks the Python. **`bin/test-floor-browser.py` checks
@@ -263,15 +268,19 @@ def project_counts(items):
 
 # --- the ship station: CI on main, and the box's own deployer ----------------------------
 
-def fetch_ci(repo, branch="main", timeout=30):
-    """The newest commit on `branch` and its check runs, through `gh api` — REST only, never
-    GraphQL, which the board dump already spends. Raises on any failure; the caller shows
-    "unknown" and never the error text."""
-    def get(path):
-        r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=timeout)
-        if r.returncode != 0:
-            raise RuntimeError("gh api failed")
-        return json.loads(r.stdout)
+def _gh_api(path, timeout=30):
+    """One `gh api` GET — REST only, never GraphQL, which the board dump already spends.
+    Raises on any failure, without gh's own error text in the message."""
+    r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        raise RuntimeError("gh api failed")
+    return json.loads(r.stdout)
+
+
+def fetch_ci(repo, branch="main", timeout=30, get=None):
+    """The newest commit on `branch` and its check runs. Raises on any failure; the caller
+    shows "unknown" and never the error text."""
+    get = get or (lambda path: _gh_api(path, timeout))
     commit = get(f"repos/{repo}/commits/{branch}")
     runs = get(f"repos/{repo}/commits/{commit['sha']}/check-runs?per_page=100").get("check_runs", [])
     return {"sha": commit["sha"],
@@ -580,6 +589,219 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     lines, new_pos = tail.read_new_lines(f, pos)
     return {"status": "ok", "card": n, "live": live, "file": fname, "pos": new_pos,
             "lines": lines, "reset": False}
+
+
+# --- Peek at the ship station: what CI did last, and the box's deployer ---------------------
+
+SHIP_RUNS = 6            # workflow runs on main fetched for one Peek
+SHIP_EARLIER = 4         # earlier commits listed under the newest one
+SHIP_HISTORY_LINES = 12  # deployer lines shown, newest first
+SHIP_CACHE_SEC = 20      # one fetch serves every poll of an open panel for this long
+# Steps every job has and nobody needs to read on a phone.
+_HOUSEKEEPING = ("Set up job", "Complete job", "Post ", "Run actions/")
+
+
+def fetch_ci_runs(repo, branch="main", n=SHIP_RUNS, get=_gh_api):
+    """The push-triggered workflow runs on `branch`, newest first, with jobs and steps for
+    the ones on the newest commit — the commit the ship station's pill is about. Two or
+    three REST calls. Raises on any failure."""
+    raw = get(f"repos/{repo}/actions/runs?branch={branch}&event=push&per_page={n}")
+    runs = [{"id": r.get("id"), "name": r.get("name") or "", "sha": r.get("head_sha") or "",
+             "title": r.get("display_title") or "", "status": r.get("status") or "",
+             "conclusion": r.get("conclusion"), "started": r.get("run_started_at") or r.get("created_at"),
+             "updated": r.get("updated_at")}
+            for r in raw.get("workflow_runs", [])]
+    for run in runs:
+        if run["sha"] != runs[0]["sha"]:
+            continue
+        jobs = get(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=50").get("jobs", [])
+        run["jobs"] = [{"name": j.get("name") or "", "status": j.get("status") or "",
+                        "conclusion": j.get("conclusion"), "started": j.get("started_at"),
+                        "completed": j.get("completed_at"),
+                        "steps": [{"name": st.get("name") or "", "status": st.get("status") or "",
+                                   "conclusion": st.get("conclusion"), "started": st.get("started_at"),
+                                   "completed": st.get("completed_at")} for st in j.get("steps") or []]}
+                       for j in jobs]
+    return runs
+
+
+def read_deploy_history(deploy_state, n=SHIP_HISTORY_LINES):
+    """The last `n` lines `deploy/autodeploy.sh` said, oldest first: [(when, text)]. Its own
+    `history` file — the journal is not readable by this page's user. Missing is empty."""
+    try:
+        with open(os.path.join(deploy_state, "history")) as f:
+            raw = f.read().splitlines()[-n:]
+    except OSError:
+        return []
+    out = []
+    for line in raw:
+        stamp, _, text = line.partition(" ")
+        try:
+            when = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if text.strip():
+            out.append((when, text.strip()[:200]))
+    return out
+
+
+def _when(iso):
+    try:
+        return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ago(when, now):
+    if when is None:
+        return ""
+    d = max((now - when).total_seconds(), 0)
+    if d < 90:
+        return "just now"
+    if d < 3600:
+        return f"{round(d / 60)}m ago"
+    if d < 86400:
+        return f"{round(d / 3600)}h ago"
+    return f"{round(d / 86400)}d ago"
+
+
+def _took(started, completed):
+    a, b = _when(started), _when(completed)
+    if a is None or b is None or (b - a).total_seconds() < 1:
+        return ""
+    sec = int((b - a).total_seconds())
+    return f" · {sec}s" if sec < 60 else f" · {sec // 60}m {sec % 60:02d}s"
+
+
+def _mark(status, conclusion):
+    """One character for where a run, job or step stands."""
+    if status != "completed":
+        return "…"   # queued or running
+    if conclusion == "success":
+        return "✓"
+    if conclusion in ("skipped", "neutral", "cancelled"):
+        return "–"
+    return "✗"
+
+
+def _worst(marks):
+    for m in ("✗", "…", "✓"):
+        if m in marks:
+            return m
+    return "–"
+
+
+_DEPLOY_WORDS = {
+    "live": "live on the box: {live}", "checking": "checking {target}: CI and tests",
+    "testing": "retesting {target}", "waiting": "{target} passed; waiting for idle lanes",
+    "swapping": "swapping in {target}", "held": "held: {target}",
+}
+
+
+def ship_lines(runs, now, deploy=None, history=None, has_deployer=False):
+    """What the ship station's Peek shows, as plain lines of text (the page puts them in a
+    `<pre>` with `textContent` — nothing here is ever HTML): the newest commit on main and
+    every step CI ran on it, the commits before it in one line each, and — on the board
+    whose repo this box deploys — what the deployer is doing and the last things it said.
+    `runs` is `fetch_ci_runs`'s list, or None when CI could not be reached. Pure: no I/O.
+
+    Returns {"sub": <one line for the panel's head>, "live": <something is running now>,
+    "lines": [...]}."""
+    lines, sub, live = [], "CI could not be reached", False
+    if runs is None:
+        lines.append("CI could not be reached right now.")
+    elif not runs:
+        sub = "no CI runs on main yet"
+        lines.append("No CI runs on main yet.")
+    else:
+        newest = [r for r in runs if r["sha"] == runs[0]["sha"]]
+        overall = _worst([_mark(r["status"], r["conclusion"]) for r in newest])
+        ago = _ago(_when(newest[0]["started"]), now)
+        failing = [j["name"] for r in newest for j in r.get("jobs", [])
+                   if _mark(j["status"], j["conclusion"]) == "✗"]
+        live = overall == "…"
+        sub = {"✓": f"CI on main: passed {ago}", "…": "CI on main: running now",
+               "✗": "CI on main: failing — " + (", ".join(failing[:3]) or "see below"),
+               "–": f"CI on main: nothing ran {ago}"}[overall]
+        lines.append(f"{newest[0]['sha'][:7]}  {newest[0]['title'][:90]}")
+        for r in newest:
+            lines.append(f"{_mark(r['status'], r['conclusion'])} {r['name']} · started {ago}")
+            for j in r.get("jobs", []):
+                jm = _mark(j["status"], j["conclusion"])
+                if jm == "–":
+                    lines.append(f"  – {j['name']} (skipped)")
+                    continue
+                lines.append(f"  {jm} {j['name']}{_took(j['started'], j['completed'])}")
+                for st in j["steps"]:
+                    if st["name"].startswith(_HOUSEKEEPING):
+                        continue
+                    lines.append(f"    {_mark(st['status'], st['conclusion'])} {st['name']}"
+                                 f"{_took(st['started'], st['completed'])}")
+        earlier, seen = [], {runs[0]["sha"]}
+        for r in runs:
+            if r["sha"] in seen:
+                continue
+            seen.add(r["sha"])
+            same = [x for x in runs if x["sha"] == r["sha"]]
+            earlier.append(f"  {_worst([_mark(x['status'], x['conclusion']) for x in same])} "
+                           f"{r['sha'][:7]}  {r['title'][:60]} · {_ago(_when(r['started']), now)}")
+        if earlier:
+            lines += ["", "Before that on main"] + earlier[:SHIP_EARLIER]
+
+    if has_deployer:
+        lines += ["", "The box's deployer"]
+        if deploy:
+            words = _DEPLOY_WORDS.get(deploy.get("state"), "")
+            if words:
+                card = deploy.get("card")
+                lines.append("  now: " + words.format(live=deploy.get("live", ""), target=deploy.get("target", ""))
+                             + (f" (#{card['number']})" if card and deploy.get("state") == "held" else ""))
+        if history:
+            for when, text in reversed(history):
+                lines.append(f"  {_ago(when, now):>8}  {text}")
+        else:
+            lines.append("  Nothing on file yet: its history starts with the next deploy.")
+    return {"sub": sub, "live": live, "lines": lines}
+
+
+def make_ship_lookup(repos_fn, runs_fetcher, deploy_repo=None, deploy_fn=None, history_fn=None,
+                     now_fn=None, cache_sec=SHIP_CACHE_SEC):
+    """`(project name) -> dict | None` for `/api/ship.json`. `repos_fn()` maps each project
+    on the page to its `owner/repo`; a name that is not one of them is None (a 404), so the
+    endpoint can only ever be asked about a repo this box already works. One fetch per
+    project serves every poll for `cache_sec`: an open panel polls, and GitHub's API is
+    not the place to spend a call per poll. CI that cannot be reached still answers — with
+    the deployer's part, where there is one."""
+    cache, lock = {}, threading.Lock()
+
+    def lookup(name):
+        repo = repos_fn().get(name)
+        if repo is None:
+            return None
+        with lock:
+            hit = cache.get(name)
+            if hit and time.monotonic() - hit[0] < cache_sec:
+                return hit[1]
+        try:
+            runs = runs_fetcher(repo)
+        except Exception as e:
+            runs = None
+            print(f"floor: CI runs for {repo} unreachable: {e}", file=sys.stderr, flush=True)
+        deploys = bool(deploy_repo) and repo == deploy_repo
+        deploy = history = None
+        if deploys:
+            try:
+                deploy = deploy_fn() if deploy_fn else None
+                history = history_fn() if history_fn else None
+            except Exception as e:
+                print(f"floor: deployer state unreadable: {e}", file=sys.stderr, flush=True)
+        now = now_fn() if now_fn else datetime.now(timezone.utc)
+        result = {"status": "ok", **ship_lines(runs, now, deploy, history, has_deployer=deploys)}
+        with lock:
+            cache[name] = (time.monotonic(), result)
+        return result
+
+    return lookup
 
 
 def _fmt_quota(cost):
@@ -984,16 +1206,21 @@ function shipSVG(mode, pill) {
     <rect class="${mode === "pushing" ? "arm-typing" : ""}" x="42" y="46" width="10" height="5" rx="2" style="fill:${c}"/>
     ${sign}</svg>`;
 }
-function shipHTML(ship) {
+function shipHTML(ship, project) {
   const st = shipState(ship);
   const [cls, label] = SHIP_PILL[st.pill];
-  return `<a class="desk ship" href="${esc(st.link)}" target="_blank" rel="noopener">
-    ${shipSVG(st.mode, st.pill)}
-    <div class="name">Ship</div>
-    <div class="unit">${st.deploys ? "CI and the box's deployer" : "CI on main"}</div>
-    <span class="pill ${cls}">${label}</span>
-    ${st.lines.map(l => `<div class="detail">${l}</div>`).join("")}
-  </a>`;
+  // The same shape as a lane's desk: a link, and Peek beside it — what CI did on the
+  // newest commit, step by step, the commits before it, and the deployer's last lines.
+  return `<div class="desk ship">
+    <a class="desk-link" href="${esc(st.link)}" target="_blank" rel="noopener">
+      ${shipSVG(st.mode, st.pill)}
+      <div class="name">Ship</div>
+      <div class="unit">${st.deploys ? "CI and the box's deployer" : "CI on main"}</div>
+      <span class="pill ${cls}">${label}</span>
+      ${st.lines.map(l => `<div class="detail">${l}</div>`).join("")}
+    </a>
+    <button class="peek-btn" type="button" data-peek-ship="${esc(project)}" data-peek-name="Ship (${esc(project)})">Peek</button>
+  </div>`;
 }
 
 function deskHTML(d) {
@@ -1029,7 +1256,7 @@ function render(state) {
       <h2><a href="${esc(p.board_url)}" target="_blank" rel="noopener">${esc(p.name)}</a></h2>
       <div class="counts">Ready ${p.counts.ready} · In progress ${p.counts.in_progress} · Backlog ${p.counts.backlog}
         ${p.board_error ? `<span class="alert"> — board unreachable</span>` : ""}</div>
-      <div class="desks">${p.lanes.map(deskHTML).join("")}${shipHTML(p.ship)}</div>
+      <div class="desks">${p.lanes.map(deskHTML).join("")}${shipHTML(p.ship, p.name)}</div>
     </section>`).join("");
 
   const tbody = document.querySelector("#recent tbody");
@@ -1064,6 +1291,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) refr
 // live while the lane works, its last session when it does not. Polls only while the panel
 // is open — never in the background, never per card.
 let peekLane = null, peekCard = null, peekFile = null, peekPos = null, peekTimer = null;
+let peekShip = null; // the project whose ship station is open, when it is one of those
 
 function peekSub(text, live) {
   const sub = document.getElementById("peek-sub");
@@ -1107,21 +1335,45 @@ async function pollPeek() {
   pre.scrollTop = pre.scrollHeight;
 }
 
-function openPeek(lane, name) {
-  peekLane = lane; peekCard = null; peekFile = null; peekPos = null;
-  document.getElementById("peek-title").textContent = name || lane;
+// The ship station's Peek: what CI did on the newest commit, step by step, the commits
+// before it, and (on the board this box deploys) the deployer's last lines. The server
+// sends finished lines of text; this only shows them. Newest is at the top, so unlike a
+// lane's session it never scrolls to the bottom.
+async function pollShip() {
+  const project = peekShip;
+  if (!project) return;
+  let data;
+  try {
+    const r = await fetch("/api/ship.json?" + new URLSearchParams({project}).toString(), {cache: "no-store"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    data = await r.json();
+  } catch (e) {
+    if (peekShip === project) peekSub("can't reach the ship station right now — retrying", false);
+    return;
+  }
+  if (peekShip !== project) return; // closed, or switched, mid-fetch
+  peekSub(data.sub, data.live);
+  const pre = document.getElementById("peek-lines");
+  const text = data.lines.join("\\n");
+  if (pre.textContent !== text) pre.textContent = text; // unchanged: leave the scroll alone
+}
+
+function openPeek(target, name) {
+  peekLane = target.lane || null; peekShip = target.ship || null;
+  peekCard = null; peekFile = null; peekPos = null;
+  document.getElementById("peek-title").textContent = name || peekLane || peekShip;
   peekSub("", false);
   document.getElementById("peek-lines").textContent = "";
   document.getElementById("peek-overlay").classList.add("open");
-  pollPeek();
   if (peekTimer) clearInterval(peekTimer);
-  peekTimer = setInterval(pollPeek, 2000);
+  if (peekShip) { pollShip(); peekTimer = setInterval(pollShip, 15000); }
+  else { pollPeek(); peekTimer = setInterval(pollPeek, 2000); }
 }
 
 function closePeek() {
   document.getElementById("peek-overlay").classList.remove("open");
   if (peekTimer) { clearInterval(peekTimer); peekTimer = null; }
-  peekLane = null;
+  peekLane = null; peekShip = null;
 }
 
 document.getElementById("peek-close").addEventListener("click", closePeek);
@@ -1132,7 +1384,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePeek(
 document.addEventListener("click", (e) => {
   const btn = e.target.closest(".peek-btn");
   if (!btn) return;
-  openPeek(btn.dataset.peekLane, btn.dataset.peekName);
+  openPeek({lane: btn.dataset.peekLane, ship: btn.dataset.peekShip}, btn.dataset.peekName);
 });
 </script>
 </body>
@@ -1164,11 +1416,12 @@ class Cache:
                 self.state = new_state
 
 
-def make_handler(cache, tail_lookup=None):
+def make_handler(cache, tail_lookup=None, ship_lookup=None):
     """`tail_lookup`, when given, is `(lane, card, file, pos) -> dict | None` — the Peek
     endpoint's `/api/tail.json`, built on `tail_status` above. `None` (the default) keeps
     every existing caller — `bin/test-floor.py`'s `FixedCache` included — working exactly
-    as before: that path just 404s."""
+    as before: that path just 404s. `ship_lookup` is the same for the ship station's Peek:
+    `(project name) -> dict | None`, served at `/api/ship.json`."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass  # never log a request path to stdout/journal — it is nobody's business
@@ -1192,6 +1445,10 @@ def make_handler(cache, tail_lookup=None):
                 self.wfile.write(body)
             elif path == "/api/tail.json":
                 self._serve_tail(parsed.query)
+            elif path == "/api/ship.json":
+                names = parse_qs(parsed.query).get("project")
+                result = ship_lookup(names[0] if names else "") if ship_lookup else None
+                self._send_json(result)
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -1214,7 +1471,9 @@ def make_handler(cache, tail_lookup=None):
                 except ValueError:
                     return None
 
-            result = tail_lookup(one("lane") or "", one_int("card"), one("file"), one_int("pos"))
+            self._send_json(tail_lookup(one("lane") or "", one_int("card"), one("file"), one_int("pos")))
+
+        def _send_json(self, result):
             if result is None:
                 self.send_response(404)
                 self.end_headers()
@@ -1290,7 +1549,13 @@ def main(argv):
             return None
         return tail_status(info, claude_projects_dir, card, file, pos)
 
-    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup))
+    ship_lookup = make_ship_lookup(
+        lambda: {l["project_repo"].split("/")[-1]: l["project_repo"] for l in lane_cache.get().values()},
+        fetch_ci_runs, deploy_repo,
+        lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
+        lambda: read_deploy_history(deploy_state))
+
+    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup, ship_lookup))
     print(f"floor.py: serving on {host}:{port}, refreshing every {refresh_sec}s")
     try:
         server.serve_forever()

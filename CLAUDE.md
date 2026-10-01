@@ -62,7 +62,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `deploy/autodeploy.sh` — **the deploy path.** A timer on the box (`watcher-deploy.timer`)
   ships `main` by itself: `verify` green on the commit, the replay suite green in a scratch
   clone, then every lane idle. Nobody runs a deploy by hand. `bash bin/test-deploy.sh` is
-  its offline suite (CI runs it); run it after touching the file.
+  its offline suite (CI runs it); run it after touching the file. Everything it says goes
+  to the journal and to `/var/lib/watcher-deploy/history`, a plain file the floor page's
+  Ship desk reads for its Peek (the page's user cannot read the journal).
 - `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (the manual
   fallback: deploy without
   killing a running tick: pull, pause, wait, restart, un-pause, per lane), one env file per

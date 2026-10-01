@@ -69,7 +69,22 @@ CANARY_DIR="${DEPLOY_CANARY_DIR:-/opt/watcher-canary}"
 CANARY_SOAK_TICKS="${DEPLOY_CANARY_SOAK_TICKS:-3}"
 CANARY_QUIET_MIN="${DEPLOY_CANARY_QUIET_MIN:-240}"
 
-say() { printf '%s autodeploy: %s\n' "$(date -u +%FT%TZ)" "$*"; }
+# Every line goes to the journal, and to $DSTATE/history: a plain file the floor page's
+# Ship desk reads for its Peek (bin/floor.py). The page runs as the lanes' user, which
+# cannot read the journal. Best-effort — a write that fails must never fail a deploy — and
+# trimmed, so it cannot grow without bound.
+HISTORY_KEEP="${DEPLOY_HISTORY_LINES:-200}"
+say() {
+  local now h="$DSTATE/history"
+  now="$(date -u +%FT%TZ)"
+  printf '%s autodeploy: %s\n' "$now" "$*"
+  [ -d "$DSTATE" ] || return 0
+  { printf '%s %s\n' "$now" "$*" >> "$h"; } 2>/dev/null || return 0
+  if [ "$( { wc -l < "$h"; } 2>/dev/null || echo 0)" -gt $((HISTORY_KEEP * 2)) ]; then
+    { tail -n "$HISTORY_KEEP" "$h" > "$h.tmp" && mv "$h.tmp" "$h"; } 2>/dev/null
+  fi
+  return 0
+}
 as_user() { su - "$RUN_AS" -c "$1"; }
 # q <word>...: the words shell-quoted, for a command line that as_user runs.
 q() { local out="" w; for w in "$@"; do out+="$(printf '%q' "$w") "; done; printf '%s' "${out% }"; }

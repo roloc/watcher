@@ -461,7 +461,7 @@ check("riffmap's lanes read Triage, Design, Build", [l["kind"] for l in rm["lane
 check("every project has a ship station", all("ship" in p for p in state15["projects"]))
 check("with no CI fetcher the ship station says unknown, not a crash",
       rm["ship"]["ci"]["state"] == "unknown")
-check("the page puts the ship station after the lanes", "${p.lanes.map(deskHTML).join(\"\")}${shipHTML(p.ship)}" in floor.INDEX_HTML)
+check("the page puts the ship station after the lanes", "${p.lanes.map(deskHTML).join(\"\")}${shipHTML(p.ship, p.name)}" in floor.INDEX_HTML)
 check("the triage lane is drawn as the dispatcher", "dispatcherSVG" in floor.INDEX_HTML and "desk.dispatcher" in floor.INDEX_HTML)
 
 print("16. CI on main, summarized")
@@ -546,7 +546,7 @@ check("a CI fetch that fails shows unknown, and its error text never reaches the
 
 print("18. every clickable link opens in a new tab (card #62)")
 for snippet in (
-    '<a class="desk ship" href="${esc(st.link)}" target="_blank" rel="noopener">',
+    '<a class="desk-link" href="${esc(st.link)}" target="_blank" rel="noopener">',
     '<a class="desk-link" href="${esc(d.link)}" target="_blank" rel="noopener">',
     '<h2><a href="${esc(p.board_url)}" target="_blank" rel="noopener">${esc(p.name)}</a></h2>',
     '<td><a href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}</a></td>',
@@ -863,6 +863,162 @@ check("a backgrounded tab's throttled timer is not the only way back: "
       "becoming visible again retries right away",
       'document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });'
       in floor.INDEX_HTML)
+
+print("24. Peek at the ship station: what CI did last, and the deployer's last lines")
+NOW24 = datetime(2026, 10, 1, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def step(name, conclusion="success", status="completed", sec=0):
+    return {"name": name, "status": status, "conclusion": conclusion,
+            "started": "2026-10-01T17:15:00Z", "completed": "2026-10-01T17:15:%02dZ" % sec}
+
+
+def job(name, steps, conclusion="success", status="completed"):
+    return {"name": name, "status": status, "conclusion": conclusion,
+            "started": "2026-10-01T17:15:00Z", "completed": "2026-10-01T17:17:05Z", "steps": steps}
+
+
+def wrun(sha, title, conclusion="success", status="completed", jobs=None, name="CI",
+         started="2026-10-01T17:15:00Z"):
+    r = {"id": 1, "name": name, "sha": sha * 40, "title": title, "status": status,
+         "conclusion": conclusion, "started": started, "updated": started}
+    if jobs is not None:
+        r["jobs"] = jobs
+    return r
+
+
+green = [wrun("a", "Newest commit", jobs=[
+             job("verify", [step("Set up job"), step("Run actions/checkout@v4"),
+                            step("The spawner suite", sec=28), step("Post Run actions/checkout@v4"),
+                            step("Complete job")]),
+             job("publish", [], conclusion="skipped")]),
+         wrun("b", "The one before", started="2026-10-01T15:00:00Z"),
+         wrun("c", "An older red one", conclusion="failure", started="2026-09-30T18:00:00Z")]
+g = floor.ship_lines(green, NOW24)
+check("a green run: the head line says passed, and how long ago",
+      g["sub"] == "CI on main: passed 45m ago" and g["live"] is False, g["sub"])
+check("the newest commit leads, short sha and title", g["lines"][0] == "aaaaaaa  Newest commit", g["lines"][0])
+check("its job, with how long it took", "  ✓ verify · 2m 05s" in g["lines"], g["lines"])
+check("its steps, each with its mark and time", "    ✓ The spawner suite · 28s" in g["lines"], g["lines"])
+check("housekeeping steps every job has are left out",
+      not any(w in l for l in g["lines"] for w in ("Set up job", "Complete job", "Post Run", "actions/checkout")))
+check("a skipped job is one line, no steps", "  – publish (skipped)" in g["lines"])
+check("earlier commits follow, one line each, with their own mark",
+      "Before that on main" in g["lines"]
+      and "  ✓ bbbbbbb  The one before · 3h ago" in g["lines"]
+      and "  ✗ ccccccc  An older red one · 1d ago" in g["lines"], g["lines"])
+check("no deployer section on a board this box does not deploy",
+      not any("deployer" in l for l in g["lines"]))
+
+red = [wrun("d", "Broke it", conclusion="failure", jobs=[
+           job("verify", [step("The floor page suite", conclusion="failure", sec=2),
+                          step("The lane-tail suite", conclusion="skipped")], conclusion="failure"),
+           job("web", [step("Run npm test", sec=19)])])]
+r24 = floor.ship_lines(red, NOW24)
+check("a red run: the head line names the failing job", r24["sub"] == "CI on main: failing — verify", r24["sub"])
+check("...and the failing step carries the cross",
+      "    ✗ The floor page suite · 2s" in r24["lines"] and "    – The lane-tail suite" in r24["lines"])
+running = [wrun("e", "In flight", conclusion=None, status="in_progress", jobs=[
+               job("verify", [step("The spawner suite", sec=5),
+                              step("The deployer suite", conclusion=None, status="in_progress")],
+                   conclusion=None, status="in_progress")])]
+u24 = floor.ship_lines(running, NOW24)
+check("a run in flight: live, and the step it is on shows as running",
+      u24["live"] is True and u24["sub"] == "CI on main: running now"
+      and "    … The deployer suite" in u24["lines"], u24)
+two = [wrun("f", "Two workflows", jobs=[job("verify", [])]),
+       wrun("f", "Two workflows", conclusion="failure", name="Design preview", jobs=[job("publish", [], conclusion="failure")])]
+check("two workflows on the newest commit: both listed, the worse one decides",
+      floor.ship_lines(two, NOW24)["sub"] == "CI on main: failing — publish"
+      and sum(l.startswith(("✓ CI", "✗ Design preview")) for l in floor.ship_lines(two, NOW24)["lines"]) == 2)
+check("CI that could not be reached says so in words, no crash",
+      floor.ship_lines(None, NOW24)["lines"] == ["CI could not be reached right now."])
+check("a repo with no runs yet says so", floor.ship_lines([], NOW24)["sub"] == "no CI runs on main yet")
+
+hist = [(datetime(2026, 10, 1, 17, 57, tzinfo=timezone.utc), "replay suite passed on f0651c6"),
+        (datetime(2026, 10, 1, 17, 59, tzinfo=timezone.utc), "deployed f0651c6; every lane un-paused")]
+d24 = floor.ship_lines(green, NOW24, deploy={"state": "live", "live": "f0651c6", "target": "f0651c6"},
+                       history=hist, has_deployer=True)["lines"]
+at = d24.index("The box's deployer")
+check("the deploying board gets the deployer: where it stands, then its lines, newest first",
+      d24[at + 1] == "  now: live on the box: f0651c6"
+      and d24[at + 2].endswith("deployed f0651c6; every lane un-paused") and "just now" in d24[at + 2]
+      and d24[at + 3].endswith("replay suite passed on f0651c6") and "3m ago" in d24[at + 3], d24[at:])
+h24 = floor.ship_lines(green, NOW24, deploy={"state": "held", "live": "aaa", "target": "bbb",
+                                             "card": {"number": 58, "url": "x"}}, has_deployer=True)["lines"]
+check("a held deploy names its card; no history on file yet says so",
+      "  now: held: bbb (#58)" in h24 and any("Nothing on file yet" in l for l in h24), h24)
+check("with CI unreachable the deployer's part still shows",
+      "The box's deployer" in floor.ship_lines(None, NOW24, history=hist, has_deployer=True)["lines"])
+
+HIST_DIR = os.path.join(ROOT, "hist"); os.makedirs(HIST_DIR)
+check("no history file: empty, not a crash", floor.read_deploy_history(HIST_DIR) == [])
+with open(os.path.join(HIST_DIR, "history"), "w") as f:
+    f.write("2026-10-01T17:57:51Z replay suite passed on f0651c6\nnot a stamp at all\n\n"
+            + "".join("2026-10-01T17:59:%02dZ line %d\n" % (i, i) for i in range(30)))
+rh = floor.read_deploy_history(HIST_DIR)
+check("the history file: the newest lines only, a malformed one skipped",
+      len(rh) == floor.SHIP_HISTORY_LINES and rh[-1][1] == "line 29"
+      and rh[-1][0] == datetime(2026, 10, 1, 17, 59, 29, tzinfo=timezone.utc), rh[-2:])
+
+fetches = []
+def stub_runs(repo):
+    fetches.append(repo)
+    if repo == "roloc/down":
+        raise RuntimeError("gh: token ghp_notreal rejected")
+    return green
+clock = [NOW24]
+look = floor.make_ship_lookup(lambda: {"watcher": "roloc/watcher", "riffmap": "roloc/riffmap", "down": "roloc/down"},
+                              stub_runs, deploy_repo="roloc/watcher",
+                              deploy_fn=lambda: {"state": "live", "live": "f0651c6", "target": "f0651c6"},
+                              history_fn=lambda: hist, now_fn=lambda: clock[0])
+check("a project that is not on the page is refused, and nothing is fetched for it",
+      look("../../etc") is None and look("") is None and fetches == [])
+w24 = look("watcher")
+check("the deploying project: CI and the deployer", w24["status"] == "ok" and "The box's deployer" in w24["lines"])
+check("any other project: CI only", "The box's deployer" not in look("riffmap")["lines"])
+look("watcher"); look("watcher")
+check("an open panel's polls share one fetch (GitHub is asked once per project)",
+      fetches == ["roloc/watcher", "roloc/riffmap"], fetches)
+dn = look("down")
+check("CI that cannot be reached still answers, and gh's own words never reach the page",
+      dn["lines"] == ["CI could not be reached right now."] and "ghp_notreal" not in json.dumps(dn))
+
+got = []
+def fake_get(path):
+    got.append(path)
+    if "/jobs" in path:
+        return {"jobs": [{"name": "verify", "status": "completed", "conclusion": "success",
+                          "started_at": "2026-10-01T17:15:00Z", "completed_at": "2026-10-01T17:16:00Z",
+                          "steps": [{"name": "The spawner suite", "status": "completed", "conclusion": "success",
+                                     "started_at": "2026-10-01T17:15:00Z", "completed_at": "2026-10-01T17:15:28Z"}]}]}
+    return {"workflow_runs": [
+        {"id": 11, "name": "CI", "head_sha": "a" * 40, "display_title": "Newest", "status": "completed",
+         "conclusion": "success", "run_started_at": "2026-10-01T17:15:00Z", "updated_at": "x"},
+        {"id": 10, "name": "CI", "head_sha": "b" * 40, "display_title": "Older", "status": "completed",
+         "conclusion": "success", "run_started_at": "2026-10-01T15:00:00Z", "updated_at": "x"}]}
+fr = floor.fetch_ci_runs("roloc/watcher", get=fake_get)
+check("fetch_ci_runs asks for push runs on main, and jobs for the newest commit only",
+      got == ["repos/roloc/watcher/actions/runs?branch=main&event=push&per_page=6",
+              "repos/roloc/watcher/actions/runs/11/jobs?per_page=50"], got)
+check("...and what it returns is what ship_lines reads",
+      "    ✓ The spawner suite · 28s" in floor.ship_lines(fr, NOW24)["lines"] and "jobs" not in fr[1])
+
+srv4 = ThreadingHTTPServer(("127.0.0.1", 0), floor.make_handler(FixedCache(), None, look))
+t4 = threading.Thread(target=srv4.serve_forever, daemon=True); t4.start()
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{srv4.server_address[1]}/api/ship.json?project=watcher", timeout=5) as r:
+        check("/api/ship.json serves a known project's lines", "aaaaaaa  Newest commit" in json.loads(r.read())["lines"])
+    for bad in ("?project=nope", ""):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{srv4.server_address[1]}/api/ship.json{bad}", timeout=5)
+            check("an unknown or missing project is refused", False)
+        except Exception as e:
+            check(f"/api/ship.json{bad or ' with no project'}: 404", "404" in str(e), str(e))
+finally:
+    srv4.shutdown(); srv4.server_close()
+check("the ship desk carries its own Peek button, beside its link and not inside it",
+      'data-peek-ship="${esc(project)}"' in floor.INDEX_HTML)
 
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(WD_ROOT, ignore_errors=True)
