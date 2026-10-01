@@ -460,6 +460,12 @@ same way the deployer closes its own: a small script on a timer, no model, deter
 - **A spawned card re-reads the complaint at the root of its chain**, not only the card that
   filed it, and says which sentence of the root it is serving. When the last card off a root
   closes, the root's own symptom is checked again and the answer is commented on the root.
+- **What a card asks for lands where the person who asked can open it.** The plan's first
+  line says what Steve gets and where; a command on the box is never the deliverable for
+  someone who reads the board on his phone. Two readings that land in different places is
+  the card's real question — ask it before building, not after.
+- **A screen is run before it ships, and looked at in a browser when it is reported
+  broken.** A fetch is not a look: the server answering says nothing about what was drawn.
 - Report the run's quota use, and never call it cost or spend (see "The dollar figure is
   quota, not a bill").
 

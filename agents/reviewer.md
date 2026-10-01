@@ -67,6 +67,18 @@ because nobody looked at what answered. A check pointed at the wrong target is
 **blocking** (wrong runtime behavior). If you cannot reach it from where you run, say so
 and report the finding as plausible, never as verified.
 
+**A change to a screen is run, not read.** When the diff changes what a person sees — a
+page, a template, the script a page runs — that code only ever executes in a browser, so
+a test that reads the source says nothing about whether it works. Run the project's
+browser check or screenshot script (its `CLAUDE.md` names it) and look at what comes back.
+**Blocking**, as wrong runtime behavior nobody has ruled out, when: the script fails; the
+branch changed a screen and neither it nor you ever rendered it; or the project has no way
+to render that screen at all and the branch did not add one. "Works in practice" about a
+click, a layout or a script you only read is a guess — say plausible, never confirmed.
+([roloc/watcher#70](https://github.com/roloc/watcher/pull/70), October 1, 2026: a page
+whose `<script>` block did not parse passed this review with three nits fixed, and shipped
+drawing nothing.)
+
 Then the project's own standing traps, which its `CLAUDE.md` lists.
 
 ## Output
