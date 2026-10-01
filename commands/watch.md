@@ -431,8 +431,11 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     entries in a list of mockups, two sections at the end of a doc, two test cases — not
     two versions of one thing. Resolve it yourself: the base text, then main's addition,
     then yours; delete the markers; commit the merge; push; wait for CI; merge. Leave one
-    comment on the PR: `🤖 FYI: merged main; kept both sides of an additive conflict in
-    <file>.` If CI is red on the merge commit, that is **Stuck** (§4), not a second try.
+    comment **on the PR, not on the card** — `gh pr comment <pr> --body "🤖 FYI: merged
+    main; kept both sides of an additive conflict in <file>."` It is a note about the
+    merge, for whoever reads the PR later; the card is where Steve reads, and it needs
+    nothing from him. If CI is red on the merge commit, that is **Stuck** (§4), not a
+    second try.
   - **Anything else** — a side rewrote or deleted lines the other side kept or changed
     differently, the same entry written two ways, a rename against an edit, or you are not
     sure — `git merge --abort` and go to **Stuck** (§4) with the conflicting files and
