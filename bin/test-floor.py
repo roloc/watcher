@@ -663,7 +663,7 @@ for name in ("card-12-20260901T000000Z.json", "card-77-20260930T120000Z.json",
              "card-9-20260915T000000Z.json", "card-77-20260930T120000Z.stderr", "notes.txt"):
     open(os.path.join(TS_STATE, "logs", name), "w").close()
 check("the last card is the newest log by its stamp, not by its number or its name's sort order",
-      floor._last_card(TS_STATE) == 77, floor._last_card(TS_STATE))
+      floor._last_tick(TS_STATE)[0] == 77, floor._last_tick(TS_STATE))
 r6 = floor.tail_status(ts_info, TS_CLAUDE)
 check("idle with a tick on file: that card's session, replayed",
       r6["status"] == "ok" and r6["card"] == 77
@@ -671,6 +671,26 @@ check("idle with a tick on file: that card's session, replayed",
 check("...and marked not live, so the page can say it is the last session", r6["live"] is False)
 r7 = floor.tail_status(ts_info, TS_CLAUDE, card=r6["card"], file=r6["file"], pos=r6["pos"])
 check("polling it again is a drain, not a re-replay", r7["lines"] == [] and r7["reset"] is False)
+# A project's lanes share one worktree per card, so the card's folder can hold a LATER
+# session that another lane wrote. This lane's last session is the one that ended when its
+# own tick did, not whichever file is newest (review finding on #73).
+ended77 = os.path.getmtime(os.path.join(TS_STATE, "logs", "card-77-20260930T120000Z.json"))
+os.utime(ts_transcript, (ended77 - 4, ended77 - 4))
+other_lane = os.path.join(ts_session_dir, "session-2-other-lane.jsonl")
+with open(other_lane, "w") as f:
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"another lane, later"}]}}\n')
+os.utime(other_lane, (ended77 + 3600, ended77 + 3600))
+r9 = floor.tail_status(ts_info, TS_CLAUDE)
+check("another lane's later session on the same card is not shown as this lane's last",
+      r9["file"] == "session-1.jsonl" and "another lane, later" not in r9["lines"], r9)
+os.utime(ts_transcript, (ended77 - 7200, ended77 - 7200))
+check("no session that ended when the tick did (pruned): idle, not somebody else's",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
+with open(os.path.join(TS_STATE, "current"), "w") as f:
+    f.write("77\n")
+check("while the lane is working, the newest file IS its session",
+      floor.tail_status(ts_info, TS_CLAUDE)["file"] == "session-2-other-lane.jsonl")
+os.remove(os.path.join(TS_STATE, "current"))
 open(os.path.join(TS_STATE, "logs", "card-500-20261001T000000Z.json"), "w").close()
 check("a last card whose transcript is gone (the CLI prunes them): idle, never 'waiting'",
       floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})

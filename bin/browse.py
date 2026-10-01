@@ -186,6 +186,7 @@ class Browser:
                 self._proc.wait(timeout=5)
             except (OSError, subprocess.TimeoutExpired):
                 self._proc.kill()
+                self._proc.wait()
             self._proc = None
         shutil.rmtree(self._profile, ignore_errors=True)
         return False
@@ -235,7 +236,10 @@ class Browser:
         msg = {"id": self._id, "method": method, "params": params or {}}
         if session == "tab":
             msg["sessionId"] = self._session
-        os.write(self._w, json.dumps(msg).encode() + b"\0")
+        try:
+            os.write(self._w, json.dumps(msg).encode() + b"\0")
+        except OSError:
+            raise BrowseError(f"browse.py: the browser is gone (is {self.binary} a working Chrome?)")
         deadline = time.time() + self.timeout
         while True:
             got = self._read_message(deadline)
@@ -248,8 +252,17 @@ class Browser:
     def pump(self, seconds):
         """Let the page run for `seconds`, collecting whatever it reports meanwhile."""
         end = time.time() + seconds
-        while time.time() < end:
-            ready, _, _ = select.select([self._r], [], [], max(end - time.time(), 0))
+        while True:
+            # Everything already read first: one read can bring several messages, and the
+            # ones behind the first sit in the buffer, where select() cannot see them. Left
+            # there, an exception the page threw is still unread when the caller looks at
+            # `errors` — a broken page reported as clean.
+            while b"\0" in self._buf:
+                self._on_event(self._read_message(time.time() + self.timeout))
+            left = end - time.time()
+            if left <= 0:
+                return
+            ready, _, _ = select.select([self._r], [], [], left)
             if ready:
                 self._on_event(self._read_message(time.time() + self.timeout))
 

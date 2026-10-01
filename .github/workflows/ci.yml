@@ -4,7 +4,8 @@ name: CI
 # spawn.sh" since the suite existed, and nothing checked that anyone did: this repo had no
 # workflow at all, so every PR merged on the author's word that the cases still passed.
 #
-# `verify` runs the two offline suites and a syntax pass. They need no network, no secrets
+# `verify` runs the offline suites and a syntax pass. They need no network (one exception:
+# the floor page's browser step fetches a browser if the runner has none), no secrets
 # and no services — `bin/test-spawn.sh` stubs every external command (claude, gh, board.py,
 # worktree.sh) and `bin/test-notify.py` never opens a socket — so this job can run anywhere
 # and must be given nothing.

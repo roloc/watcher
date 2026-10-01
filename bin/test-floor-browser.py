@@ -11,7 +11,8 @@ browser, and until October 1, 2026 nothing ever ran it. Every check was a string
 in the Python source. #70 shipped a `<script>` block that did not parse — the page loaded
 its frame and nothing else — with 115 of those checks green and a review passed; the fix
 (#72) shipped a Peek button that only exists while a lane is working, so on a quiet floor
-there was still nothing to see. Case 9 below serves #70's exact page and fails on it.
+there was still nothing to see. Case 9 below puts #70's bug back into today's page and
+fails on it.
 
 `--shots` is the picture `commands/watch.md` asks for on any change to a screen ("a change
 to a screen ships with its picture"): run it, `Read` the PNGs, say what they show.
@@ -293,7 +294,7 @@ try:
               and b.eval(PANEL_SUB) == "idle — its last session, #3", b.eval(PANEL_SUB))
         b.key("Escape")
         b.click(peek_button("alpha-triage"))
-        check("a lane that has never worked a card says there is nothing yet, in words",
+        check("a lane with no session on file says there is nothing yet, in words",
               b.wait_for(PANEL_TEXT + ".includes('Nothing to show yet')"), b.eval(PANEL_TEXT))
         b.key("Escape")
         check("still no errors after all of that", b.errors == [], b.errors)

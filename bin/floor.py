@@ -451,20 +451,55 @@ PEEK_REPLAY_LINES = 100  # a first look's worth of history; the panel scrolls
 _LOG_NAME = re.compile(r"^card-(\d+)-(\d{8}T\d{6}Z)\.json$")
 
 
-def _last_card(state_dir):
-    """The card of this lane's newest tick log, or None — from the file names alone
-    (`card-<n>-<UTC stamp>.json`, the stamp sorts as text), never by parsing a log: this
-    runs on every poll of an open Peek panel on a lane that is not working."""
+# How far a session file's last write may sit from the end of the tick that wrote it. The
+# tick's result lands in its log as the process exits, seconds after the session's last
+# line; this is slack for a slow exit, not a search window.
+LAST_SESSION_SLACK_SEC = 900
+
+
+def _last_tick(state_dir):
+    """(card, when it ended) for this lane's newest tick log, or None — from the file names
+    (`card-<n>-<UTC stamp>.json`, the stamp sorts as text) and one stat, never by parsing a
+    log: this runs on every poll of an open Peek panel on a lane that is not working."""
     newest = None
+    logs = os.path.join(state_dir, "logs")
     try:
-        names = os.listdir(os.path.join(state_dir, "logs"))
+        names = os.listdir(logs)
     except OSError:
         return None
     for name in names:
         m = _LOG_NAME.match(name)
         if m and (newest is None or m.group(2) > newest[0]):
-            newest = (m.group(2), int(m.group(1)))
-    return newest[1] if newest else None
+            newest = (m.group(2), int(m.group(1)), name)
+    if newest is None:
+        return None
+    try:
+        return newest[1], os.path.getmtime(os.path.join(logs, newest[2]))
+    except OSError:
+        return None
+
+
+def _session_ended_near(session_dir, when):
+    """The session file in `session_dir` last written closest to `when`, within
+    `LAST_SESSION_SLACK_SEC` — or None. `tail.newest_jsonl` is right for a lane that is
+    working (its session is the one being written), and wrong for "this lane's last tick":
+    a project's lanes share one worktree per card, and a triage lane runs every tick in
+    the project root, so the newest file in the folder can be another lane's later session
+    on the same card, shown under this lane's name."""
+    best = None
+    try:
+        names = [n for n in os.listdir(session_dir) if n.endswith(".jsonl")]
+    except OSError:
+        return None
+    for name in names:
+        path = os.path.join(session_dir, name)
+        try:
+            gap = abs(os.path.getmtime(path) - when)
+        except OSError:
+            continue  # pruned between the listing and the stat
+        if gap <= LAST_SESSION_SLACK_SEC and (best is None or gap < best[0]):
+            best = (gap, path)
+    return best[1] if best else None
 
 
 def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
@@ -488,7 +523,8 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     (a `drain`) instead of a full `replay` every poll.
 
     Returns one of:
-      {"status": "idle"}                       - not working, and no earlier session to show
+      {"status": "idle"}                       - not working, and no session of its last
+                                                 tick on file (never ran, or pruned since)
       {"status": "waiting", "card": <n>}       - working, its session not written yet
       {"status": "ok", "card": <n>, "live": bool, "file": <name>, "pos": <n>,
        "lines": [...], "reset": bool}
@@ -498,14 +534,16 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     # cursor's int below and force a full replay on every single poll.
     n = _read_current(os.path.join(info["state_dir"], "current"))
     live = n is not None
+    ended = None
     if not live:
-        n = _last_card(info["state_dir"])
-        if n is None:
+        last = _last_tick(info["state_dir"])
+        if last is None:
             return {"status": "idle"}
+        n, ended = last
     session_dir = os.path.join(
         claude_projects_dir,
         tail.encode_dir(tail.card_dir(n, info["workdir_mode"], info["worktree_base"])))
-    f = tail.newest_jsonl(session_dir)
+    f = tail.newest_jsonl(session_dir) if live else _session_ended_near(session_dir, ended)
     if f is None:
         # The CLI prunes old transcripts on its own schedule, so a lane's last session can
         # be gone: that is "nothing to show", not a session about to appear.
@@ -1039,7 +1077,7 @@ async function pollPeek() {
     return;
   }
   if (peekLane !== lane) return; // closed, or switched to another lane, mid-fetch
-  if (data.status === "idle") { peekStatus("idle", "Nothing to show yet: this lane has not worked a card."); return; }
+  if (data.status === "idle") { peekStatus("idle", "Nothing to show yet: no session on file for this lane."); return; }
   if (data.status === "waiting") { peekStatus(`starting #${data.card}`, "The session has not written anything yet."); return; }
   peekSub(data.live ? `working on #${data.card} — live` : `idle — its last session, #${data.card}`, data.live);
   const pre = document.getElementById("peek-lines");
