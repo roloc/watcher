@@ -50,6 +50,7 @@ checks of the other suite green. Run both after touching this file.
 import glob
 import json
 import os
+import calendar
 import re
 import socket
 import subprocess
@@ -458,9 +459,13 @@ LAST_SESSION_SLACK_SEC = 900
 
 
 def _last_tick(state_dir):
-    """(card, when it ended) for this lane's newest tick log, or None — from the file names
-    (`card-<n>-<UTC stamp>.json`, the stamp sorts as text) and one stat, never by parsing a
-    log: this runs on every poll of an open Peek panel on a lane that is not working."""
+    """(card, when it ended, when it started if it died) for this lane's newest tick log,
+    or None — from the file names (`card-<n>-<UTC stamp>.json`, the stamp sorts as text)
+    and one stat, never by parsing a log: this runs on every poll of an open Peek panel on
+    a lane that is not working. A tick that was killed never wrote its result: its log is
+    empty and still carries the time it was created, which is the launch, not the end —
+    so for that one the third value is the launch time and the caller looks forward from
+    it; for a tick that finished it is None."""
     newest = None
     logs = os.path.join(state_dir, "logs")
     try:
@@ -474,14 +479,19 @@ def _last_tick(state_dir):
     if newest is None:
         return None
     try:
-        return newest[1], os.path.getmtime(os.path.join(logs, newest[2]))
+        st = os.stat(os.path.join(logs, newest[2]))
     except OSError:
         return None
+    launched = None
+    if st.st_size == 0:
+        launched = calendar.timegm(time.strptime(newest[0], "%Y%m%dT%H%M%SZ"))
+    return newest[1], st.st_mtime, launched
 
 
-def _session_ended_near(session_dir, when):
+def _session_ended_near(session_dir, when, launched=None):
     """The session file in `session_dir` last written closest to `when`, within
-    `LAST_SESSION_SLACK_SEC` — or None. `tail.newest_jsonl` is right for a lane that is
+    `LAST_SESSION_SLACK_SEC` — or None. With `launched` (a tick that died, so `when` is
+    not its end): the first session to end after that launch instead. `tail.newest_jsonl` is right for a lane that is
     working (its session is the one being written), and wrong for "this lane's last tick":
     a project's lanes share one worktree per card, and a triage lane runs every tick in
     the project root, so the newest file in the folder can be another lane's later session
@@ -494,10 +504,18 @@ def _session_ended_near(session_dir, when):
     for name in names:
         path = os.path.join(session_dir, name)
         try:
-            gap = abs(os.path.getmtime(path) - when)
+            mtime = os.path.getmtime(path)
         except OSError:
             continue  # pruned between the listing and the stat
-        if gap <= LAST_SESSION_SLACK_SEC and (best is None or gap < best[0]):
+        if launched is not None:
+            if mtime < launched:
+                continue
+            gap = mtime - launched
+        else:
+            gap = abs(mtime - when)
+            if gap > LAST_SESSION_SLACK_SEC:
+                continue
+        if best is None or gap < best[0]:
             best = (gap, path)
     return best[1] if best else None
 
@@ -534,16 +552,17 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     # cursor's int below and force a full replay on every single poll.
     n = _read_current(os.path.join(info["state_dir"], "current"))
     live = n is not None
-    ended = None
+    ended = launched = None
     if not live:
         last = _last_tick(info["state_dir"])
         if last is None:
             return {"status": "idle"}
-        n, ended = last
+        n, ended, launched = last
     session_dir = os.path.join(
         claude_projects_dir,
         tail.encode_dir(tail.card_dir(n, info["workdir_mode"], info["worktree_base"])))
-    f = tail.newest_jsonl(session_dir) if live else _session_ended_near(session_dir, ended)
+    f = (tail.newest_jsonl(session_dir) if live
+         else _session_ended_near(session_dir, ended, launched))
     if f is None:
         # The CLI prunes old transcripts on its own schedule, so a lane's last session can
         # be gone: that is "nothing to show", not a session about to appear.

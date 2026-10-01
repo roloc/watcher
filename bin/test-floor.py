@@ -661,7 +661,8 @@ check("no tick log yet: still idle, nothing to show",
       floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
 for name in ("card-12-20260901T000000Z.json", "card-77-20260930T120000Z.json",
              "card-9-20260915T000000Z.json", "card-77-20260930T120000Z.stderr", "notes.txt"):
-    open(os.path.join(TS_STATE, "logs", name), "w").close()
+    with open(os.path.join(TS_STATE, "logs", name), "w") as f:
+        f.write('{"subtype": "success"}')  # a finished tick wrote its result; a killed one did not
 check("the last card is the newest log by its stamp, not by its number or its name's sort order",
       floor._last_tick(TS_STATE)[0] == 77, floor._last_tick(TS_STATE))
 r6 = floor.tail_status(ts_info, TS_CLAUDE)
@@ -691,7 +692,26 @@ with open(os.path.join(TS_STATE, "current"), "w") as f:
 check("while the lane is working, the newest file IS its session",
       floor.tail_status(ts_info, TS_CLAUDE)["file"] == "session-2-other-lane.jsonl")
 os.remove(os.path.join(TS_STATE, "current"))
-open(os.path.join(TS_STATE, "logs", "card-500-20261001T000000Z.json"), "w").close()
+# A tick that was killed (the watchdog, a restart) never wrote its result: the log is empty
+# and its mtime is the launch, not the end. Its session is the first one to end after that
+# launch — however long the tick ran (review finding on #73, second round).
+import calendar, time as _time
+killed_log = os.path.join(TS_STATE, "logs", "card-77-20260930T130000Z.json")
+open(killed_log, "w").close()
+launch = calendar.timegm(_time.strptime("20260930T130000Z", "%Y%m%dT%H%M%SZ"))
+os.utime(killed_log, (launch, launch))
+os.utime(ts_transcript, (launch - 60, launch - 60))            # an earlier run of the card
+killed_session = os.path.join(ts_session_dir, "session-killed.jsonl")
+with open(killed_session, "w") as f:
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"killed mid-build"}]}}\n')
+os.utime(killed_session, (launch + 5400, launch + 5400))       # ran ninety minutes
+os.utime(other_lane, (launch + 9000, launch + 9000))           # another lane, later still
+r10 = floor.tail_status(ts_info, TS_CLAUDE)
+check("a killed tick's session is found from its launch, however long it ran",
+      r10.get("file") == "session-killed.jsonl" and r10["lines"] == ["killed mid-build"], r10)
+os.remove(killed_log)
+with open(os.path.join(TS_STATE, "logs", "card-500-20261001T000000Z.json"), "w") as f:
+    f.write('{"subtype": "success"}')
 check("a last card whose transcript is gone (the CLI prunes them): idle, never 'waiting'",
       floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
 long_dir = os.path.join(TS_CLAUDE, tail.encode_dir(os.path.join(ts_info["worktree_base"], "card-500")))
