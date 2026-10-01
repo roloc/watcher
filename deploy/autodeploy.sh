@@ -74,6 +74,8 @@ CANARY_QUIET_MIN="${DEPLOY_CANARY_QUIET_MIN:-240}"
 # cannot read the journal. Best-effort — a write that fails must never fail a deploy — and
 # trimmed, so it cannot grow without bound.
 HISTORY_KEEP="${DEPLOY_HISTORY_LINES:-200}"
+# Not a number would abort the first `say`, and with it the deploy: fall back, never fail.
+case "$HISTORY_KEEP" in ''|*[!0-9]*) HISTORY_KEEP=200 ;; esac
 say() {
   local now h="$DSTATE/history"
   now="$(date -u +%FT%TZ)"

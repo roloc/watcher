@@ -931,6 +931,18 @@ two = [wrun("f", "Two workflows", jobs=[job("verify", [])]),
 check("two workflows on the newest commit: both listed, the worse one decides",
       floor.ship_lines(two, NOW24)["sub"] == "CI on main: failing — publish"
       and sum(l.startswith(("✓ CI", "✗ Design preview")) for l in floor.ship_lines(two, NOW24)["lines"]) == 2)
+nostart = [wrun("9", "No start time", started=None, jobs=[job("verify", [])])]
+n24 = floor.ship_lines(nostart, NOW24)
+check("a run with no start time leaves no dangling 'started' or 'passed'",
+      n24["sub"] == "CI on main: passed" and "✓ CI" in n24["lines"], n24)
+got_t = []
+def title_get(path):
+    if "/jobs" in path:
+        return {"jobs": []}
+    return {"workflow_runs": [{"id": 1, "name": "CI", "head_sha": "a" * 40, "status": "completed",
+                               "conclusion": "success", "display_title": "one\ntwo\n  three"}]}
+check("a title is flattened to one line, so it cannot add lines to the panel",
+      floor.fetch_ci_runs("r/w", get=title_get)[0]["title"] == "one two three")
 check("CI that could not be reached says so in words, no crash",
       floor.ship_lines(None, NOW24)["lines"] == ["CI could not be reached right now."])
 check("a repo with no runs yet says so", floor.ship_lines([], NOW24)["sub"] == "no CI runs on main yet")

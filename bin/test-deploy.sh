@@ -446,6 +446,9 @@ run
 chmod 644 "$H"
 check "history: a file it cannot write never stops a deploy"          [ "$(head_)" = "$T3" ]
 check "history: ...and adds no noise of its own to the journal"       out_lacks "ermission denied"
+T4="$(commit bin/spawn.sh history-4)"
+DEPLOY_HISTORY_LINES=10x run
+check "history: a cap that is not a number never stops a deploy either" [ "$(head_)" = "$T4" ]
 
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi

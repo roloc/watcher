@@ -606,8 +606,9 @@ def fetch_ci_runs(repo, branch="main", n=SHIP_RUNS, get=_gh_api):
     the ones on the newest commit — the commit the ship station's pill is about. Two or
     three REST calls. Raises on any failure."""
     raw = get(f"repos/{repo}/actions/runs?branch={branch}&event=push&per_page={n}")
+    # A title is one line here, whatever it was: the panel puts each list entry on a line.
     runs = [{"id": r.get("id"), "name": r.get("name") or "", "sha": r.get("head_sha") or "",
-             "title": r.get("display_title") or "", "status": r.get("status") or "",
+             "title": " ".join((r.get("display_title") or "").split()), "status": r.get("status") or "",
              "conclusion": r.get("conclusion"), "started": r.get("run_started_at") or r.get("created_at"),
              "updated": r.get("updated_at")}
             for r in raw.get("workflow_runs", [])]
@@ -720,12 +721,14 @@ def ship_lines(runs, now, deploy=None, history=None, has_deployer=False):
         failing = [j["name"] for r in newest for j in r.get("jobs", [])
                    if _mark(j["status"], j["conclusion"]) == "✗"]
         live = overall == "…"
-        sub = {"✓": f"CI on main: passed {ago}", "…": "CI on main: running now",
+        sub = {"✓": f"CI on main: passed {ago}".rstrip(), "…": "CI on main: running now",
                "✗": "CI on main: failing — " + (", ".join(failing[:3]) or "see below"),
-               "–": f"CI on main: nothing ran {ago}"}[overall]
+               "–": f"CI on main: nothing ran {ago}".rstrip()}[overall]
         lines.append(f"{newest[0]['sha'][:7]}  {newest[0]['title'][:90]}")
         for r in newest:
-            lines.append(f"{_mark(r['status'], r['conclusion'])} {r['name']} · started {ago}")
+            began = _ago(_when(r["started"]), now)
+            lines.append(f"{_mark(r['status'], r['conclusion'])} {r['name']}"
+                         + (f" · started {began}" if began else ""))
             for j in r.get("jobs", []):
                 jm = _mark(j["status"], j["conclusion"])
                 if jm == "–":
