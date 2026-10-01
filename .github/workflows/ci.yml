@@ -68,5 +68,21 @@ jobs:
       - name: The floor page suite
         run: python3 bin/test-floor.py
 
+      # The floor page is a program that runs in a browser, and until October 1, 2026 no
+      # step here ever ran it: "The floor page suite" above checks the Python that builds
+      # the page's data, and looks for strings in the page's source. #70 merged a page
+      # whose script did not parse, with that suite green. This step loads the page in
+      # headless Chrome and clicks it. It needs a browser binary: the ci box has one in
+      # the runner's Playwright cache (riffmap's CI puts it there) and a GitHub-hosted
+      # runner has Chrome on the PATH; if neither is there, fetch one rather than skip —
+      # a check that skips when its tool is missing is a check nobody decided to remove.
+      - name: A browser for the floor page
+        run: |
+          python3 -c "import sys; sys.path.insert(0, 'bin'); import browse; b = browse.find_browser(); print(b or 'none found'); sys.exit(0 if b else 1)" \
+            || npx --yes playwright install chromium-headless-shell
+
+      - name: The floor page, in a real browser
+        run: python3 bin/test-floor-browser.py
+
       - name: The lane-tail suite
         run: bash bin/test-tail.sh

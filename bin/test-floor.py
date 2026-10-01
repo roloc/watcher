@@ -547,7 +547,7 @@ check("a CI fetch that fails shows unknown, and its error text never reaches the
 print("18. every clickable link opens in a new tab (card #62)")
 for snippet in (
     '<a class="desk ship" href="${esc(st.link)}" target="_blank" rel="noopener">',
-    '<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}" target="_blank" rel="noopener">',
+    '<a class="desk-link" href="${esc(d.link)}" target="_blank" rel="noopener">',
     '<h2><a href="${esc(p.board_url)}" target="_blank" rel="noopener">${esc(p.name)}</a></h2>',
     '<td><a href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}</a></td>',
 ):
@@ -612,7 +612,7 @@ os.makedirs(TS_CLAUDE)
 ts_info = {"state_dir": TS_STATE, "workdir_mode": "card",
            "worktree_base": os.path.join(TS_ROOT, "repo-worktrees")}
 
-check("no current card at all: idle",
+check("no current card, and no tick ever logged: idle, nothing to show",
       floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
 
 with open(os.path.join(TS_STATE, "current"), "w") as f:
@@ -633,6 +633,7 @@ check("first look: status ok, a fresh replay", r1["status"] == "ok" and r1["rese
 check("first look: both lines decoded, in order", r1["lines"] == ["line one", "line two"], r1["lines"])
 check("first look: names the card and the session file",
       r1["card"] == 77 and r1["file"] == "session-1.jsonl")
+check("first look: a lane holding a card is live", r1["live"] is True)
 
 r2 = floor.tail_status(ts_info, TS_CLAUDE, card=r1["card"], file=r1["file"], pos=r1["pos"])
 check("same card, same file, same pos: nothing new, not a re-replay",
@@ -652,6 +653,36 @@ r5 = floor.tail_status(ts_info, TS_CLAUDE, card=r3["card"], file=r3["file"], pos
 check("a negative pos (a malformed request, never one this endpoint produces itself): "
       "replays instead of crashing on fh.seek()",
       r5["status"] == "ok" and r5["reset"] is True and r5["lines"] == ["line one", "line two", "line three"])
+
+print("20b. a lane that is not working shows its LAST session (card #63: no Peek on a quiet floor)")
+os.remove(os.path.join(TS_STATE, "current"))
+os.makedirs(os.path.join(TS_STATE, "logs"))
+check("no tick log yet: still idle, nothing to show",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
+for name in ("card-12-20260901T000000Z.json", "card-77-20260930T120000Z.json",
+             "card-9-20260915T000000Z.json", "card-77-20260930T120000Z.stderr", "notes.txt"):
+    open(os.path.join(TS_STATE, "logs", name), "w").close()
+check("the last card is the newest log by its stamp, not by its number or its name's sort order",
+      floor._last_card(TS_STATE) == 77, floor._last_card(TS_STATE))
+r6 = floor.tail_status(ts_info, TS_CLAUDE)
+check("idle with a tick on file: that card's session, replayed",
+      r6["status"] == "ok" and r6["card"] == 77
+      and r6["lines"] == ["line one", "line two", "line three"], r6)
+check("...and marked not live, so the page can say it is the last session", r6["live"] is False)
+r7 = floor.tail_status(ts_info, TS_CLAUDE, card=r6["card"], file=r6["file"], pos=r6["pos"])
+check("polling it again is a drain, not a re-replay", r7["lines"] == [] and r7["reset"] is False)
+open(os.path.join(TS_STATE, "logs", "card-500-20261001T000000Z.json"), "w").close()
+check("a last card whose transcript is gone (the CLI prunes them): idle, never 'waiting'",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
+long_dir = os.path.join(TS_CLAUDE, tail.encode_dir(os.path.join(ts_info["worktree_base"], "card-500")))
+os.makedirs(long_dir)
+with open(os.path.join(long_dir, "s.jsonl"), "w") as f:
+    for i in range(floor.PEEK_REPLAY_LINES + 30):
+        f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"n%d"}]}}\n' % i)
+r8 = floor.tail_status(ts_info, TS_CLAUDE)
+check("a first look is capped at PEEK_REPLAY_LINES, the newest ones",
+      len(r8["lines"]) == floor.PEEK_REPLAY_LINES
+      and r8["lines"][-1] == "n%d" % (floor.PEEK_REPLAY_LINES + 29), len(r8["lines"]))
 
 print("21. the HTTP server: /api/tail.json, wired to a lane lookup (and refused without one)")
 
@@ -768,9 +799,15 @@ def script_quotes_ok(script):
     return True
 
 
-script22 = floor.INDEX_HTML.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-check("no plain-quoted string in the page's script spills onto a second line",
-      script_quotes_ok(script22))
+# Every <script> block, each checked on its own (the page has a small first one that
+# reports a failure of the main one). `bin/test-floor-browser.py` is the real check — a
+# browser parsing and running the page; this one stays because it runs with no browser.
+scripts22 = re.findall(r"<script[^>]*>(.*?)</script>", floor.INDEX_HTML, re.S)
+script22 = max(scripts22, key=len)
+check("the page has its two script blocks: the error reporter, then the main one",
+      len(scripts22) == 2 and scripts22[1] is script22 and '"script-error"' in scripts22[0])
+check("no plain-quoted string in the page's scripts spills onto a second line",
+      all(script_quotes_ok(sc) for sc in scripts22))
 check("...and the checker itself catches the real bug: a bare newline where \\n belonged",
       not script_quotes_ok(script22.replace(
           'pre.textContent ? "\\n" : ""', 'pre.textContent ? "\n" : ""')))

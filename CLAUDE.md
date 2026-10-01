@@ -32,6 +32,20 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   reached from the floor page instead of the command line — it imports `bin/tail.py`
   directly rather than re-implementing it, so touching either file's decode logic means
   running both `bash bin/test-tail.sh` and `python3 bin/test-floor.py`.
+- `bin/floor.py` — the floor page (`watcher-floor.service`, port 8787): what every lane is
+  doing, and a Peek at each one's session. **It has two suites, and they check different
+  things.** `python3 bin/test-floor.py` checks the Python that builds the page's data.
+  `python3 bin/test-floor-browser.py` loads the page in a real headless browser and clicks
+  it — the only thing that runs the page's own script. Run both after touching the file
+  (CI runs both); a change to what the page shows or does adds its case to the browser
+  suite, never only a string looked for in the source. See "The floor page is a screen"
+  below.
+- `bin/browse.py` — a real browser from the command line, no dependencies beyond a Chrome
+  or Chromium binary (it finds the one in Playwright's cache on the box):
+  `python3 bin/browse.py check <url>` says whether the page's own code or requests failed,
+  `text <url>` prints what a reader sees after the scripts ran, `shot <url> out.png` writes
+  a picture to `Read`. This is how a page is looked at — never `curl`, which returns what
+  the server sent and says nothing about what was drawn.
 - `bin/eval.sh` — the replay suite: real past failures against `commands/watch.md`,
   `commands/triage.md` and `agents/reviewer.md`, each a case under `evals/cases/` run with a
   live `claude -p` against `evals/fakehub.py` (a closed, offline stand-in for `gh` and
@@ -114,11 +128,51 @@ above:
   PR body and the Done comment say, in plain words, that it goes live on its own once the
   lanes are idle, and flag anything that changes how every lane behaves (`commands/`,
   `agents/`, `bin/spawn.sh`).
+- **Steve can open three things: the board, the Discord channel, and the floor page — all
+  from his phone.** He does not ssh. So a card that asks for a way to *see*, *watch*,
+  *check* or *look at* something is asking for it in one of those places — the floor page,
+  unless its words say otherwise — and a command on the box is not an answer to it, however
+  literally the title reads as one. A command is a fine *part* of the work (the floor
+  page's Peek is `bin/tail.py` underneath); it is never the thing he gets. When a card can
+  be built two ways that land in different places, that is the card's real question: build
+  the one he can reach, and say which in the first line of the plan; if you cannot tell,
+  that is one question for Stuck before anything is built, not a guess he finds afterwards.
+  (Card [#63](https://github.com/roloc/watcher/issues/63), September 30, 2026: "a way to
+  tail the log for a lane" shipped as `bin/tail.sh`, a command that needs ssh. He reopened
+  it: "I would like to view these things from the floor page.")
+- **The floor page is a screen: it ships with its picture, and its own code is run before
+  it merges.** `watch.md`'s "a change to a screen ships with its picture" applies to any
+  change to what `bin/floor.py` serves, and this repo's screenshot script is
+  `python3 bin/test-floor-browser.py --shots /tmp/card-<n>-shots`: it loads the page in
+  headless Chrome against a fixture floor, clicks through it, and writes desktop and phone
+  PNGs. `Read` them, and say in the PR in one sentence what they show. The change also adds
+  its own case to that suite — one that does the thing in the browser: opens it, clicks it,
+  reads what appeared. A string found in the page's source is not the page working: #70
+  merged with 115 such checks green and a `<script>` block that did not parse, so the page
+  drew nothing at all.
+- **A symptom on the floor page is reproduced with `bin/browse.py`, never with `curl`.**
+  `python3 bin/browse.py check http://192.168.176.45:8787/` loads the live page the way a
+  browser does and prints every error its own code raised; `shot` gives you the picture.
+  The page draws itself with a script, so `curl` returning 200 and a full document says the
+  service is up and nothing about what Steve saw. A page you only fetched is a page you did
+  not look at, and "it loads fine from here" on the strength of `curl` is not a finding to
+  take to Stuck. (Card [#71](https://github.com/roloc/watcher/issues/71), October 1, 2026:
+  five clean fetches, then a Stuck card asking Steve what he had seen. `check` says it in
+  one line.)
+- **The Done comment says where to look and what is there right now.** Steve's next move
+  after a card closes is to open the thing. So the closing comment names the place — the
+  floor page's link, for anything on it — and says what he will see when he opens it
+  *today*, including when the honest answer is "nothing yet". A feature that only shows in
+  a state the box is not in right now reads as a feature that did not ship; if that is
+  what you are about to write, the design is usually not finished. (Card #63 once more:
+  the Peek button existed only on a desk that was working, the floor was idle, and the
+  closing comment did not say so. He looked, found no button, and came back a third time.)
 - **A watcher card's symptom is re-checked by a test, not live.** The fix is not running
   until the deployer ships it, so `watch.md`'s "a symptom card is not done until its symptom is checked
-  again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, or a replay
-  case in `bin/eval.sh` (card [#34](https://github.com/roloc/watcher/issues/34)) — failing
-  on `main` and passing on the branch. Say which case, in one sentence, in the PR.
+  again" is met by a case that reproduces the symptom — in `bin/test-spawn.sh`, in
+  `bin/test-floor-browser.py` for anything on the floor page, or a replay case in
+  `bin/eval.sh` (card [#34](https://github.com/roloc/watcher/issues/34)) — failing on
+  `main` and passing on the branch. Say which case, in one sentence, in the PR.
 - **Merge your own PR on green and a clean review — including a change to the gate.**
   Steve never merges here, the same as riffmap (September 28, 2026: "I don't want to review
   all of these merges since I am only involved at the card / feature level"). The gate is

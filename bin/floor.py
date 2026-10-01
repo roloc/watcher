@@ -11,10 +11,13 @@ by the board it works, and for each lane shows one of exactly five states — **
 the first line of its ask), **paused** (a `PAUSE` file), or **sleeping** (a died tick,
 inside the spawner's own ten-minute retry sleep — `how-it-works.md`, "step 8"). A "Recent
 ticks" list, across every project, closes the loop: project, lane, card, when, quota. A
-**Peek** button on a working desk opens a live panel, decoded from that lane's own Claude
-Code session transcript the same way `bin/tail.sh` decodes it on the command line (card
+**Peek** button on **every** lane's desk opens a panel decoded from that lane's own Claude
+Code session transcript, the same way `bin/tail.sh` decodes it on the command line (card
 #63: "view these things from the floor page ... what their claude code session looks
-like") — polled only while a human has it open, never while the panel is closed.
+like") — live while the lane is working, its last session when it is not — polled only
+while a human has it open, never while the panel is closed. (Until October 1, 2026 the
+button existed only on a desk that was working at that moment, so on a quiet floor there
+was no sign the feature had shipped at all.)
 
 Where the data comes from (`how-it-works.md`, "State on disk" and "Lanes"):
 - `projects/*.env`, sourced with bash exactly as `spawn.sh` sources them (they use shell
@@ -38,11 +41,16 @@ says exactly what it returns — one short decoded line at a time, the same ones
 would print, never a raw file or a tool's full output.
 
 `bin/test-floor.py` is the offline suite: fixture state directories and a stubbed board,
-no network, no real systemd. Run it after touching this file.
+no network, no real systemd. It checks the Python. **`bin/test-floor-browser.py` checks
+the page**: it loads `INDEX_HTML` in a real headless browser and clicks it. Everything
+below `INDEX_HTML = ` is a program that only ever runs in a browser, so that suite is the
+only one that runs it — #70 shipped a `<script>` block that did not parse, with all 115
+checks of the other suite green. Run both after touching this file.
 """
 import glob
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -437,16 +445,42 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             "reason": _idle_reason(lane, items_by_number, last_tick)}
 
 
-# --- Peek: one lane's live session, decoded on demand -------------------------------------
+# --- Peek: one lane's session, decoded on demand -------------------------------------------
+
+PEEK_REPLAY_LINES = 100  # a first look's worth of history; the panel scrolls
+_LOG_NAME = re.compile(r"^card-(\d+)-(\d{8}T\d{6}Z)\.json$")
+
+
+def _last_card(state_dir):
+    """The card of this lane's newest tick log, or None — from the file names alone
+    (`card-<n>-<UTC stamp>.json`, the stamp sorts as text), never by parsing a log: this
+    runs on every poll of an open Peek panel on a lane that is not working."""
+    newest = None
+    try:
+        names = os.listdir(os.path.join(state_dir, "logs"))
+    except OSError:
+        return None
+    for name in names:
+        m = _LOG_NAME.match(name)
+        if m and (newest is None or m.group(2) > newest[0]):
+            newest = (m.group(2), int(m.group(1)))
+    return newest[1] if newest else None
+
 
 def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     """One step of `bin/tail.py`'s own decode, for the floor page's Peek panel: given a
     lane's resolved layout (`state_dir`, `workdir_mode`, `worktree_base` — the fields
-    `discover_lanes` already computes for every lane), say what its live session shows
-    right now. The same decode `tail.py` uses and nothing more: never a raw transcript
-    line, a tool's full output, or any path beyond the session file's own basename
-    (`tail.py`'s `describe_tool_use` already caps what it returns at ~200 characters —
-    this hands that back unchanged, not a second, looser copy of the same limit).
+    `discover_lanes` already computes for every lane), say what its session shows. The
+    same decode `tail.py` uses and nothing more: never a raw transcript line, a tool's
+    full output, or any path beyond the session file's own basename (`tail.py`'s
+    `describe_tool_use` already caps what it returns at ~200 characters — this hands that
+    back unchanged, not a second, looser copy of the same limit).
+
+    A lane holding a card is `live`. A lane that is not — idle, paused, waiting on Steve —
+    shows the session of its **last** tick instead, `live: false`: a desk with nobody at it
+    still has something worth peeking at, and a button that only exists while a lane is
+    working reads, the rest of the time, as a feature that never shipped (card #63, third
+    visit).
 
     `card`/`file`/`pos` are the caller's last-seen cursor — `None` on a fresh Peek, or
     whenever the card or the session file it names has moved on since. Passing them back
@@ -454,22 +488,28 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     (a `drain`) instead of a full `replay` every poll.
 
     Returns one of:
-      {"status": "idle"}
-      {"status": "waiting", "card": <n>}
-      {"status": "ok", "card": <n>, "file": <name>, "pos": <n>, "lines": [...], "reset": bool}
+      {"status": "idle"}                       - not working, and no earlier session to show
+      {"status": "waiting", "card": <n>}       - working, its session not written yet
+      {"status": "ok", "card": <n>, "live": bool, "file": <name>, "pos": <n>,
+       "lines": [...], "reset": bool}
     """
     # `_read_current` (above), not `tail.read_current` — this file's own helper returns an
     # int or None; `tail.py`'s returns the raw string, which would never equal the `card`
     # cursor's int below and force a full replay on every single poll.
     n = _read_current(os.path.join(info["state_dir"], "current"))
-    if n is None:
-        return {"status": "idle"}
+    live = n is not None
+    if not live:
+        n = _last_card(info["state_dir"])
+        if n is None:
+            return {"status": "idle"}
     session_dir = os.path.join(
         claude_projects_dir,
         tail.encode_dir(tail.card_dir(n, info["workdir_mode"], info["worktree_base"])))
     f = tail.newest_jsonl(session_dir)
     if f is None:
-        return {"status": "waiting", "card": n}
+        # The CLI prunes old transcripts on its own schedule, so a lane's last session can
+        # be gone: that is "nothing to show", not a session about to appear.
+        return {"status": "waiting", "card": n} if live else {"status": "idle"}
     fname = os.path.basename(f)
     # A negative pos (never produced by this endpoint itself, but a client can send
     # anything) would reach `fh.seek()` and raise — treat it the same as "no cursor yet"
@@ -477,11 +517,11 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     if pos is not None and pos < 0:
         pos = None
     if card != n or file != fname or pos is None:
-        lines, new_pos = tail.replay_lines(f)
-        return {"status": "ok", "card": n, "file": fname, "pos": new_pos,
+        lines, new_pos = tail.replay_lines(f, PEEK_REPLAY_LINES)
+        return {"status": "ok", "card": n, "live": live, "file": fname, "pos": new_pos,
                 "lines": lines, "reset": True}
     lines, new_pos = tail.read_new_lines(f, pos)
-    return {"status": "ok", "card": n, "file": fname, "pos": new_pos,
+    return {"status": "ok", "card": n, "live": live, "file": fname, "pos": new_pos,
             "lines": lines, "reset": False}
 
 
@@ -637,6 +677,10 @@ INDEX_HTML = """<!doctype html>
     border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 180px;
     flex: 1 1 200px; text-decoration: none; color: inherit; display: block;
   }
+  /* A lane's desk is a box holding a link (the picture and the words, to the card or the
+     board) and, beside it, the Peek button. The button is never inside the link: a
+     button in an anchor is a click that some browsers also follow. */
+  .desk-link { display: block; text-decoration: none; color: inherit; }
   .desk .name { font-weight: 600; }
   .desk .unit { color: var(--dim); font-size: 12px; }
   .pill {
@@ -687,7 +731,7 @@ INDEX_HTML = """<!doctype html>
   a { color: inherit; }
   /* Peek: a lane's live session, decoded the same way bin/tail.sh prints it. */
   .peek-btn {
-    margin-top: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px;
+    margin-top: 8px; font-size: 13px; font-weight: 600; padding: 6px 14px;
     border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
     color: var(--ink); cursor: pointer;
   }
@@ -706,6 +750,8 @@ INDEX_HTML = """<!doctype html>
     display: flex; justify-content: space-between; align-items: center;
   }
   #peek-panel .peek-head strong { font-size: 14px; }
+  #peek-sub { font-size: 13px; color: var(--dim); }
+  #peek-sub.live { color: var(--working); font-weight: 600; }
   #peek-close {
     background: none; border: none; color: var(--dim); font-size: 20px; line-height: 1;
     cursor: pointer; padding: 0 4px;
@@ -723,6 +769,19 @@ INDEX_HTML = """<!doctype html>
   <div class="muted" id="clock"></div>
 </header>
 <div class="alert" id="load-error" style="display:none">Can't reach the floor's own data right now — retrying&hellip;</div>
+<div class="alert" id="script-error" style="display:none">This page's own code hit an error, so what is below may be empty or out of date. If a reload does not clear this line, the page is broken and needs a card.</div>
+<script>
+// A block of its own, first, and as small as it can be: if the page's main script below
+// fails — even fails to parse, which stops every line of it — this still runs and says so.
+// Card #71: the main script did not parse, and the page sat there blank with nothing to
+// say why.
+window.addEventListener("error", function () {
+  document.getElementById("script-error").style.display = "block";
+});
+window.addEventListener("unhandledrejection", function () {
+  document.getElementById("script-error").style.display = "block";
+});
+</script>
 <div id="projects"></div>
 <section class="project">
   <h2>Recent ticks</h2>
@@ -731,13 +790,13 @@ INDEX_HTML = """<!doctype html>
 <div id="peek-overlay">
   <div id="peek-panel">
     <div class="peek-head">
-      <strong id="peek-title"></strong>
+      <div><strong id="peek-title"></strong> <span id="peek-sub"></span></div>
       <button id="peek-close" aria-label="Close">&times;</button>
     </div>
     <pre id="peek-lines"></pre>
   </div>
 </div>
-<script>
+<script id="main">
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
                      paused: "Paused", sleeping: "Sleeping"};
 
@@ -886,19 +945,19 @@ function deskHTML(d) {
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   const dispatcher = d.kind === "Triage";
-  // Peek only makes sense while a session is actually running — "working" is the only
-  // pill with a live transcript behind it.
-  const peekBtn = d.pill === "working"
-    ? `<button class="peek-btn" type="button" data-peek-lane="${esc(d.lane)}">Peek</button>`
-    : "";
-  return `<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}" target="_blank" rel="noopener">
-    ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
-    <div class="name">${esc(d.kind)}</div>
-    <div class="unit">${esc(d.unit)}</div>
-    <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
-    <div class="detail">${detail}</div>
-    ${peekBtn}
-  </a>`;
+  // Peek is on every lane's desk, whatever its pill: live while the lane works, its last
+  // session when it does not. (It used to exist only on a working desk — so on a quiet
+  // floor, which is most of the time, the feature was nowhere to be seen.)
+  return `<div class="desk${dispatcher ? " dispatcher" : ""}">
+    <a class="desk-link" href="${esc(d.link)}" target="_blank" rel="noopener">
+      ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
+      <div class="name">${esc(d.kind)}</div>
+      <div class="unit">${esc(d.unit)}</div>
+      <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
+      <div class="detail">${detail}</div>
+    </a>
+    <button class="peek-btn" type="button" data-peek-lane="${esc(d.lane)}" data-peek-name="${esc(d.kind)} (${esc(d.lane)})">Peek</button>
+  </div>`;
 }
 
 function render(state) {
@@ -944,11 +1003,19 @@ setInterval(refresh, 30000);
 // Refresh the moment it is looked at again, rather than waiting on the interval.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
-// Peek: a lane's live session, decoded the same way bin/tail.sh prints it on the command
-// line. Polls only while the panel is open — never in the background, never per card.
+// Peek: a lane's session, decoded the same way bin/tail.sh prints it on the command line —
+// live while the lane works, its last session when it does not. Polls only while the panel
+// is open — never in the background, never per card.
 let peekLane = null, peekCard = null, peekFile = null, peekPos = null, peekTimer = null;
 
-function peekStatus(text) {
+function peekSub(text, live) {
+  const sub = document.getElementById("peek-sub");
+  sub.textContent = text;
+  sub.className = live ? "live" : "";
+}
+
+function peekStatus(sub, text) {
+  peekSub(sub, false);
   document.getElementById("peek-lines").textContent = text;
   peekCard = null; peekFile = null; peekPos = null;
 }
@@ -963,12 +1030,18 @@ async function pollPeek() {
   let data;
   try {
     const r = await fetch("/api/tail.json?" + params.toString(), {cache: "no-store"});
-    if (!r.ok) return;
+    if (!r.ok) throw new Error("HTTP " + r.status);
     data = await r.json();
-  } catch (e) { return; }
+  } catch (e) {
+    // Say so in the panel: an open panel that silently stays empty is the same blank
+    // page, one click further in.
+    if (peekLane === lane) peekSub("can't reach this lane's session right now — retrying", false);
+    return;
+  }
   if (peekLane !== lane) return; // closed, or switched to another lane, mid-fetch
-  if (data.status === "idle") { peekStatus("Idle — no card right now."); return; }
-  if (data.status === "waiting") { peekStatus(`Waiting for a session on #${data.card}...`); return; }
+  if (data.status === "idle") { peekStatus("idle", "Nothing to show yet: this lane has not worked a card."); return; }
+  if (data.status === "waiting") { peekStatus(`starting #${data.card}`, "The session has not written anything yet."); return; }
+  peekSub(data.live ? `working on #${data.card} — live` : `idle — its last session, #${data.card}`, data.live);
   const pre = document.getElementById("peek-lines");
   if (data.reset) pre.textContent = "";
   peekCard = data.card; peekFile = data.file; peekPos = data.pos;
@@ -977,9 +1050,10 @@ async function pollPeek() {
   pre.scrollTop = pre.scrollHeight;
 }
 
-function openPeek(lane) {
+function openPeek(lane, name) {
   peekLane = lane; peekCard = null; peekFile = null; peekPos = null;
-  document.getElementById("peek-title").textContent = lane;
+  document.getElementById("peek-title").textContent = name || lane;
+  peekSub("", false);
   document.getElementById("peek-lines").textContent = "";
   document.getElementById("peek-overlay").classList.add("open");
   pollPeek();
@@ -1001,9 +1075,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePeek(
 document.addEventListener("click", (e) => {
   const btn = e.target.closest(".peek-btn");
   if (!btn) return;
-  e.preventDefault();
-  e.stopPropagation();
-  openPeek(btn.dataset.peekLane);
+  openPeek(btn.dataset.peekLane, btn.dataset.peekName);
 });
 </script>
 </body>

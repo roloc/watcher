@@ -13,9 +13,12 @@ to be idle, or held (a red flag, with its card). Working, idle, needing you, pau
 asleep after a failure — one look, phone-friendly, light and dark. Read-only: it never
 changes a card.
 
-**Peek** at a working desk to see what that bot is actually doing, not just which card it
-holds: a **Peek** button opens a live panel, one short line at a time, updating as it
-works. Close it the same way you opened it — nothing there can change a card either.
+**Peek** at any desk to see what that bot is actually doing, not just which card it holds.
+Every desk has a **Peek** button, busy or not: on a working desk it opens that bot's
+session live, one short line at a time, updating as it works; on a quiet desk it shows the
+bot's last session, and says so. Close it with the ×, or tap outside it — nothing there can
+change a card either. If the page ever shows a red line saying its own code hit an error,
+that is the page telling you it is broken: file a card.
 
 ## The columns
 
