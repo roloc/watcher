@@ -372,6 +372,29 @@ try:
         b.key("Escape")
         check("still no errors", b.errors == [], b.errors)
 
+        print("7c. the CI window a push-only history can't see: a PR's own check, live (card #77)")
+        alpha_shipped = CI_RUNS["roloc/alpha"]
+        CI_RUNS["roloc/alpha"] = [{
+            "id": 99, "name": "CI", "sha": "d" * 40, "title": "A card in flight", "status": "in_progress",
+            "conclusion": None, "started": "2026-10-01T17:58:00Z", "updated": "x",
+            "pr": 80, "branch": "card-77",
+            "jobs": [{"name": "verify", "status": "in_progress", "conclusion": None,
+                      "started": "2026-10-01T17:58:00Z", "completed": None,
+                      "steps": [{"name": "The spawner suite", "status": "in_progress", "conclusion": None,
+                                 "started": "2026-10-01T17:58:00Z", "completed": None}]}]},
+        ] + alpha_shipped
+        b.click('.peek-btn[data-peek-ship="alpha"]')
+        check("the panel leads with the PR's own run while it is still going, not the last merge",
+              b.wait_for(PANEL_SUB + " === 'CI on PR #80: running now'")
+              and "ddddddd  A card in flight  · card-77" in b.eval(PANEL_TEXT), b.eval(PANEL_TEXT))
+        check("what already shipped still follows, under its own heading (not 'before' — it hasn't merged)",
+              "Already on main" in b.eval(PANEL_TEXT) and "aaaaaaa  Peek on every desk" in b.eval(PANEL_TEXT),
+              b.eval(PANEL_TEXT))
+        shot(b, "ship-peek-pr-live.png", full_page=False)
+        b.key("Escape")
+        CI_RUNS["roloc/alpha"] = alpha_shipped
+        check("still no errors", b.errors == [], b.errors)
+
         print("8. on a phone: nothing runs off the side, and Peek still works")
         b.resize(390, 844)
         b.goto(URL)

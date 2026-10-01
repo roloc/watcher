@@ -19,7 +19,10 @@ while a human has it open, never while the panel is closed. (Until October 1, 20
 button existed only on a desk that was working at that moment, so on a quiet floor there
 was no sign the feature had shipped at all.) The **ship station** has a Peek too: every
 step CI ran on main's newest commit, the commits before it, and — on the board whose repo
-this box deploys — what the deployer is doing and the last things it said.
+this box deploys — what the deployer is doing and the last things it said. While a PR's own
+check is still running — the wait before every merge, and the one window a push-only
+history can never show, since the PR's commit is not on main yet — that run leads instead
+(card #77: "the CI windows [...] doesn't work for those peeks").
 
 Where the data comes from (`how-it-works.md`, "State on disk" and "Lanes"):
 - `projects/*.env`, sourced with bash exactly as `spawn.sh` sources them (they use shell
@@ -601,10 +604,37 @@ SHIP_CACHE_SEC = 20      # one fetch serves every poll of an open panel for this
 _HOUSEKEEPING = ("Set up job", "Complete job", "Post ", "Run actions/")
 
 
+def _fetch_live_pr_run(repo, get):
+    """The newest pull_request-triggered run that has not finished, shaped like one of
+    `fetch_ci_runs`'s own entries — or None. A PR's own commit never reaches `branch` until
+    it merges, so the push history below can never show it: this is the window Steve meant
+    by "the CI windows" (card #77) — the wait before every merge, which is most of the time
+    CI is actually running. Best-effort: a failure here never stops the push history from
+    being read, since watching a PR's check is a nicety on top of it, not the main job."""
+    try:
+        raw = get(f"repos/{repo}/actions/runs?event=pull_request&per_page=5").get("workflow_runs", [])
+    except Exception as e:
+        print(f"floor: a PR's live CI run for {repo} unreachable: {e}", file=sys.stderr, flush=True)
+        return None
+    # GitHub empties `pull_requests` once the PR it ran for is closed (observed on this
+    # box), so a run with no number here is one whose PR is already gone — not a window
+    # worth leading the panel with, and not safely labeled "on main" either.
+    live = next((r for r in raw
+                if (r.get("status") or "") != "completed" and r.get("pull_requests")), None)
+    if live is None:
+        return None
+    pr = live["pull_requests"][0]["number"]
+    return {"id": live.get("id"), "name": live.get("name") or "", "sha": live.get("head_sha") or "",
+            "title": " ".join((live.get("display_title") or "").split()), "status": live.get("status") or "",
+            "conclusion": live.get("conclusion"), "started": live.get("run_started_at") or live.get("created_at"),
+            "updated": live.get("updated_at"), "pr": pr, "branch": live.get("head_branch") or ""}
+
+
 def fetch_ci_runs(repo, branch="main", n=SHIP_RUNS, get=_gh_api):
-    """The push-triggered workflow runs on `branch`, newest first, with jobs and steps for
-    the ones on the newest commit — the commit the ship station's pill is about. Two or
-    three REST calls. Raises on any failure."""
+    """The push-triggered workflow runs on `branch`, newest first — with a PR's own run
+    leading them when one is still running (`_fetch_live_pr_run`) — and jobs and steps for
+    whichever leads the list. Three or four REST calls. Raises only when the push query
+    itself fails; the live-PR check is best-effort (see `_fetch_live_pr_run`)."""
     raw = get(f"repos/{repo}/actions/runs?branch={branch}&event=push&per_page={n}")
     # A title is one line here, whatever it was: the panel puts each list entry on a line.
     runs = [{"id": r.get("id"), "name": r.get("name") or "", "sha": r.get("head_sha") or "",
@@ -612,6 +642,9 @@ def fetch_ci_runs(repo, branch="main", n=SHIP_RUNS, get=_gh_api):
              "conclusion": r.get("conclusion"), "started": r.get("run_started_at") or r.get("created_at"),
              "updated": r.get("updated_at")}
             for r in raw.get("workflow_runs", [])]
+    live = _fetch_live_pr_run(repo, get)
+    if live is not None:
+        runs = [live] + runs
     for run in runs:
         if run["sha"] != runs[0]["sha"]:
             continue
@@ -704,6 +737,8 @@ def ship_lines(runs, now, deploy=None, history=None, has_deployer=False):
     `<pre>` with `textContent` — nothing here is ever HTML): the newest commit on main and
     every step CI ran on it, the commits before it in one line each, and — on the board
     whose repo this box deploys — what the deployer is doing and the last things it said.
+    When a PR's own check is still running, that leads instead (it is `runs[0]`, same as
+    any other entry) and the header reads "CI on PR #<n>" rather than "CI on main".
     `runs` is `fetch_ci_runs`'s list, or None when CI could not be reached. Pure: no I/O.
 
     Returns {"sub": <one line for the panel's head>, "live": <something is running now>,
@@ -721,10 +756,13 @@ def ship_lines(runs, now, deploy=None, history=None, has_deployer=False):
         failing = [j["name"] for r in newest for j in r.get("jobs", [])
                    if _mark(j["status"], j["conclusion"]) == "✗"]
         live = overall == "…"
-        sub = {"✓": f"CI on main: passed {ago}".rstrip(), "…": "CI on main: running now",
-               "✗": "CI on main: failing — " + (", ".join(failing[:3]) or "see below"),
-               "–": f"CI on main: nothing ran {ago}".rstrip()}[overall]
-        lines.append(f"{newest[0]['sha'][:7]}  {newest[0]['title'][:90]}")
+        on_pr = newest[0].get("pr")  # the "live window" entry _fetch_live_pr_run adds
+        where = f"PR #{on_pr}" if on_pr else "main"
+        sub = {"✓": f"CI on {where}: passed {ago}".rstrip(), "…": f"CI on {where}: running now",
+               "✗": f"CI on {where}: failing — " + (", ".join(failing[:3]) or "see below"),
+               "–": f"CI on {where}: nothing ran {ago}".rstrip()}[overall]
+        lines.append(f"{newest[0]['sha'][:7]}  {newest[0]['title'][:90]}"
+                     + (f"  · {newest[0]['branch']}" if on_pr else ""))
         for r in newest:
             began = _ago(_when(r["started"]), now)
             lines.append(f"{_mark(r['status'], r['conclusion'])} {r['name']}"
@@ -749,7 +787,11 @@ def ship_lines(runs, now, deploy=None, history=None, has_deployer=False):
             earlier.append(f"  {_worst([_mark(x['status'], x['conclusion']) for x in same])} "
                            f"{r['sha'][:7]}  {r['title'][:60]} · {_ago(_when(r['started']), now)}")
         if earlier:
-            lines += ["", "Before that on main"] + earlier[:SHIP_EARLIER]
+            # "Before that" is literally true for a push: each one is an older commit on
+            # the same branch. A live PR run hasn't merged yet, so what follows it is what
+            # already shipped, not what came before it.
+            heading = "Already on main" if on_pr else "Before that on main"
+            lines += ["", heading] + earlier[:SHIP_EARLIER]
 
     if has_deployer:
         lines += ["", "The box's deployer"]

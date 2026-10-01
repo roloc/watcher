@@ -1004,17 +1004,76 @@ def fake_get(path):
                           "started_at": "2026-10-01T17:15:00Z", "completed_at": "2026-10-01T17:16:00Z",
                           "steps": [{"name": "The spawner suite", "status": "completed", "conclusion": "success",
                                      "started_at": "2026-10-01T17:15:00Z", "completed_at": "2026-10-01T17:15:28Z"}]}]}
+    if "event=pull_request" in path:
+        return {"workflow_runs": []}  # nothing open right now
     return {"workflow_runs": [
         {"id": 11, "name": "CI", "head_sha": "a" * 40, "display_title": "Newest", "status": "completed",
          "conclusion": "success", "run_started_at": "2026-10-01T17:15:00Z", "updated_at": "x"},
         {"id": 10, "name": "CI", "head_sha": "b" * 40, "display_title": "Older", "status": "completed",
          "conclusion": "success", "run_started_at": "2026-10-01T15:00:00Z", "updated_at": "x"}]}
 fr = floor.fetch_ci_runs("roloc/watcher", get=fake_get)
-check("fetch_ci_runs asks for push runs on main, and jobs for the newest commit only",
+check("fetch_ci_runs asks for push runs on main, whether a PR has one running, and jobs "
+      "for the newest commit only",
       got == ["repos/roloc/watcher/actions/runs?branch=main&event=push&per_page=6",
+              "repos/roloc/watcher/actions/runs?event=pull_request&per_page=5",
               "repos/roloc/watcher/actions/runs/11/jobs?per_page=50"], got)
 check("...and what it returns is what ship_lines reads",
       "    ✓ The spawner suite · 28s" in floor.ship_lines(fr, NOW24)["lines"] and "jobs" not in fr[1])
+
+print("24b. the CI window a push-only history can't see: a PR's own check, while it runs (card #77)")
+def pr_running_get(path):
+    if "/jobs" in path:
+        return {"jobs": [{"name": "verify", "status": "in_progress", "conclusion": None,
+                          "started_at": "2026-10-01T17:50:00Z", "completed_at": None,
+                          "steps": [{"name": "The spawner suite", "status": "in_progress", "conclusion": None,
+                                     "started_at": "2026-10-01T17:50:00Z", "completed_at": None}]}]}
+    if "event=pull_request" in path:
+        return {"workflow_runs": [
+            {"id": 21, "name": "CI", "head_sha": "d" * 40, "display_title": "A card in flight",
+             "status": "in_progress", "conclusion": None, "run_started_at": "2026-10-01T17:50:00Z",
+             "updated_at": "x", "head_branch": "card-77", "pull_requests": [{"number": 80}]}]}
+    return {"workflow_runs": [
+        {"id": 11, "name": "CI", "head_sha": "a" * 40, "display_title": "Last shipped", "status": "completed",
+         "conclusion": "success", "run_started_at": "2026-10-01T17:15:00Z", "updated_at": "x"}]}
+prr = floor.fetch_ci_runs("roloc/watcher", get=pr_running_get)
+check("the live PR run leads the list, ahead of what already shipped",
+      prr[0]["pr"] == 80 and prr[0]["branch"] == "card-77" and prr[1]["sha"] == "a" * 40, prr)
+check("its own jobs were fetched, not the shipped commit's",
+      prr[0]["jobs"][0]["name"] == "verify" and "jobs" not in prr[1])
+spr = floor.ship_lines(prr, NOW24)
+check("the header names the PR, not main, while its check runs",
+      spr["sub"] == "CI on PR #80: running now" and spr["live"] is True, spr["sub"])
+check("the commit line carries the PR's branch", spr["lines"][0] == "ddddddd  A card in flight  · card-77")
+check("what already shipped follows under its own, non-'before', heading",
+      "Already on main" in spr["lines"] and "  ✓ aaaaaaa  Last shipped · 45m ago" in spr["lines"], spr["lines"])
+
+def pr_query_fails(path):
+    if "event=pull_request" in path:
+        raise RuntimeError("gh: rate limited")
+    if "/jobs" in path:
+        return {"jobs": []}
+    return {"workflow_runs": [{"id": 11, "name": "CI", "head_sha": "a" * 40, "display_title": "Last shipped",
+                               "status": "completed", "conclusion": "success",
+                               "run_started_at": "2026-10-01T17:15:00Z", "updated_at": "x"}]}
+check("a failed check for a live PR never costs the push history",
+      floor.fetch_ci_runs("roloc/watcher", get=pr_query_fails)[0]["sha"] == "a" * 40)
+
+def pr_closed_get(path):
+    # GitHub empties `pull_requests` once the PR it ran for is closed — observed on this
+    # box for superseded runs. Nothing to attribute it to, so it must not lead the panel
+    # mislabeled as "on main" over a branch commit (reviewer's own finding on card #77).
+    if "event=pull_request" in path:
+        return {"workflow_runs": [{"id": 21, "name": "CI", "head_sha": "d" * 40, "display_title": "Superseded",
+                                   "status": "in_progress", "conclusion": None, "head_branch": "old-branch",
+                                   "run_started_at": "2026-10-01T17:58:00Z", "updated_at": "x",
+                                   "pull_requests": []}]}
+    if "/jobs" in path:
+        return {"jobs": []}
+    return {"workflow_runs": [{"id": 11, "name": "CI", "head_sha": "a" * 40, "display_title": "Last shipped",
+                               "status": "completed", "conclusion": "success",
+                               "run_started_at": "2026-10-01T17:15:00Z", "updated_at": "x"}]}
+check("a running check with no PR to attribute it to is left out, not mislabeled as main",
+      floor.fetch_ci_runs("roloc/watcher", get=pr_closed_get)[0]["sha"] == "a" * 40)
 
 srv4 = ThreadingHTTPServer(("127.0.0.1", 0), floor.make_handler(FixedCache(), None, look))
 t4 = threading.Thread(target=srv4.serve_forever, daemon=True); t4.start()
