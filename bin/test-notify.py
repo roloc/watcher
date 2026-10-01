@@ -132,5 +132,40 @@ os.environ.pop("DISCORD_WEBHOOK_URL")
 sent.clear()
 check("notify with no webhook is a silent no-op, exit 0", board.cmd_notify("87", "shipped") == 0 and not sent)
 
+print("6. board.py sweep-stages: a closed card does not keep its Stage")
+os.environ["DISCORD_WEBHOOK_URL"] = "https://discord.example/webhook"
+
+
+def card(n, state, stage):
+    return {"item": f"I{n}", "number": n, "title": "", "url": "", "state": state,
+            "labels": [], "status": "Done" if state == "CLOSED" else "Stuck - Needs help",
+            "priority": None, "stage": stage}
+
+
+cleared, looked_up = [], []
+board.gh = lambda q, **v: cleared.append(v["i"]) or {}
+board.project = lambda: (looked_up.append(1) or
+                         ({"id": "P"}, {"Stage": {"id": "F", "name": "Stage", "options": []}}))
+board.items = lambda: [card(35, "CLOSED", "Parked"), card(36, "CLOSED", None),
+                       card(37, "OPEN", "Parked"), card(38, "CLOSED", "Merging")]
+sent.clear()
+check("exit 0", board.cmd_sweep_stages() == 0)
+check("every closed card with a Stage is emptied, whatever the Stage", cleared == ["I35", "I38"],
+      repr(cleared))
+check("an open card keeps its Stage (a parked card is still Parked)", "I37" not in cleared)
+check("no Discord post", not sent)
+cleared.clear(); looked_up.clear()
+board.items = lambda: [card(36, "CLOSED", None), card(37, "OPEN", "Parked")]
+check("nothing stale → nothing cleared, and no second lookup",
+      board.cmd_sweep_stages() == 0 and not cleared and not looked_up)
+board.items = lambda: [card(n, "CLOSED", "Merging") for n in range(100, 100 + board.SWEEP_MAX + 5)]
+board.cmd_sweep_stages()
+check("one run empties at most SWEEP_MAX; the rest wait for the next",
+      len(cleared) == board.SWEEP_MAX, str(len(cleared)))
+cleared.clear()
+board.project = lambda: ({"id": "P"}, {})
+board.items = lambda: [card(35, "CLOSED", "Parked")]
+check("a board with no Stage field is a no-op", board.cmd_sweep_stages() == 0 and not cleared)
+
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")
 sys.exit(fails)

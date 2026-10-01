@@ -8,6 +8,7 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py list ["In progress"]   # cards in a column, as TSV
     python3 scripts/board.py move <issue> "<status>" [--why "<one line>"]
     python3 scripts/board.py stage <issue> "<stage>"     # "-" empties it
+    python3 scripts/board.py sweep-stages           # empty the Stage on closed cards
     python3 scripts/board.py show <issue>
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
     python3 scripts/board.py notify <issue> shipped|closed|released ["<detail>"]
@@ -252,6 +253,10 @@ def cmd_move(issue, status, *rest):
 QUIET_STAGES = {"Parked"}
 
 
+CLEAR_FIELD = """mutation($p:ID!,$i:ID!,$f:ID!){ clearProjectV2ItemFieldValue(input:{
+  projectId:$p,itemId:$i,fieldId:$f}){ projectV2Item{ id } } }"""
+
+
 def clear_stage(issue):
     """Empty the card's Stage. The spawner calls it when a card closes: a Done card still
     reading "Merging" or "Claimed" sits in the wrong group on the Stage-grouped view Steve
@@ -264,10 +269,34 @@ def clear_stage(issue):
     if not it:
         sys.exit(f"board.py: issue #{issue} is not on the board")
     if it.get("stage"):
-        m = """mutation($p:ID!,$i:ID!,$f:ID!){ clearProjectV2ItemFieldValue(input:{
-          projectId:$p,itemId:$i,fieldId:$f}){ projectV2Item{ id } } }"""
-        gh(m, p=proj["id"], i=it["item"], f=f["id"])
+        gh(CLEAR_FIELD, p=proj["id"], i=it["item"], f=f["id"])
     print(f"#{issue} stage → (none)")
+    return 0
+
+
+# How many stale Stages one `sweep-stages` run empties. A board that predates the sweep
+# can hold a hundred of them, and a hundred mutations in a row is what GitHub's secondary
+# limit is for; the rest go on the next run.
+SWEEP_MAX = 20
+
+
+def cmd_sweep_stages():
+    """Empty the Stage on every CLOSED card that still has one. `clear_stage` only runs
+    for the card a tick was holding when it closed; a card that closes with no tick on it
+    — Steve merging a parked card's PR, or closing a card by hand — kept its last Stage
+    for good and sat in Done reading "Parked" (watcher#35, #36, #40, #43 and #44,
+    September 28, 2026). The spawner calls this every few minutes. Quiet — no Discord
+    post. One `items()` read; nothing else is fetched unless a card needs clearing."""
+    stale = [i for i in items() if i["state"] == "CLOSED" and i.get("stage")]
+    if not stale:
+        return 0
+    proj, fields = project()
+    f = fields.get(STAGE_FIELD)
+    if not f:
+        return 0
+    for it in stale[:SWEEP_MAX]:
+        gh(CLEAR_FIELD, p=proj["id"], i=it["item"], f=f["id"])
+        print(f"#{it['number']} stage {it['stage']} → (none)")
     return 0
 
 
@@ -355,12 +384,14 @@ def cmd_ask(issue):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "queue", "notify", "dump", "ask"):
+    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
+                            "dump", "ask"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
                   "move": lambda: cmd_move(a[1], a[2], *a[3:]),
                   "stage": lambda: cmd_stage(a[1], a[2]),
+                  "sweep-stages": lambda: cmd_sweep_stages(),
                   "queue": lambda: cmd_queue(),
                   "show": lambda: cmd_show(a[1]),
                   "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),

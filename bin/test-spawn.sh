@@ -60,7 +60,9 @@ mkdir -p "$FAKE_ROOT" "$WORKTREE_BASE"
 # the one comment it already sent — once it lands). On a successful move it also rewrites
 # $BOARD_SHOW_FILE's "status" to "Stuck - Needs help", if that file exists and is valid
 # JSON, so a test can see the board itself reflect the move without maintaining a second,
-# parallel notion of the card's status. `unclaim`/anything else just logs and exits 0.
+# parallel notion of the card's status. `sweep-stages` prints $BOARD_SWEEP_FILE (what it
+# emptied; nothing when a test set none), or fails if $BOARD_SWEEP_FAIL=1.
+# `unclaim`/anything else just logs and exits 0.
 cat > "$BIN/board.py" <<'STUB'
 #!/usr/bin/env bash
 echo "board.py $*" >> "$TEST_LOG"
@@ -135,6 +137,10 @@ d["status"] = "Stuck - Needs help"
 json.dump(d, open(path, "w"))
 ' "$BOARD_SHOW_FILE" 2>/dev/null || true
     fi
+    ;;
+  sweep-stages)
+    if [ "${BOARD_SWEEP_FAIL:-0}" = 1 ]; then echo "board.py: transient API error" >&2; exit 1; fi
+    cat "${BOARD_SWEEP_FILE:-/dev/null}"
     ;;
   *) exit 0 ;;
 esac
@@ -360,6 +366,7 @@ run() {
   READY_PULL="${READY_PULL:-}" WIP_MAX="${WIP_MAX:-}" \
   BOARD_REVIEW_FILE="${BOARD_REVIEW_FILE:-/dev/null}" BOARD_REVIEW_FAIL="${BOARD_REVIEW_FAIL:-0}" \
   INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-}" INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-}" \
+  STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-}" BOARD_SWEEP_FILE="${BOARD_SWEEP_FILE:-}" BOARD_SWEEP_FAIL="${BOARD_SWEEP_FAIL:-0}" \
   BOARD_SHOW_FILE="${BOARD_SHOW_FILE:-/dev/null}" BOARD_SHOW_FAIL="${BOARD_SHOW_FAIL:-0}" \
   BOARD_MOVE_FAIL="${BOARD_MOVE_FAIL:-0}" \
   BOARD_MOVE_FAIL_COUNT="${BOARD_MOVE_FAIL_COUNT:-}" BOARD_MOVE_COUNTER_FILE="${BOARD_MOVE_COUNTER_FILE:-}" \
@@ -1640,6 +1647,50 @@ run --once >/dev/null 2>&1 || true
 [ "$(cat "$STATE/attempts/901" 2>/dev/null)" = 1 ] && pass "left In progress instead: attempts bumped to 1" || flunk "expected attempts/901=1" "$(cat "$STATE/attempts/901" 2>/dev/null)"
 run --once >/dev/null 2>&1 || true
 if grepped "board.py move 901 Stuck - Needs help"; then pass "…and parked on the second — which is exactly what 4b avoids"; else flunk "expected a park for #901" "$(cat "$TESTLOG")"; fi
+
+# ============================================================================
+echo "Closed-card Stage sweep: a card that closes with no tick on it does not keep its Stage"
+# ============================================================================
+# watcher#35, #36, #40, #43 and #44, September 28, 2026: each was parked in Stuck asking
+# for its PR to be merged, and each was merged by hand hours later. handle_exit's own
+# `stage <n> -` only runs for the card a tick was holding when it closed, so nothing ever
+# emptied these and all five sat in Done reading "Parked". board.py's `sweep-stages` does
+# the emptying (test-notify.py checks which cards it picks); here, that the spawner calls
+# it, how often, and that it can never cost a poll.
+sweeps() { grep -c '^board.py sweep-stages$' "$TESTLOG" || true; }
+
+fresh_state; board_list ""
+BOARD_SWEEP_FILE="$STATE/swept.txt"; printf '%s\n' '#35 stage Parked → (none)' > "$BOARD_SWEEP_FILE"
+run --once >/dev/null 2>"$TMP/sweep1.err" || true
+if [ "$(sweeps)" = 1 ]; then pass "a poll with nothing to pick still sweeps closed cards' Stages"; else flunk "expected one sweep-stages call" "$(cat "$TESTLOG")"; fi
+if grep -q 'closed card, stale Stage emptied: #35 stage Parked' "$TMP/sweep1.err"; then pass "…and the journal names each card it emptied"; else flunk "no journal line for the emptied card" "$(cat "$TMP/sweep1.err")"; fi
+if not_grepped "board.py notify"; then pass "…with no Discord post (a stale Stage is not an event)"; else flunk "the sweep posted to Discord" "$(cat "$TESTLOG")"; fi
+
+run --once >/dev/null 2>&1 || true
+if [ "$(sweeps)" = 1 ]; then pass "the next poll, inside STAGE_SWEEP_SEC, does not read the board again for it"; else flunk "swept twice inside the interval" "$(cat "$TESTLOG")"; fi
+
+echo 1 > "$STATE/stage-sweep.last"   # the last sweep was long ago
+run --once >/dev/null 2>&1 || true
+if [ "$(sweeps)" = 2 ]; then pass "once the interval has passed, it sweeps again"; else flunk "no sweep after the interval" "$(cat "$TESTLOG")"; fi
+
+STAGE_SWEEP_SEC=0 run --once >/dev/null 2>&1 || true
+STAGE_SWEEP_SEC=0 run --once >/dev/null 2>&1 || true
+if [ "$(sweeps)" = 4 ]; then pass "STAGE_SWEEP_SEC=0 sweeps every poll"; else flunk "expected 4 sweeps" "$(cat "$TESTLOG")"; fi
+BOARD_SWEEP_FILE=""
+
+# A sweep that fails is cosmetic work not done: the poll goes on and the card is served.
+fresh_state; board_list $'950\tP1\tbuilder\t-\t-\tOrdinary card'
+board_show '{"number":950,"state":"CLOSED","status":"Done","labels":[]}'
+BOARD_SWEEP_FAIL=1 run --once >/dev/null 2>"$TMP/sweepfail.err" || true
+if grepped "/watch 950"; then pass "a failed sweep does not stop the poll: the card is still picked"; else flunk "a failed sweep stopped the poll" "$(cat "$TESTLOG")"; fi
+if grep -q 'sweep-stages failed; stale Stages stay until the next sweep: board.py: transient API error' "$TMP/sweepfail.err"; then pass "…and says so once, with the board's own error"; else flunk "no log line for the failed sweep" "$(cat "$TMP/sweepfail.err")"; fi
+BOARD_SWEEP_FAIL=1 run --once >/dev/null 2>&1 || true
+if [ "$(sweeps)" = 1 ]; then pass "…and is not retried every poll: it waits for its next turn"; else flunk "a failed sweep was retried inside the interval" "$(cat "$TESTLOG")"; fi
+
+# A paused lane touches nothing, the sweep included.
+fresh_state; board_list ""; : > "$STATE/PAUSE"
+run --once >/dev/null 2>&1 || true
+if [ "$(sweeps)" = 0 ]; then pass "PAUSE present: no sweep"; else flunk "a paused lane swept" "$(cat "$TESTLOG")"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail
