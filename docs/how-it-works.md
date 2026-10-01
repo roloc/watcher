@@ -73,7 +73,7 @@ Labels and fields the bots read:
 6. **The spawner's exit handling** reads the card back. If `in-flight` leaked, it unclaims
    and leaves a sweeper comment. A success that left In progress resets the attempt count.
    Anything else bumps it; **two attempts with the card still In progress parks it in Stuck**
-   with a comment. A closed card gets its worktree removed.
+   with a comment. A closed card gets its Stage emptied and its worktree removed.
 7. **Sleep:** 60 seconds after a normal poll, 10 minutes after a failed tick, 5 minutes
    after a board outage.
 
@@ -100,6 +100,26 @@ back) — because Steve's answer starts it over, and when it closes. A re-queued
 picked on the following poll, not the same one. Everything fails closed: a PR lookup that
 errors is not "no PR" and the card is left alone for that poll, and a failed In review read
 never stops In progress from being served. Both limits are env knobs a project file may set.
+
+## The closed-card Stage sweep
+
+The Stage field says what a tick is doing, so it means nothing once the card is closed —
+and a Done card that still reads "Parked" or "Merging" sits in the wrong group on the
+Stage-grouped view Steve works from. `handle_exit` empties the Stage of the card a tick
+was holding when it closed (step 6 above), which covers a tick that merges its own PR.
+It does not cover **a card that closes with no tick on it**: Steve merging the PR of a
+card parked in Stuck, or closing a card by hand. Five cards on the watcher's own board
+sat in Done reading "Parked" that way (watcher [#35](https://github.com/roloc/watcher/issues/35),
+[#36](https://github.com/roloc/watcher/issues/36), [#40](https://github.com/roloc/watcher/issues/40),
+[#43](https://github.com/roloc/watcher/issues/43), [#44](https://github.com/roloc/watcher/issues/44),
+September 28, 2026).
+
+So every five minutes (`STAGE_SWEEP_SEC`, an env knob like the In review limits) each
+lane's spawner runs `board sweep-stages`: one board read, and the Stage emptied on every
+closed card that still has one, at most 20 a run. It is quiet (no Discord post), it is
+board-wide rather than per lane (a second lane's sweep finds nothing left), and it is
+best-effort: a sweep that fails is one line in the journal, waits for its next turn, and
+never costs the poll. An open card is never touched — a parked card stays Parked.
 
 ## Lanes
 
@@ -322,6 +342,7 @@ money he had been charged (September 19, 2026). The number was never a bill.
 | `attempts/<n>` | attempt count for card n; reset on a success that left In progress, or when Steve moves a parked card back |
 | `parked/<n>` | the one Stuck comment for card n was posted |
 | `parked-ok/<n>` | the move to Stuck actually landed |
+| `stage-sweep.last` | when this lane last ran the closed-card Stage sweep (epoch seconds) |
 | `waiting/<n>` | the FYI comment saying what card n waits on was posted, and for which blockers; cleared when it is picked |
 | `logs/card-<n>-<ts>.json` | the tick's JSON result: `subtype`, `total_cost_usd` (quota, not a bill — see above), `num_turns`, `result` |
 | `logs/card-<n>-<ts>.stderr` | the tick's stderr |

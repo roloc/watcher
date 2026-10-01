@@ -184,6 +184,10 @@ case "$WIP_MAX" in ''|*[!0-9]*) echo "spawn.sh: WIP_MAX must be a number, not '$
 # PR before it is parked, and how long with one before it is sent back to In progress.
 INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-600}"
 INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-7200}"
+# The closed-card Stage sweep (sweep_closed_stages): the least time between two of them.
+# Each one is a full board read, so it is not done every poll.
+STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-300}"
+case "$STAGE_SWEEP_SEC" in ''|*[!0-9]*) echo "spawn.sh: STAGE_SWEEP_SEC must be a number, not '$STAGE_SWEEP_SEC'" >&2; exit 64 ;; esac
 LANE_AGENTS="${LANE_AGENTS:-}"
 LANE_COMMAND="${LANE_COMMAND:-/watch}"
 LANE_WORKDIR="${LANE_WORKDIR:-card}"
@@ -1318,6 +1322,40 @@ Reply if you chose B, then move the card."
   done
 }
 
+# --- the closed-card Stage sweep ---------------------------------------------------------------
+# handle_exit empties the Stage of the card a tick was holding when it closed, and nothing
+# else did: a card that closes with NO tick on it kept its last Stage for good. Five cards
+# on the watcher's own board sat in Done reading "Parked" (watcher#35, #36, #40, #43, #44,
+# September 28, 2026) — each parked in Stuck for its PR to be merged, each merged by hand
+# hours later, by which time the lane had long moved on. So every STAGE_SWEEP_SEC, board.py
+# empties the Stage on every closed card that still has one (`sweep-stages`: one board
+# read, a capped number of clears, no Discord post).
+#
+# Not per lane (the Stage is the board's, and a second lane's sweep finds nothing left),
+# not every poll (a full board read each time, for something that is only ever cosmetic),
+# and best-effort: a sweep that fails is one line in the journal and waits its turn like
+# any other — the stamp is written before the call, so an outage cannot turn this into a
+# retry every poll. It never fails the poll.
+sweep_closed_stages() {
+  local stamp="$WATCHER_STATE/stage-sweep.last" now last out errfile line
+  now="$(date +%s)"
+  last="$(cat "$stamp" 2>/dev/null || echo 0)"
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  if [ $((now - last)) -lt "$STAGE_SWEEP_SEC" ]; then return 0; fi
+  echo "$now" > "$stamp"
+  errfile="$(mktemp)"
+  if ! out="$($WATCHER_BOARD sweep-stages 2>"$errfile")"; then
+    log "board.py sweep-stages failed; stale Stages stay until the next sweep: $(cat "$errfile" 2>/dev/null)"
+    rm -f "$errfile"
+    return 0
+  fi
+  rm -f "$errfile"
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then log "closed card, stale Stage emptied: $line"; fi
+  done <<< "$out"
+  return 0
+}
+
 # --- one poll iteration --------------------------------------------------------------------
 tick_once() {
   # Every poll, before anything else — see reconcile_stale_current's own comment for why
@@ -1343,6 +1381,7 @@ tick_once() {
   fi
 
   sweep_in_review
+  sweep_closed_stages
 
   QUEUED=0
   PROMOTE_FROM=""
