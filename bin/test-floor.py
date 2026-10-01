@@ -693,7 +693,89 @@ finally:
     srv3.shutdown()
     srv3.server_close()
 
-print("22. a failed first load says so, out loud, instead of sitting blank forever (card #71)")
+print("22. the page's own <script> block still parses (card #71: it silently didn't)")
+
+
+def script_quotes_ok(script):
+    """True if every plain `'` or `"` string in `script` closes before a raw newline —
+    a backtick template literal may span lines, a plain one may not. This is the exact
+    shape of card #71: `INDEX_HTML` is a non-raw Python triple-quoted string, so a `\\n`
+    written for the JS reader was silently eaten as a literal newline instead, leaving an
+    unterminated string and the whole <script> block unparsed — the static page loaded,
+    nothing it fetches ever did, and nothing said why. No `node` or other JS tool needed
+    (this suite has to pass on a stock Mac): walk the text by hand, skipping `//` and
+    `/* */` comments, regex literals (by the token before the `/`, same ambiguity a real
+    JS tokenizer resolves the same way), and backtick strings — then require every plain
+    string to close on the line it opened."""
+    i, n, prev = 0, len(script), ''
+    while i < n:
+        c = script[i]
+        if c == '/' and i + 1 < n and script[i + 1] == '/':
+            j = script.find('\n', i)
+            i = n if j == -1 else j
+            continue
+        if c == '/' and i + 1 < n and script[i + 1] == '*':
+            j = script.find('*/', i + 2)
+            i = n if j == -1 else j + 2
+            continue
+        if c == '/' and prev in '([{,=:;!&|?\n':
+            j, in_class, is_regex = i + 1, False, True
+            while j < n:
+                ch = script[j]
+                if ch == '\\':
+                    j += 2
+                    continue
+                if ch == '[':
+                    in_class = True
+                elif ch == ']':
+                    in_class = False
+                elif ch == '/' and not in_class:
+                    break
+                elif ch == '\n':
+                    is_regex = False
+                    break
+                j += 1
+            if is_regex and j < n:
+                i = j + 1
+                while i < n and script[i].isalpha():
+                    i += 1
+                prev = '/'
+                continue
+        if c == '`':
+            j = i + 1
+            while j < n and script[j] != '`':
+                j += 2 if script[j] == '\\' else 1
+            if j >= n:
+                return False
+            i, prev = j + 1, '`'
+            continue
+        if c in '"\'':
+            quote, j = c, i + 1
+            while j < n and script[j] != quote:
+                if script[j] == '\\':
+                    j += 2
+                    continue
+                if script[j] == '\n':
+                    return False
+                j += 1
+            if j >= n:
+                return False
+            i, prev = j + 1, quote
+            continue
+        if not c.isspace():
+            prev = c
+        i += 1
+    return True
+
+
+script22 = floor.INDEX_HTML.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+check("no plain-quoted string in the page's script spills onto a second line",
+      script_quotes_ok(script22))
+check("...and the checker itself catches the real bug: a bare newline where \\n belonged",
+      not script_quotes_ok(script22.replace(
+          'pre.textContent ? "\\n" : ""', 'pre.textContent ? "\n" : ""')))
+
+print("23. a failed first load says so, out loud, instead of sitting blank forever (card #71)")
 check("the page carries a visible load-error banner, starting hidden",
       '<div class="alert" id="load-error" style="display:none">' in floor.INDEX_HTML)
 check("a failed refresh shows that banner",

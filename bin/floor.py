@@ -973,7 +973,7 @@ async function pollPeek() {
   if (data.reset) pre.textContent = "";
   peekCard = data.card; peekFile = data.file; peekPos = data.pos;
   if (!data.lines.length) return; // nothing new: leave any manual scroll-back alone
-  for (const line of data.lines) pre.textContent += (pre.textContent ? "\n" : "") + line;
+  for (const line of data.lines) pre.textContent += (pre.textContent ? "\\n" : "") + line;
   pre.scrollTop = pre.scrollHeight;
 }
 
