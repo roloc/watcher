@@ -22,6 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import floor  # noqa: E402
 import metrics  # noqa: E402
+import tail  # noqa: E402  (bin/tail.py — Peek's own decode, exercised directly below)
 
 fails = 0
 count = 0
@@ -555,7 +556,146 @@ anchors = re.findall(r"<a\b[^>]*>", floor.INDEX_HTML)
 check("...and every anchor on the page carries it, so a future link can't slip through",
       anchors and all('target="_blank"' in a for a in anchors), anchors)
 
+print("19. discover_lanes: a lane's worktree layout for Peek (card vs root, a bad value)")
+WD_ROOT = tempfile.mkdtemp(prefix="watcher-floor-wd-test-")
+WD_PROJECTS = os.path.join(WD_ROOT, "projects")
+WD_STATE = os.path.join(WD_ROOT, "state")
+os.makedirs(WD_PROJECTS)
+os.makedirs(WD_STATE)
+
+
+def wd_env(name, body):
+    with open(os.path.join(WD_PROJECTS, f"{name}.env"), "w") as f:
+        f.write(body)
+
+
+wd_env("card-mode", f"""\
+PROJECT_NAME=card-mode
+PROJECT_ROOT={WD_ROOT}/repo
+BOARD_OWNER=roloc
+PROJECT_REPO=roloc/card-mode
+BOARD_NUMBER=9
+""")
+wd_env("root-mode", f"""\
+PROJECT_NAME=root-mode
+PROJECT_ROOT={WD_ROOT}/repo2
+BOARD_OWNER=roloc
+PROJECT_REPO=roloc/root-mode
+BOARD_NUMBER=10
+LANE_WORKDIR=root
+""")
+wd_env("bad-mode", f"""\
+PROJECT_NAME=bad-mode
+PROJECT_ROOT={WD_ROOT}/repo3
+BOARD_OWNER=roloc
+PROJECT_REPO=roloc/bad-mode
+BOARD_NUMBER=11
+LANE_WORKDIR=sideways
+""")
+
+wd_lanes = {l["lane"]: l for l in floor.discover_lanes(WD_PROJECTS, WD_STATE)}
+check("default LANE_WORKDIR reads as 'card'", wd_lanes["card-mode"]["workdir_mode"] == "card")
+check("card mode's worktree_base is <root>-worktrees, tail.sh's own derivation",
+      wd_lanes["card-mode"]["worktree_base"] == f"{WD_ROOT}/repo-worktrees")
+check("LANE_WORKDIR=root reads as 'root'", wd_lanes["root-mode"]["workdir_mode"] == "root")
+check("root mode's worktree_base is PROJECT_ROOT itself",
+      wd_lanes["root-mode"]["worktree_base"] == f"{WD_ROOT}/repo2")
+check("a bad LANE_WORKDIR falls back to 'card', not a crashed page",
+      wd_lanes["bad-mode"]["workdir_mode"] == "card")
+
+print("20. tail_status: Peek's own decode (idle, waiting, a full replay, then a drain)")
+TS_ROOT = tempfile.mkdtemp(prefix="watcher-floor-tail-test-")
+TS_STATE = os.path.join(TS_ROOT, "state")
+TS_CLAUDE = os.path.join(TS_ROOT, "claude-projects")
+os.makedirs(TS_STATE)
+os.makedirs(TS_CLAUDE)
+ts_info = {"state_dir": TS_STATE, "workdir_mode": "card",
+           "worktree_base": os.path.join(TS_ROOT, "repo-worktrees")}
+
+check("no current card at all: idle",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
+
+with open(os.path.join(TS_STATE, "current"), "w") as f:
+    f.write("77\n")
+check("a card but no session written yet: waiting, names the card",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "waiting", "card": 77})
+
+ts_session_dir = os.path.join(TS_CLAUDE,
+                               tail.encode_dir(os.path.join(ts_info["worktree_base"], "card-77")))
+os.makedirs(ts_session_dir, exist_ok=True)
+ts_transcript = os.path.join(ts_session_dir, "session-1.jsonl")
+with open(ts_transcript, "w") as f:
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"line one"}]}}\n')
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"line two"}]}}\n')
+
+r1 = floor.tail_status(ts_info, TS_CLAUDE)
+check("first look: status ok, a fresh replay", r1["status"] == "ok" and r1["reset"] is True)
+check("first look: both lines decoded, in order", r1["lines"] == ["line one", "line two"], r1["lines"])
+check("first look: names the card and the session file",
+      r1["card"] == 77 and r1["file"] == "session-1.jsonl")
+
+r2 = floor.tail_status(ts_info, TS_CLAUDE, card=r1["card"], file=r1["file"], pos=r1["pos"])
+check("same card, same file, same pos: nothing new, not a re-replay",
+      r2["status"] == "ok" and r2["lines"] == [] and r2["reset"] is False)
+
+with open(ts_transcript, "a") as f:
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"line three"}]}}\n')
+r3 = floor.tail_status(ts_info, TS_CLAUDE, card=r2["card"], file=r2["file"], pos=r2["pos"])
+check("a line appended since: drains just the new one",
+      r3["status"] == "ok" and r3["lines"] == ["line three"] and r3["reset"] is False)
+
+r4 = floor.tail_status(ts_info, TS_CLAUDE, card=999, file=r3["file"], pos=r3["pos"])
+check("a card number that moved on since: forces a fresh replay",
+      r4["reset"] is True and r4["lines"] == ["line one", "line two", "line three"])
+
+r5 = floor.tail_status(ts_info, TS_CLAUDE, card=r3["card"], file=r3["file"], pos=-1)
+check("a negative pos (a malformed request, never one this endpoint produces itself): "
+      "replays instead of crashing on fh.seek()",
+      r5["status"] == "ok" and r5["reset"] is True and r5["lines"] == ["line one", "line two", "line three"])
+
+print("21. the HTTP server: /api/tail.json, wired to a lane lookup (and refused without one)")
+
+
+def stub_tail_lookup(lane, card, file, pos):
+    if lane == "known":
+        return {"status": "ok", "card": 1, "file": "s.jsonl", "pos": 10, "lines": ["hi"], "reset": True}
+    return None
+
+
+srv2 = ThreadingHTTPServer(("127.0.0.1", 0), floor.make_handler(FixedCache(), stub_tail_lookup))
+port2 = srv2.server_address[1]
+t2 = threading.Thread(target=srv2.serve_forever, daemon=True)
+t2.start()
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port2}/api/tail.json?lane=known", timeout=5) as r:
+        check("a known lane returns its lookup's own decode", json.loads(r.read())["lines"] == ["hi"])
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port2}/api/tail.json?lane=nope", timeout=5)
+        check("an unknown lane is refused", False)
+    except Exception as e:
+        check("an unknown lane 404s", "404" in str(e), str(e))
+finally:
+    srv2.shutdown()
+    srv2.server_close()
+
+srv3 = ThreadingHTTPServer(("127.0.0.1", 0), floor.make_handler(FixedCache()))
+port3 = srv3.server_address[1]
+t3 = threading.Thread(target=srv3.serve_forever, daemon=True)
+t3.start()
+try:
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port3}/api/tail.json?lane=known", timeout=5)
+        check("no tail_lookup given at all: still refused, not a crash", False)
+    except Exception as e:
+        check("no tail_lookup given at all: 404s (every caller before this card)",
+              "404" in str(e), str(e))
+finally:
+    srv3.shutdown()
+    srv3.server_close()
+
 shutil.rmtree(ROOT, ignore_errors=True)
+shutil.rmtree(WD_ROOT, ignore_errors=True)
+shutil.rmtree(TS_ROOT, ignore_errors=True)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")
 sys.exit(fails)

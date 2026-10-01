@@ -10,7 +10,11 @@ by the board it works, and for each lane shows one of exactly five states — **
 (a card, its Stage, minutes since launch), **idle** (why), **needs Steve** (the card and
 the first line of its ask), **paused** (a `PAUSE` file), or **sleeping** (a died tick,
 inside the spawner's own ten-minute retry sleep — `how-it-works.md`, "step 8"). A "Recent
-ticks" list, across every project, closes the loop: project, lane, card, when, quota.
+ticks" list, across every project, closes the loop: project, lane, card, when, quota. A
+**Peek** button on a working desk opens a live panel, decoded from that lane's own Claude
+Code session transcript the same way `bin/tail.sh` decodes it on the command line (card
+#63: "view these things from the floor page ... what their claude code session looks
+like") — polled only while a human has it open, never while the panel is closed.
 
 Where the data comes from (`how-it-works.md`, "State on disk" and "Lanes"):
 - `projects/*.env`, sourced with bash exactly as `spawn.sh` sources them (they use shell
@@ -22,10 +26,16 @@ Where the data comes from (`how-it-works.md`, "State on disk" and "Lanes"):
   three do), cached and refreshed every `--refresh-sec` (default 60), like the spawner's
   own poll. Never one call per page view.
 - `systemctl is-active <unit>` for whether the lane's unit is up at all.
+- for Peek, the lane's own session transcript under `~/.claude/projects/<cwd>/<session>.jsonl`
+  (`CLAUDE_PROJECTS_DIR` to override), decoded by `bin/tail.py`'s own functions — reused,
+  never re-implemented, so the two never drift apart on what a line means.
 
 Read-only, and nothing but: no endpoint here can change a card, a `PAUSE` file, or
 anything else. The JSON endpoint (`/api/state.json`) serves exactly the fields in
 `ALLOWED_FIELDS` below — never a raw file, an env value, a log's `result` text, or stderr.
+`/api/tail.json` (Peek) is a separate, narrower contract: `tail_status`'s own docstring
+says exactly what it returns — one short decoded line at a time, the same ones `tail.py`
+would print, never a raw file or a tool's full output.
 
 `bin/test-floor.py` is the offline suite: fixture state directories and a stubbed board,
 no network, no real systemd. Run it after touching this file.
@@ -40,11 +50,13 @@ import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import metrics  # noqa: E402  (bin/metrics.py, beside this file — reused for the log parser)
+import tail  # noqa: E402  (bin/tail.py, beside this file — reused for the Peek decode)
 
 STUCK_STATUS = "Stuck - Needs help"  # board.py's own constant; kept as a literal here so
                                       # this file never imports board.py (which reads
@@ -55,7 +67,7 @@ RECENT_PER_LANE = 20   # ticks kept per lane before the global list is trimmed
 RECENT_TOTAL = 15      # ticks shown on the page, across every project
 
 ENV_VARS = ("PROJECT_NAME", "PROJECT_ROOT", "BOARD_OWNER", "PROJECT_REPO", "BOARD_NUMBER",
-            "LANE_AGENTS", "LANE_COMMAND", "WATCHER_STATE")
+            "LANE_AGENTS", "LANE_COMMAND", "WATCHER_STATE", "LANE_WORKDIR")
 
 # Every key the JSON endpoint may ever emit. `test-floor.py` walks a real response and
 # fails if it finds one outside this set — the rule from the card ("serves only the fields
@@ -122,6 +134,19 @@ def discover_lanes(projects_dir, state_root):
             board_number = int(env.get("BOARD_NUMBER") or 1)
         except ValueError:
             board_number = 1
+        # Same derivation as `tail.sh`: a bad or missing LANE_WORKDIR reads as "card" rather
+        # than failing the whole page — `tail.sh` is strict about this because a human typed
+        # the lane name, but one bad project file here must not take down every other lane's
+        # desk.
+        project_root = env.get("PROJECT_ROOT") or ""
+        workdir_mode = env.get("LANE_WORKDIR") or "card"
+        if workdir_mode not in ("card", "root"):
+            workdir_mode = "card"
+        if workdir_mode == "root":
+            worktree_base = project_root
+        else:
+            worktree_base = os.path.join(os.path.dirname(project_root),
+                                          os.path.basename(project_root) + "-worktrees")
         lanes.append({
             "lane": name,
             "unit": f"watcher@{name}",
@@ -131,6 +156,8 @@ def discover_lanes(projects_dir, state_root):
             "lane_agents": env.get("LANE_AGENTS") or "",
             "lane_command": env.get("LANE_COMMAND") or "/watch",
             "state_dir": env.get("WATCHER_STATE") or os.path.join(state_root, name),
+            "workdir_mode": workdir_mode,
+            "worktree_base": worktree_base,
         })
     return lanes
 
@@ -410,6 +437,54 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             "reason": _idle_reason(lane, items_by_number, last_tick)}
 
 
+# --- Peek: one lane's live session, decoded on demand -------------------------------------
+
+def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
+    """One step of `bin/tail.py`'s own decode, for the floor page's Peek panel: given a
+    lane's resolved layout (`state_dir`, `workdir_mode`, `worktree_base` — the fields
+    `discover_lanes` already computes for every lane), say what its live session shows
+    right now. The same decode `tail.py` uses and nothing more: never a raw transcript
+    line, a tool's full output, or any path beyond the session file's own basename
+    (`tail.py`'s `describe_tool_use` already caps what it returns at ~200 characters —
+    this hands that back unchanged, not a second, looser copy of the same limit).
+
+    `card`/`file`/`pos` are the caller's last-seen cursor — `None` on a fresh Peek, or
+    whenever the card or the session file it names has moved on since. Passing them back
+    unchanged on the next call is what turns this into `tail.py`'s own `read_new_lines`
+    (a `drain`) instead of a full `replay` every poll.
+
+    Returns one of:
+      {"status": "idle"}
+      {"status": "waiting", "card": <n>}
+      {"status": "ok", "card": <n>, "file": <name>, "pos": <n>, "lines": [...], "reset": bool}
+    """
+    # `_read_current` (above), not `tail.read_current` — this file's own helper returns an
+    # int or None; `tail.py`'s returns the raw string, which would never equal the `card`
+    # cursor's int below and force a full replay on every single poll.
+    n = _read_current(os.path.join(info["state_dir"], "current"))
+    if n is None:
+        return {"status": "idle"}
+    session_dir = os.path.join(
+        claude_projects_dir,
+        tail.encode_dir(tail.card_dir(n, info["workdir_mode"], info["worktree_base"])))
+    f = tail.newest_jsonl(session_dir)
+    if f is None:
+        return {"status": "waiting", "card": n}
+    fname = os.path.basename(f)
+    # A negative pos (never produced by this endpoint itself, but a client can send
+    # anything) would reach `fh.seek()` and raise — treat it the same as "no cursor yet"
+    # rather than letting a malformed request 500 instead of replaying.
+    if pos is not None and pos < 0:
+        pos = None
+    if card != n or file != fname or pos is None:
+        lines, new_pos = tail.replay_lines(f)
+        return {"status": "ok", "card": n, "file": fname, "pos": new_pos,
+                "lines": lines, "reset": True}
+    lines, new_pos = tail.read_new_lines(f, pos)
+    return {"status": "ok", "card": n, "file": fname, "pos": new_pos,
+            "lines": lines, "reset": False}
+
+
 def _fmt_quota(cost):
     if cost is None:
         return "unknown"
@@ -610,6 +685,36 @@ INDEX_HTML = """<!doctype html>
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   th { color: var(--dim); font-weight: 600; }
   a { color: inherit; }
+  /* Peek: a lane's live session, decoded the same way bin/tail.sh prints it. */
+  .peek-btn {
+    margin-top: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
+    color: var(--ink); cursor: pointer;
+  }
+  .peek-btn:hover { border-color: var(--dim); }
+  #peek-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 10;
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  #peek-overlay.open { display: flex; }
+  #peek-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    width: min(720px, 100%); max-height: 80vh; display: flex; flex-direction: column;
+  }
+  #peek-panel .peek-head {
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #peek-panel .peek-head strong { font-size: 14px; }
+  #peek-close {
+    background: none; border: none; color: var(--dim); font-size: 20px; line-height: 1;
+    cursor: pointer; padding: 0 4px;
+  }
+  #peek-lines {
+    margin: 0; padding: 12px 14px; overflow-y: auto; flex: 1;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
 </style>
 </head>
 <body>
@@ -622,6 +727,15 @@ INDEX_HTML = """<!doctype html>
   <h2>Recent ticks</h2>
   <div class="table-wrap"><table id="recent"><thead><tr><th>Project</th><th>Lane</th><th>Card</th><th>When</th><th>Quota</th></tr></thead><tbody></tbody></table></div>
 </section>
+<div id="peek-overlay">
+  <div id="peek-panel">
+    <div class="peek-head">
+      <strong id="peek-title"></strong>
+      <button id="peek-close" aria-label="Close">&times;</button>
+    </div>
+    <pre id="peek-lines"></pre>
+  </div>
+</div>
 <script>
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
                      paused: "Paused", sleeping: "Sleeping"};
@@ -771,12 +885,18 @@ function deskHTML(d) {
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   const dispatcher = d.kind === "Triage";
+  // Peek only makes sense while a session is actually running — "working" is the only
+  // pill with a live transcript behind it.
+  const peekBtn = d.pill === "working"
+    ? `<button class="peek-btn" type="button" data-peek-lane="${esc(d.lane)}">Peek</button>`
+    : "";
   return `<a class="desk${dispatcher ? " dispatcher" : ""}" href="${esc(d.link)}" target="_blank" rel="noopener">
     ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
     <div class="name">${esc(d.kind)}</div>
     <div class="unit">${esc(d.unit)}</div>
     <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
     <div class="detail">${detail}</div>
+    ${peekBtn}
   </a>`;
 }
 
@@ -810,6 +930,68 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 30000);
+
+// Peek: a lane's live session, decoded the same way bin/tail.sh prints it on the command
+// line. Polls only while the panel is open — never in the background, never per card.
+let peekLane = null, peekCard = null, peekFile = null, peekPos = null, peekTimer = null;
+
+function peekStatus(text) {
+  document.getElementById("peek-lines").textContent = text;
+  peekCard = null; peekFile = null; peekPos = null;
+}
+
+async function pollPeek() {
+  const lane = peekLane;
+  if (!lane) return;
+  const params = new URLSearchParams({lane});
+  if (peekCard != null) params.set("card", peekCard);
+  if (peekFile != null) params.set("file", peekFile);
+  if (peekPos != null) params.set("pos", peekPos);
+  let data;
+  try {
+    const r = await fetch("/api/tail.json?" + params.toString(), {cache: "no-store"});
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) { return; }
+  if (peekLane !== lane) return; // closed, or switched to another lane, mid-fetch
+  if (data.status === "idle") { peekStatus("Idle — no card right now."); return; }
+  if (data.status === "waiting") { peekStatus(`Waiting for a session on #${data.card}...`); return; }
+  const pre = document.getElementById("peek-lines");
+  if (data.reset) pre.textContent = "";
+  peekCard = data.card; peekFile = data.file; peekPos = data.pos;
+  if (!data.lines.length) return; // nothing new: leave any manual scroll-back alone
+  for (const line of data.lines) pre.textContent += (pre.textContent ? "\n" : "") + line;
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function openPeek(lane) {
+  peekLane = lane; peekCard = null; peekFile = null; peekPos = null;
+  document.getElementById("peek-title").textContent = lane;
+  document.getElementById("peek-lines").textContent = "";
+  document.getElementById("peek-overlay").classList.add("open");
+  pollPeek();
+  if (peekTimer) clearInterval(peekTimer);
+  peekTimer = setInterval(pollPeek, 2000);
+}
+
+function closePeek() {
+  document.getElementById("peek-overlay").classList.remove("open");
+  if (peekTimer) { clearInterval(peekTimer); peekTimer = null; }
+  peekLane = null;
+}
+
+document.getElementById("peek-close").addEventListener("click", closePeek);
+document.getElementById("peek-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "peek-overlay") closePeek();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePeek(); });
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".peek-btn");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openPeek(btn.dataset.peekLane);
+});
 </script>
 </body>
 </html>
@@ -840,29 +1022,67 @@ class Cache:
                 self.state = new_state
 
 
-def make_handler(cache):
+def make_handler(cache, tail_lookup=None):
+    """`tail_lookup`, when given, is `(lane, card, file, pos) -> dict | None` — the Peek
+    endpoint's `/api/tail.json`, built on `tail_status` above. `None` (the default) keeps
+    every existing caller — `bin/test-floor.py`'s `FixedCache` included — working exactly
+    as before: that path just 404s."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass  # never log a request path to stdout/journal — it is nobody's business
 
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            if path in ("/", "/index.html"):
                 body = INDEX_HTML.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            elif self.path == "/api/state.json":
+            elif path == "/api/state.json":
                 body = json.dumps(cache.get()).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif path == "/api/tail.json":
+                self._serve_tail(parsed.query)
             else:
                 self.send_response(404)
                 self.end_headers()
+
+        def _serve_tail(self, query):
+            if tail_lookup is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            qs = parse_qs(query)
+
+            def one(key):
+                vs = qs.get(key)
+                return vs[0] if vs else None
+
+            def one_int(key):
+                v = one(key)
+                try:
+                    return int(v) if v is not None else None
+                except ValueError:
+                    return None
+
+            result = tail_lookup(one("lane") or "", one_int("card"), one("file"), one_int("pos"))
+            if result is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = json.dumps(result).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     return Handler
 
@@ -901,18 +1121,34 @@ def main(argv):
     deploy_state = os.environ.get("DEPLOY_STATE") or "/var/lib/watcher-deploy"
     deploy_repo = watcher_repo(REPO_ROOT)
 
+    claude_projects_dir = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+
     def build():
         return build_state(projects_dir, state_root, fetch_board,
                             unit_active_fn=systemctl_is_active, ask_fn=board_ask,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo))
 
+    def build_lanes():
+        # Peek's own lookup, kept separate from `build()`'s state so a lane's worktree
+        # layout is never one of the fields `/api/state.json` serves (ALLOWED_FIELDS).
+        return {l["lane"]: l for l in discover_lanes(projects_dir, state_root)}
+
     cache = Cache(build, refresh_sec)
+    lane_cache = Cache(build_lanes, refresh_sec)
     stop_event = threading.Event()
     t = threading.Thread(target=cache.loop, args=(stop_event,), daemon=True)
     t.start()
+    lt = threading.Thread(target=lane_cache.loop, args=(stop_event,), daemon=True)
+    lt.start()
 
-    server = ThreadingHTTPServer((host, port), make_handler(cache))
+    def tail_lookup(lane, card, file, pos):
+        info = lane_cache.get().get(lane)
+        if info is None:
+            return None
+        return tail_status(info, claude_projects_dir, card, file, pos)
+
+    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup))
     print(f"floor.py: serving on {host}:{port}, refreshing every {refresh_sec}s")
     try:
         server.serve_forever()

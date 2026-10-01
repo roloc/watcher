@@ -13,6 +13,10 @@ to be idle, or held (a red flag, with its card). Working, idle, needing you, pau
 asleep after a failure — one look, phone-friendly, light and dark. Read-only: it never
 changes a card.
 
+**Peek** at a working desk to see what that bot is actually doing, not just which card it
+holds: a **Peek** button opens a live panel, one short line at a time, updating as it
+works. Close it the same way you opened it — nothing there can change a card either.
+
 ## The columns
 
 - **Backlog** — yours. The bots never start anything from here. They will **put a card

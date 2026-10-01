@@ -2,7 +2,9 @@
 """
 Decodes and follows one Claude Code session transcript — the part of `bin/tail.sh` that
 needs real JSON parsing. Invoked by `tail.sh`, never by hand: see that file's header for
-the interface a human actually types.
+the interface a human actually types. `bin/floor.py` imports this module directly for the
+floor page's "Peek" panel, reusing `replay_lines`/`read_new_lines` (and the path-resolving
+helpers below) rather than re-implementing the decode.
 
 A transcript line is one of several `type`s (`assistant`, `user`, `attachment`,
 `queue-operation`, `last-prompt`, ...); only `assistant` (tool calls, and what the model
@@ -112,22 +114,24 @@ def decode_line(raw):
     return describe(entry)
 
 
-def replay(path, n=REPLAY_LINES):
+def replay_lines(path, n=REPLAY_LINES):
+    """The last `n` decoded lines of `path`, and the byte position (end of file) a
+    follow-up `read_new_lines` call should start from. Pure — no printing — so a caller
+    other than this CLI (`bin/floor.py`'s Peek) can reuse the same decode exactly."""
     lines = []
     with open(path) as fh:
         for raw in fh:
             d = decode_line(raw)
             if d:
                 lines.append(d)
-    for d in lines[-n:]:
-        print(d, flush=True)
-    return os.path.getsize(path)
+    return lines[-n:], os.path.getsize(path)
 
 
-def drain(path, pos):
-    """Prints every complete line appended since `pos`; returns the new position. A
+def read_new_lines(path, pos):
+    """Every complete line's decode appended since `pos`, and the new position. A
     trailing line with no newline yet is left for the next call — the tick is still
     writing it."""
+    lines = []
     new_pos = pos
     with open(path) as fh:
         fh.seek(pos)
@@ -138,7 +142,21 @@ def drain(path, pos):
             new_pos = fh.tell()
             d = decode_line(line)
             if d:
-                print(d, flush=True)
+                lines.append(d)
+    return lines, new_pos
+
+
+def replay(path, n=REPLAY_LINES):
+    lines, pos = replay_lines(path, n)
+    for d in lines:
+        print(d, flush=True)
+    return pos
+
+
+def drain(path, pos):
+    lines, new_pos = read_new_lines(path, pos)
+    for d in lines:
+        print(d, flush=True)
     return new_pos
 
 

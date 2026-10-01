@@ -28,7 +28,10 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   what its tick is doing right now, decoded live from the tick's own session transcript
   (not the lane's own coarser `journalctl` line — see `bin/tail.sh`'s header). Read-only;
   never touches the board or GitHub. `bash bin/test-tail.sh` is its offline test (CI runs
-  it); run it after touching either file.
+  it); run it after touching either file. `bin/floor.py`'s Peek button is the same decode,
+  reached from the floor page instead of the command line — it imports `bin/tail.py`
+  directly rather than re-implementing it, so touching either file's decode logic means
+  running both `bash bin/test-tail.sh` and `python3 bin/test-floor.py`.
 - `bin/eval.sh` — the replay suite: real past failures against `commands/watch.md`,
   `commands/triage.md` and `agents/reviewer.md`, each a case under `evals/cases/` run with a
   live `claude -p` against `evals/fakehub.py` (a closed, offline stand-in for `gh` and
