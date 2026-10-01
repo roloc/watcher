@@ -171,6 +171,10 @@ run_case() {
   CASE_MAX_BUDGET_USD=""
   export FAKEHUB_STATE FAKEHUB_ORIGIN="$ORIGIN" FAKEHUB_LOG="$EVAL_LOG"
 
+  # A case may export BROWSE_BROWSER (to hand the tick a browser that logs its own starts).
+  # Whatever it was before this case, it is again after it, on every way out of here.
+  local had_browser="${BROWSE_BROWSER+set}" old_browser="${BROWSE_BROWSER:-}"
+
   : > "$EVAL_LOG"
   echo '{"next_issue":200,"next_pr":1,"issues":{},"prs":{}}' > "$FAKEHUB_STATE"
   git init -q --bare "$ORIGIN"
@@ -189,6 +193,7 @@ run_case() {
     flunk "$name: case_setup" "did not set CASE_COMMAND and a real \$WORKTREE"
     rm -rf "$TMP"
     unset -f case_setup case_check
+    if [ -n "$had_browser" ]; then export BROWSE_BROWSER="$old_browser"; else unset BROWSE_BROWSER; fi
     return
   fi
 
@@ -231,6 +236,7 @@ run_case() {
   RESULT_RC="$rc"
 
   case_check
+  if [ -n "$had_browser" ]; then export BROWSE_BROWSER="$old_browser"; else unset BROWSE_BROWSER; fi
 
   if [ -n "${EVAL_KEEP:-}" ]; then
     echo "  (kept: $TMP)"

@@ -142,8 +142,8 @@ grep -qE '^DISCORD_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  
               (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)")
 su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su - watcher; gh auth login   (the bot account); gh auth setup-git")
 # A browser for bin/browse.py: how a tick on any project looks at a page (the reviewer
-# too). Asked of browse.py itself, as the user the ticks run as, so this and a tick can
-# never disagree about whether there is one.
+# too). Asked of browse.py itself, as the user the ticks run as, so this looks where a
+# tick's own call will look.
 su - watcher -c "python3 /opt/watcher/bin/browse.py find" >/dev/null 2>&1 || MISSING+=("  Browser:    apt install chromium   (ticks look at pages with bin/browse.py, which needs a
               Chrome or Chromium; without one a tick cannot check a page it changed)")
 if [ $# -eq 0 ]; then

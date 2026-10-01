@@ -357,7 +357,9 @@ def main(argv):
         found = find_browser()
         print(found or NO_BROWSER, file=sys.stdout if found else sys.stderr)
         return 0 if found else 1
-    ap = argparse.ArgumentParser(prog="browse.py", description="Look at a page in a real browser.")
+    ap = argparse.ArgumentParser(
+        prog="browse.py", description="Look at a page in a real browser.",
+        epilog="Also: `browse.py find` prints the browser it would use (exit 1 if there is none).")
     ap.add_argument("command", choices=("check", "text", "shot"))
     ap.add_argument("url")
     ap.add_argument("out", nargs="?", help="shot: the PNG to write")

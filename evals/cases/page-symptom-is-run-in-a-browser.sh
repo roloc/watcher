@@ -12,6 +12,10 @@
 # the card closes), fixes it, and ships. The case knows the browser really ran because
 # BROWSE_BROWSER points at a wrapper that writes one line to the call log and then becomes
 # the real browser — and it knows the fix is real because it loads main's page itself.
+# (bin/eval.sh puts BROWSE_BROWSER back after every case.) The wrapper cannot tell the tick
+# from the `reviewer` it calls, so what this proves is that the prompts TOGETHER get the
+# page run, at least twice: with main's watch.md and reviewer.md, on the day this case was
+# written, the browser was never started at all, in two runs out of two.
 #
 # It needs a Chrome or Chromium on the machine that runs the suite, the same one every tick
 # needs. None found is a failure that says so: a box where this case cannot run is a box
@@ -71,7 +75,6 @@ EOF
 }
 
 case_check() {
-  unset BROWSE_BROWSER
   if [ -z "$CASE_REAL_BROWSER" ]; then
     flunk "page-in-browser: a browser on this machine" \
       "none found — apt install chromium (no tick here can look at a page either)"
@@ -86,17 +89,17 @@ case_check() {
 
   local runs
   runs="$(grep -c '^browser started' "$EVAL_LOG" || true)"
-  if [ "${runs:-0}" -ge 1 ]; then
-    pass "page-in-browser: the tick ran the page in the watcher's browser ($runs time(s))"
+  if [ "${runs:-0}" -ge 2 ]; then
+    pass "page-in-browser: the page was run in the watcher's browser, more than once ($runs)"
   else
-    flunk "page-in-browser: the browser was never started" \
+    flunk "page-in-browser: the browser was started ${runs:-0} time(s), not the two a look and a re-check take" \
       "a project with no tool of its own still has \$WATCHER_HOME/bin/browse.py"
   fi
 
   # The fix, checked the way a reader would: load main's page and read what it draws.
   local page="$TMP/main-index.html" drawn
   git -C "$ORIGIN" show main:site/index.html > "$page" 2>/dev/null || true
-  drawn="$(python3 "$REPO/bin/browse.py" text "file://$page" --settle 0.5 2>&1 || true)"
+  drawn="$(BROWSE_BROWSER="$CASE_REAL_BROWSER" python3 "$REPO/bin/browse.py" text "file://$page" --settle 0.5 2>&1 || true)"
   if printf '%s' "$drawn" | grep -q '3 jobs waiting'; then
     pass "page-in-browser: the page on main draws its line again (3 jobs waiting)"
   else

@@ -74,7 +74,8 @@ browser check or screenshot script (its `CLAUDE.md` names it; point anything it 
 `/tmp`, never the repo) and look at what comes back. A project that names none still has
 the one the watcher ships with the box: `python3 "$WATCHER_HOME/bin/browse.py" check <url>`
 (and `shot <url> /tmp/<name>.png`, which you can `Read`) on the page served from the
-branch, or on the file itself (`file://…`). **Blocking**, as wrong runtime behavior nobody
+branch, or on the file itself (`file://…`). A server you start for this is started and
+killed inside the same Bash call, never left running. **Blocking**, as wrong runtime behavior nobody
 has ruled out, when: the check runs and the page fails it; or the branch changed code that
 runs in a browser and neither it nor you ever rendered it. A check
 that cannot start where you are — no browser on this machine — is not the page failing:

@@ -164,7 +164,15 @@ python3 "$WATCHER_HOME/bin/browse.py" shot  <url> /tmp/card-<n>.png   # a pictur
 
 `<url>` is anything this box can reach: the live page, a server you started from the
 worktree the way the project runs locally, or a file (`file://$PWD/site/index.html`). Add
-`--wait '<a JS expression>'` to wait for the page to finish drawing. When the project's
+`--wait '<a JS expression>'` to wait for the page to finish drawing. **A server is started
+and stopped inside one Bash call** — `<serve command> >/tmp/card-<n>-serve.log 2>&1 &
+pid=$!; <wait for the port>; python3 "$WATCHER_HOME/bin/browse.py" check <url>; kill $pid`
+— never as a call of its own (nothing runs in the background here, so it would hold the
+turn until it timed out) and never left running (the next tick on that port would be
+looking at your branch, not its own). **Exit 2 with "no Chrome or Chromium found" is the
+box, not the page**: go to Stuck (§4) with that one line — it is an access fact, with the
+one action that fixes it (`apt install chromium` on the box) — and do not ship a screen
+change meanwhile. When the project's
 `CLAUDE.md` names its own screenshot script, that is still what makes the pictures a PR
 ships with (below); this is how you *look* — at a symptom before you decide what is wrong,
 and at the same page again before the card closes.
@@ -289,7 +297,7 @@ exempt.** When what you are changing is a page's own script or a template with l
 serve the page from your worktree (the way the project runs locally, or the file itself)
 and run `browse.py check` and `browse.py shot` on it (above): no errors, and a picture you
 have `Read`, are what the PR says in place of the project's own shots. Only a page you
-cannot serve at all is Stuck. Never ship code that only runs in a browser and that no
+cannot serve at all, or a box with no browser, is Stuck. Never ship code that only runs in a browser and that no
 browser has run. (watcher
 [#70](https://github.com/roloc/watcher/pull/70), October 1, 2026: a page's script that did
 not parse merged with every check green, because every check read the source and none ran
