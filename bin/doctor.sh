@@ -156,6 +156,13 @@ PY
   fi
 fi
 
+# --- a browser, for looking at pages ------------------------------------------------------
+# Every project gets bin/browse.py; it needs a Chrome or Chromium on the box. A warning,
+# never a failure: plenty of cards touch no page, and a lane refused over this would stop
+# those too.
+python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
+  || warn "no Chrome or Chromium on this box — a tick cannot look at a page (apt install chromium)"
+
 if [ "$fail" = 0 ]; then
   echo "doctor: ok"
 fi

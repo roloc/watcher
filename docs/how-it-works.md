@@ -472,7 +472,10 @@ same way the deployer closes its own: a small script on a timer, no model, deter
 
 ## What a project brings, what the watcher brings
 
-The watcher brings the loop: the spawner, `/watch`, the reviewer, the board CLI, worktrees.
+The watcher brings the loop: the spawner, `/watch`, the reviewer, the board CLI, worktrees
+— and **a browser** (`"$WATCHER_HOME/bin/browse.py"`), so a tick on any project can load a
+page the way a person does without the project building or installing anything. A project
+with a screen only says where its pages are and how to serve a branch's version.
 A project keeps its own `CLAUDE.md` (hard rules, the required CI check, standing traps),
 its own `.claude/agents/`, its own CI, and can override `/watch` with its own
 `.claude/commands/watch.md`. The generic `/watch` reads the project's `CLAUDE.md` for the

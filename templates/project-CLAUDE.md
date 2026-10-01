@@ -33,14 +33,21 @@ though a human reading the file would say it obviously does.
   every plan `You get:` and builds for the place the asker can open; without this bullet a
   tick assumes a phone and the board.>
 
-- **Looking at a screen.** <If the project has anything a person looks at that runs code —
-  a web app, a page with its own script — name the command that renders it and writes a
-  picture (riffmap: `cd web && npm run shots`; the watcher: `python3
-  bin/test-floor-browser.py --shots <dir>`), and the one that loads a live URL the way a
-  browser does (the watcher: `python3 bin/browse.py check <url>`). `watch.md` and
-  `reviewer.md` treat a change to such a screen that nothing rendered as not shippable, and
-  a page fetched with `curl` as not looked at. Delete this bullet if the project has no
-  screen.>
+- **Looking at a screen.** Every tick already has a browser, from the watcher itself —
+  `python3 "$WATCHER_HOME/bin/browse.py" check|text|shot <url>` — so a project does not
+  build or install one. What only the project knows, and this bullet has to say:
+  <**where its pages are**: the live or staging URL a tick may open, and any login it
+  needs (see "Reading the project's own data"). **How to serve the branch's version**: the
+  one command that starts the app from a worktree and the URL it answers on (`npm run dev`
+  → `http://localhost:5173/`), or that the page is a plain file. **Its own screenshot
+  script, if it has one** (riffmap: `cd web && npm run shots`; the watcher: `python3
+  bin/test-floor-browser.py --shots <dir>`) — that is what makes the pictures a PR ships
+  with; without one, `browse.py shot` on the served page is the picture.> `watch.md` and
+  `reviewer.md` treat a changed screen that nothing rendered as not shippable, and a page
+  fetched with `curl` as not looked at. To run a page in the project's **own CI**, where
+  `$WATCHER_HOME` does not exist, copy `bin/browse.py` into the project (one file, standard
+  library only; `bin/test-floor-browser.py` is a worked example of a suite built on it) or
+  use the stack's own tool. Delete this bullet if the project has no screen.
 
 - **The merge gate** is <list the files/paths: the CI workflow, a pre-commit or pre-push
   hook, `agents/reviewer.md` if the project keeps its own, any replay/eval suite>. A change

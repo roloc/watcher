@@ -71,10 +71,12 @@ and report the finding as plausible, never as verified.
 page, a template, the script a page runs — that code only ever executes in a browser, so
 a test that reads the source says nothing about whether it works. Run the project's
 browser check or screenshot script (its `CLAUDE.md` names it; point anything it writes at
-`/tmp`, never the repo) and look at what comes back. **Blocking**, as wrong runtime
-behavior nobody has ruled out, when: the check runs and the page fails it; the branch
-changed code that runs in a browser and neither it nor you ever rendered it; or the
-project has no way to render that screen at all and the branch did not add one. A check
+`/tmp`, never the repo) and look at what comes back. A project that names none still has
+the one the watcher ships with the box: `python3 "$WATCHER_HOME/bin/browse.py" check <url>`
+(and `shot <url> /tmp/<name>.png`, which you can `Read`) on the page served from the
+branch, or on the file itself (`file://…`). **Blocking**, as wrong runtime behavior nobody
+has ruled out, when: the check runs and the page fails it; or the branch changed code that
+runs in a browser and neither it nor you ever rendered it. A check
 that cannot start where you are — no browser on this machine — is not the page failing:
 say so, and report the finding as plausible. Plain text and documents are not screens in
 this sense; nothing here applies to them. "Works in practice" about a click, a layout or a

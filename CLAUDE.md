@@ -45,7 +45,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `python3 bin/browse.py check <url>` says whether the page's own code or requests failed,
   `text <url>` prints what a reader sees after the scripts ran, `shot <url> out.png` writes
   a picture to `Read`. This is how a page is looked at — never `curl`, which returns what
-  the server sent and says nothing about what was drawn.
+  the server sent and says nothing about what was drawn. **It is the browser every project
+  on the box gets** (`"$WATCHER_HOME/bin/browse.py"`, named in `commands/watch.md`), so
+  keep it dependency-free and keep its three commands stable: other projects' ticks call
+  them. `bin/browse.py find` says which browser it would use (the installer and
+  `bin/doctor.sh` ask it).
 - `bin/eval.sh` — the replay suite: real past failures against `commands/watch.md`,
   `commands/triage.md` and `agents/reviewer.md`, each a case under `evals/cases/` run with a
   live `claude -p` against `evals/fakehub.py` (a closed, offline stand-in for `gh` and

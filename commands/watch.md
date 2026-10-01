@@ -146,13 +146,28 @@ one fetch away — its data said neither widget could have drawn — so the ques
 day of Steve's attention on something the tick could have answered in a minute.)
 
 **Look at it the way its reader did.** A page that draws itself with its own script is
-looked at by **running it in a browser** — the project's screenshot script or browser
-tool, which its `CLAUDE.md` names — never by fetching it. `curl` returns what the server
-sent: a 200 and a complete document say the server is up, and nothing about what was on
-the screen. So "I fetched it and it loads fine" is not having looked, and it is never
-grounds for asking Steve what he saw — what he saw is a fact (below), and the browser will
-show it to you. The same goes for your own change to a page: until something has run it,
-nobody knows whether it works, however many tests read its source.
+looked at by **running it in a browser**, never by fetching it. `curl` returns what the
+server sent: a 200 and a complete document say the server is up, and nothing about what
+was on the screen. So "I fetched it and it loads fine" is not having looked, and it is
+never grounds for asking Steve what he saw — what he saw is a fact (below), and the browser
+will show it to you. The same goes for your own change to a page: until something has run
+it, nobody knows whether it works, however many tests read its source.
+
+**Every project has a browser, whether or not it brings its own.** The watcher ships one
+with the box, and it works from any worktree:
+
+```
+python3 "$WATCHER_HOME/bin/browse.py" check <url>                  # exit 1, and the errors, if the page's own code or a request failed
+python3 "$WATCHER_HOME/bin/browse.py" text  <url>                  # the text a reader sees, after the scripts ran
+python3 "$WATCHER_HOME/bin/browse.py" shot  <url> /tmp/card-<n>.png   # a picture; `Read` it
+```
+
+`<url>` is anything this box can reach: the live page, a server you started from the
+worktree the way the project runs locally, or a file (`file://$PWD/site/index.html`). Add
+`--wait '<a JS expression>'` to wait for the page to finish drawing. When the project's
+`CLAUDE.md` names its own screenshot script, that is still what makes the pictures a PR
+ships with (below); this is how you *look* — at a symptom before you decide what is wrong,
+and at the same page again before the card closes.
 (watcher [#71](https://github.com/roloc/watcher/issues/71), October 1, 2026: "nothing
 loads" on a page whose script did not parse. The tick fetched it five times, got five
 clean responses, and went to Stuck to ask what Steve had seen. A browser says "syntax
@@ -268,12 +283,14 @@ reader. If that sentence is "most of it is in one grey bucket", you have not fix
 chart, you have removed one: stop, and file the designer card instead. The `reviewer`
 treats a screen change with no picture as blocking. Tests, lint and a green build are
 not a look — they passed on [#359](https://github.com/roloc/riffmap/issues/359).
-**A screen that runs code, in a project with no way to run it, is not exempt; the project
-is missing a check.** When what you are changing is a page's own script or a template with
-logic in it — not plain text or a document — and the project's `CLAUDE.md` names no way to
-render it, the change has no gate at all: say that on the card and build the smallest way
-to run the page first (or go to Stuck if you cannot). Never ship code that only runs in a
-browser and that no browser has run. (watcher
+**A screen that runs code, in a project with no screenshot script of its own, is not
+exempt.** When what you are changing is a page's own script or a template with logic in it
+— not plain text or a document — and the project's `CLAUDE.md` names no way to render it,
+serve the page from your worktree (the way the project runs locally, or the file itself)
+and run `browse.py check` and `browse.py shot` on it (above): no errors, and a picture you
+have `Read`, are what the PR says in place of the project's own shots. Only a page you
+cannot serve at all is Stuck. Never ship code that only runs in a browser and that no
+browser has run. (watcher
 [#70](https://github.com/roloc/watcher/pull/70), October 1, 2026: a page's script that did
 not parse merged with every check green, because every check read the source and none ran
 it. The page drew nothing.)

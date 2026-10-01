@@ -207,4 +207,7 @@ Next:
   - Commit and push projects/$NAME.env (git add/commit/push — this script does not).
   - On the box: deploy/install.sh $NAME; systemctl enable --now watcher@$NAME
   - bin/doctor.sh (run by install.sh) is the read-only check that everything above landed.
+  - In the project's own CLAUDE.md: paste templates/project-CLAUDE.md and fill it in. A
+    project with a screen only has to say where its pages are and how to serve a branch;
+    the browser itself (bin/browse.py) comes with the box.
 EOF

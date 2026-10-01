@@ -75,6 +75,18 @@ if not browse.find_browser():
     print(browse.NO_BROWSER, file=sys.stderr)
     sys.exit(2)
 
+# `browse.py find`: how the installer and doctor.sh ask, from a shell, whether a tick on
+# this box can look at a page at all.
+import subprocess
+_found = subprocess.run([sys.executable, os.path.join(HERE, "browse.py"), "find"],
+                        capture_output=True, text=True)
+check("`browse.py find` prints the browser it would use and exits 0",
+      _found.returncode == 0 and _found.stdout.strip() == browse.find_browser(), _found.stdout)
+_none = subprocess.run([sys.executable, os.path.join(HERE, "browse.py"), "find"], capture_output=True,
+                       text=True, env=dict(os.environ, BROWSE_BROWSER="/no/such/browser"))
+check("...and with none it exits 1 and says how to get one, on stderr",
+      _none.returncode == 1 and _none.stdout == "" and "apt install chromium" in _none.stderr, _none.stderr)
+
 # --- a fixture floor: two boards, four lanes, real files -------------------------------
 
 ROOT = tempfile.mkdtemp(prefix="watcher-floor-browser-")

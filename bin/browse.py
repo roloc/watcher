@@ -4,6 +4,7 @@
     python3 bin/browse.py check URL [--wait JS] [--settle SEC]   # exit 1 if the page's own code failed
     python3 bin/browse.py text  URL [--wait JS] [--settle SEC]   # the text a reader sees, after scripts ran
     python3 bin/browse.py shot  URL OUT.png [--width N] [--height N] [--wait JS] [--settle SEC]
+    python3 bin/browse.py find                                   # which browser it would use; exit 1 if none
 
 `curl` fetches what the server sent. A page that draws itself with its own script — the
 floor page does — sends a shell and then fills it in, so `curl` returning 200 and a full
@@ -26,6 +27,10 @@ agents box and the ci box have one). None found is an error that says how to get
 never a silent skip, which is how a check stops existing without anyone deciding it should.
 
 Also a module: `bin/test-floor-browser.py` drives the floor page with `Browser` below.
+
+This is the browser **every project on the box gets**: a tick in any worktree runs it as
+`python3 "$WATCHER_HOME/bin/browse.py" …` (`commands/watch.md` says when), against a live
+page, a server it started, or a `file://` path. A project does not install anything.
 """
 import base64
 import fcntl
@@ -61,7 +66,8 @@ PLAYWRIGHT_BINARIES = (
 
 NO_BROWSER = """browse.py: no Chrome or Chromium found.
   Looked at $BROWSE_BROWSER, the PATH, /Applications, and Playwright's cache.
-  Get one with:   npx --yes playwright install chromium-headless-shell
+  Get one with:   apt install chromium
+             or:   npx --yes playwright install chromium-headless-shell
   or point at one: BROWSE_BROWSER=/path/to/chrome"""
 
 
@@ -347,6 +353,10 @@ class Browser:
 
 def main(argv):
     import argparse
+    if argv[:1] == ["find"]:
+        found = find_browser()
+        print(found or NO_BROWSER, file=sys.stdout if found else sys.stderr)
+        return 0 if found else 1
     ap = argparse.ArgumentParser(prog="browse.py", description="Look at a page in a real browser.")
     ap.add_argument("command", choices=("check", "text", "shot"))
     ap.add_argument("url")

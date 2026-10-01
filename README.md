@@ -32,6 +32,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
                           against it, built from what watch.md/triage.md/reviewer.md actually read
     bin/detect.sh         the product detector: a metric, a rolling baseline, fixed bands (see below)
     bin/floor.py          the floor page: what every lane on the box is doing, live and read-only (see below); bin/test-floor.py checks it offline
+    bin/browse.py         a real browser for every tick on every project: check / text / shot a page (see "Looking at pages")
+    bin/test-floor-browser.py  the floor page loaded and clicked in that browser; also the worked example of a suite built on it
     bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
     bin/test-detect.sh    the detector's cases, offline, every external command stubbed
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
@@ -157,7 +159,7 @@ on. Details in `docs/how-it-works.md`, "Watching the product".
 
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 
-    apt install git python3 curl gh                # plus node 22 and whatever the project builds with
+    apt install git python3 curl gh chromium       # plus node 22 and whatever the project builds with
     npm i -g @anthropic-ai/claude-code
     git clone https://github.com/roloc/watcher /opt/watcher   # or rsync it in
     /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, symlinks, `board`
@@ -185,6 +187,32 @@ Then by hand, once:
    address>:8787/`, reached off-site over whatever WireGuard tunnel already reaches the
    box. `journalctl -u watcher-floor -f` follows it; `systemctl restart watcher-floor`
    after hand-editing `bin/floor.py` outside the normal deploy path.
+
+## Looking at pages
+
+A tick that is told "the page is broken", or that changes a page, has to see the page the
+way a person does — after its scripts ran. `curl` cannot do that, and a project should not
+have to build the means each time. So the browser comes with the box:
+
+    python3 "$WATCHER_HOME/bin/browse.py" check <url>            # exit 1 and the errors if the page's own code or a request failed
+    python3 "$WATCHER_HOME/bin/browse.py" text  <url>            # the text a reader sees
+    python3 "$WATCHER_HOME/bin/browse.py" shot  <url> out.png    # a picture a tick can Read
+
+- **Every project has it.** `$WATCHER_HOME` is set for every tick on every lane, so there
+  is nothing to install or copy per project. `commands/watch.md` tells the tick when to
+  use it, and `agents/reviewer.md` blocks a changed screen that nothing rendered.
+- **It needs one thing on the box:** a Chrome or Chromium. `apt install chromium` (in the
+  setup line above); it also finds one in Playwright's cache. `deploy/install.sh` lists a
+  missing browser under "Next, by hand", and `bin/doctor.sh` warns about it before a
+  lane's first tick. No node, no Playwright package, no port: standard-library Python
+  speaking Chrome's own protocol over a pipe.
+- **What a project adds** is only what the watcher cannot know: where its pages are, and
+  the command that serves a branch's version (`templates/project-CLAUDE.md`, "Looking at a
+  screen"). A project that wants its page run in its **own CI** copies `bin/browse.py`
+  (one file) and writes a suite like `bin/test-floor-browser.py`.
+- **The replay suite holds it in place:** `evals/cases/page-symptom-is-run-in-a-browser.sh`
+  hands a tick a bare project with a broken page and no browser tool of its own, and fails
+  unless the tick ran the page in the browser and the page on `main` draws afterward.
 
 ## CI
 
