@@ -108,7 +108,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   failed post is one stderr line and nothing else, and no message goes out per poll or
   per tick. **It is for stuck and broken only** — a move to Stuck, a run that died, a card
   the detector filed. A new kind of post needs one of those two words to be true of it;
-  progress belongs on the floor page (October 1, 2026). The webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
+  progress belongs on the floor page (October 1, 2026). The webhook URL is a secret; it
+  lives in `/etc/watcher/env`, never in git.
 - American English in every file. Dates like September 7, 2026.
 
 ## When the watcher works its own board

@@ -17,8 +17,9 @@
 #   PROJECT_ROOT     the project's main checkout on this box (worktrees go beside it)
 #   BOARD_OWNER      GitHub user/org that owns the Projects board   (board.py reads these)
 #   BOARD_NUMBER     the board's number
-#   DISCORD_WEBHOOK_URL  optional; a per-project Discord channel for card events. Usually
-#                    set once for the box in /etc/watcher/env instead (see notify.py).
+#   DISCORD_WEBHOOK_URL  optional; a per-project Discord channel for stuck and broken
+#                    alerts. Usually set once for the box in /etc/watcher/env instead
+#                    (see notify.py).
 #   DISCORD_MENTION  optional; who a Stuck alert pings (`<@id>`, `<@&roleid>`, `@here`)
 #   LANE_AGENTS      optional; which cards THIS instance may pick, by `agent:` label. A
 #                    comma-separated list of agent names (`architect,designer`), or the
