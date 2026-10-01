@@ -693,6 +693,18 @@ finally:
     srv3.shutdown()
     srv3.server_close()
 
+print("22. a failed first load says so, out loud, instead of sitting blank forever (card #71)")
+check("the page carries a visible load-error banner, starting hidden",
+      '<div class="alert" id="load-error" style="display:none">' in floor.INDEX_HTML)
+check("a failed refresh shows that banner",
+      'document.getElementById("load-error").style.display = "block"' in floor.INDEX_HTML)
+check("a refresh that succeeds hides it again",
+      'document.getElementById("load-error").style.display = "none"' in floor.INDEX_HTML)
+check("a backgrounded tab's throttled timer is not the only way back: "
+      "becoming visible again retries right away",
+      'document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });'
+      in floor.INDEX_HTML)
+
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(WD_ROOT, ignore_errors=True)
 shutil.rmtree(TS_ROOT, ignore_errors=True)

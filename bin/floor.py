@@ -722,6 +722,7 @@ INDEX_HTML = """<!doctype html>
   <h1 id="box">The floor</h1>
   <div class="muted" id="clock"></div>
 </header>
+<div class="alert" id="load-error" style="display:none">Can't reach the floor's own data right now — retrying&hellip;</div>
 <div id="projects"></div>
 <section class="project">
   <h2>Recent ticks</h2>
@@ -926,10 +927,22 @@ async function refresh() {
   try {
     const r = await fetch("/api/state.json", {cache: "no-store"});
     render(await r.json());
-  } catch (e) { /* keep showing the last good state */ }
+    document.getElementById("load-error").style.display = "none";
+  } catch (e) {
+    // The first load has no "last good state" to fall back on, so a failed fetch would
+    // otherwise leave the static, data-less shell up with nothing saying it is still
+    // trying — the exact shape of "nothing loads" (card #71). Say so, out loud, and keep
+    // retrying; a later success clears it above.
+    console.error("floor: refresh failed", e);
+    document.getElementById("load-error").style.display = "block";
+  }
 }
 refresh();
 setInterval(refresh, 30000);
+// A backgrounded tab has its timers throttled by the browser, so a tab opened and then
+// left in the background can sit well past one failed load before its next retry fires.
+// Refresh the moment it is looked at again, rather than waiting on the interval.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
 // Peek: a lane's live session, decoded the same way bin/tail.sh prints it on the command
 // line. Polls only while the panel is open — never in the background, never per card.
