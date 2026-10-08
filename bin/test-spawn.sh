@@ -309,6 +309,51 @@ exit 0
 STUB
 chmod +x "$BIN/worktree.sh"
 
+# Git fixtures for sync_reused_worktree (card #86): real git, local-only — a bare repo on
+# disk standing in for GitHub, so fetch/merge/divergence are exercised for real rather than
+# re-implemented in a stub. Never touches the network: everything here is file:// local.
+GIT_ORIGIN="$TMP/git-origin.git"
+git init -q --bare "$GIT_ORIGIN"
+
+# seed_worktree <n> — a worktree dir at $WORKTREE_BASE/card-<n> the way worktree.sh would
+# leave one: branch card-<n> checked out, one commit, 'origin' remote set, that same commit
+# already pushed (so origin/card-<n> exists and matches HEAD — the common "nothing to sync"
+# starting point every sub-case below mutates from).
+seed_worktree() {
+  # Two `local` statements, not one `local n=.. dir=..$n..`: every RHS in a single `local`
+  # command is expanded before ANY of its assignments take effect, so a combined form reads
+  # the OUTER (test-counter) $n, not this function's own $1 — found while writing this
+  # fixture, the dirs it built were silently named after the suite's pass/flunk counter.
+  local n="$1"
+  local dir="$WORKTREE_BASE/card-$n"
+  rm -rf "$dir"
+  git init -q "$dir"
+  git -C "$dir" config user.email t@example.com
+  git -C "$dir" config user.name test
+  git -C "$dir" checkout -q -b "card-$n"
+  echo "seed" > "$dir/f.txt"
+  git -C "$dir" add f.txt
+  git -C "$dir" commit -q -m "seed card-$n"
+  git -C "$dir" remote add origin "$GIT_ORIGIN"
+  git -C "$dir" push -q origin "card-$n"
+}
+
+# advance_origin <n> — pushes one more commit to origin/card-<n> from a throwaway clone, so
+# origin moves WITHOUT touching the fixture worktree itself (simulating another lane, Steve,
+# or a Mac session pushing to the same branch while this lane is away).
+advance_origin() {
+  local n="$1"
+  local tmp="$TMP/advance-$n-$RANDOM"
+  git clone -q "$GIT_ORIGIN" "$tmp"
+  git -C "$tmp" checkout -q "card-$n"
+  git -C "$tmp" config user.email t@example.com
+  git -C "$tmp" config user.name test
+  echo "more" >> "$tmp/f.txt"
+  git -C "$tmp" commit -qam "advance card-$n"
+  git -C "$tmp" push -q origin "card-$n"
+  rm -rf "$tmp"
+}
+
 # doctor.sh (card #39): logs the call, then exits 0 silently unless $DOCTOR_FAIL=1, in
 # which case it prints the one line a real failing check would and exits 1 — so a test
 # only has to assert spawn.sh reacted to that line and to the exit code, never re-implement
@@ -741,6 +786,68 @@ WORKTREE_NEW_FAIL=0
   || flunk "attempts/120 after second failure" "$(cat "$STATE/attempts/120" 2>/dev/null)"
 if grepped 'board.py move 120 Stuck - Needs help'; then pass "two failed worktree creates → parked in Stuck without ever launching claude"; else flunk "Stuck move after two worktree failures" "$(cat "$TESTLOG")"; fi
 if not_grepped "claude "; then pass "claude was never invoked (worktree never became ready)"; else flunk "claude should never have been invoked" "$(cat "$TESTLOG")"; fi
+
+# ============================================================================
+echo "12b. a reused worktree is synced to origin before the tick launches (card #86)"
+
+fresh_state
+seed_worktree 140
+board_list $'140\tP1\tbuilder\t-\tCard one forty'
+board_show '{"number":140,"state":"OPEN","status":"In progress","labels":[]}'
+advance_origin 140
+OLD_HEAD="$(git -C "$WORKTREE_BASE/card-140" rev-parse HEAD)"
+NEW_HEAD="$(git -C "$GIT_ORIGIN" rev-parse card-140)"
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+run --once >/dev/null 2>"$TMP/sync140.err"
+if grep -qF "synced card-140 to origin/card-140 ($OLD_HEAD..$NEW_HEAD)" "$TMP/sync140.err"; then pass "one commit behind, clean: fast-forwarded and logged"; else flunk "sync log line" "$(cat "$TMP/sync140.err")"; fi
+if not_grepped "worktree.sh new card-140"; then pass "no fresh worktree created: the same directory was fast-forwarded in place"; else flunk "unexpected fresh worktree" "$(cat "$TESTLOG")"; fi
+if [ "$(git -C "$WORKTREE_BASE/card-140" rev-parse HEAD)" = "$NEW_HEAD" ]; then pass "worktree HEAD now matches origin"; else flunk "HEAD not advanced"; fi
+if grepped "/watch 140"; then pass "the tick still launched, on the synced worktree"; else flunk "tick never launched" "$(cat "$TESTLOG")"; fi
+
+echo "12c. …diverged (commits on both sides): set aside, a fresh worktree takes its place"
+fresh_state
+seed_worktree 141
+board_list $'141\tP1\tbuilder\t-\tCard one forty-one'
+board_show '{"number":141,"state":"OPEN","status":"In progress","labels":[]}'
+advance_origin 141
+dir="$WORKTREE_BASE/card-141"
+echo "local only" >> "$dir/f.txt"
+git -C "$dir" commit -qam "local-only commit"
+run --once >/dev/null 2>"$TMP/sync141.err"
+if grep -qF "card-141 worktree is diverged from origin/card-141" "$TMP/sync141.err"; then pass "diverged worktree: logged as diverged"; else flunk "diverged log line" "$(cat "$TMP/sync141.err")"; fi
+if grepped "worktree.sh new card-141"; then pass "a fresh worktree was created for the tick to launch on"; else flunk "no fresh worktree created" "$(cat "$TESTLOG")"; fi
+if ls -d "$dir".stale-* >/dev/null 2>&1; then pass "the diverged directory was renamed aside, not deleted"; else flunk "no stale directory found" "$(ls "$WORKTREE_BASE")"; fi
+
+echo "12d. …dirty (uncommitted changes), even just behind: set aside rather than guessing"
+fresh_state
+seed_worktree 142
+board_list $'142\tP1\tbuilder\t-\tCard one forty-two'
+board_show '{"number":142,"state":"OPEN","status":"In progress","labels":[]}'
+advance_origin 142
+dir="$WORKTREE_BASE/card-142"
+echo "uncommitted edit" >> "$dir/f.txt"
+run --once >/dev/null 2>"$TMP/sync142.err"
+if grep -qF "card-142 worktree is dirty" "$TMP/sync142.err"; then pass "dirty worktree: logged as dirty"; else flunk "dirty log line" "$(cat "$TMP/sync142.err")"; fi
+if grepped "worktree.sh new card-142"; then pass "a fresh worktree was created"; else flunk "no fresh worktree created" "$(cat "$TESTLOG")"; fi
+stale="$(ls -d "$dir".stale-* 2>/dev/null | head -1)"
+if [ -n "$stale" ] && grep -q "uncommitted edit" "$stale/f.txt" 2>/dev/null; then pass "the uncommitted edit survives, set aside rather than lost"; else flunk "uncommitted edit lost" "stale=[$stale]"; fi
+
+echo "12e. …never pushed: left exactly as it is, no fetch error treated as divergence"
+fresh_state
+dir="$WORKTREE_BASE/card-143"
+rm -rf "$dir"
+git init -q "$dir"
+git -C "$dir" config user.email t@example.com
+git -C "$dir" config user.name test
+git -C "$dir" checkout -q -b card-143
+echo "seed" > "$dir/f.txt"; git -C "$dir" add f.txt; git -C "$dir" commit -q -m seed
+git -C "$dir" remote add origin "$GIT_ORIGIN"
+PRE_HEAD="$(git -C "$dir" rev-parse HEAD)"
+board_list $'143\tP1\tbuilder\t-\tCard one forty-three'
+board_show '{"number":143,"state":"OPEN","status":"In progress","labels":[]}'
+run --once >/dev/null 2>"$TMP/sync143.err"
+if grep -qF "reusing existing worktree for #143" "$TMP/sync143.err"; then pass "never-pushed branch: reused as-is"; else flunk "reuse log line" "$(cat "$TMP/sync143.err")"; fi
+if not_grepped "worktree.sh new card-143" && [ "$(git -C "$dir" rev-parse HEAD)" = "$PRE_HEAD" ]; then pass "left untouched: same directory, same head"; else flunk "never-pushed branch was altered" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "13. pick_card logs WHY a row was skipped, and a row already at 2 attempts is parked (round 4, B2 safety net)"

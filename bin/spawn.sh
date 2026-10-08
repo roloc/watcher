@@ -818,21 +818,78 @@ do_dry_run() {
 }
 
 # --- section 1, step 4: the worktree ------------------------------------------------------
+
+# create_worktree <n> — the create-from-scratch path, shared by prepare_worktree's two
+# entries into it: a card with no worktree yet, and a reused one sync_reused_worktree just
+# set aside as unsyncable. A failed create counts as an attempt either way (card #65 review
+# fold-in: a worktree that never gets created must still count toward the two-attempt Stuck
+# rule).
+create_worktree() {
+  local n="$1"
+  if $WATCHER_WORKTREE new "card-$n"; then return 0; fi
+  log "worktree create failed for #$n"
+  local attempts
+  attempts="$(bump_attempts "$n")"
+  if [ "$attempts" -ge 2 ]; then
+    park_stuck "$n" "Could not create the card's work folder (git worktree) twice in a row."
+  fi
+  return 1
+}
+
+# sync_reused_worktree <n> <dir> — reuse path only, before WT_DIR is set. Brings the
+# worktree's branch up to date with origin before the tick launches on it (card #86 —
+# riffmap-site #1, October 8 2026: a reused worktree sat on its previous head while another
+# lane pushed to the same branch, and only a hand `git pull --ff-only` kept that tick's push
+# from being refused as non-fast-forward). Returns 1 when the directory was renamed aside —
+# dirty, or the branch diverged — so the caller falls through to create_worktree for a fresh
+# one at origin's head; 0 otherwise, with $dir left exactly as found. A branch strictly
+# ahead of its own origin counterpart (unpushed local commits, clean or not) is left alone
+# too: there is nothing on origin to sync to, and touching a dirty tree the tick may be
+# resuming (watch.md: "resume it, never start the card over") is only ever safe when origin
+# actually moved past it.
+sync_reused_worktree() {
+  local n="$1" dir="$2" branch="card-$n"
+  git -C "$dir" fetch -q origin "$branch" 2>/dev/null || true
+  if ! git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    log "reusing existing worktree for #$n at $dir (never pushed)"
+    return 0
+  fi
+  local old new
+  old="$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)"
+  new="$(git -C "$dir" rev-parse "origin/$branch" 2>/dev/null || true)"
+  if [ -z "$old" ] || [ -z "$new" ] || [ "$old" = "$new" ]; then
+    log "reusing existing worktree for #$n at $dir"
+    return 0
+  fi
+  local ahead behind
+  ahead="$(git -C "$dir" rev-list --count "origin/$branch..HEAD" 2>/dev/null || echo 0)"
+  behind="$(git -C "$dir" rev-list --count "HEAD..origin/$branch" 2>/dev/null || echo 0)"
+  if [ "$behind" -eq 0 ]; then
+    log "reusing existing worktree for #$n at $dir"
+    return 0
+  fi
+  local dirty=0
+  [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ] && dirty=1
+  if [ "$dirty" = 1 ] || [ "$ahead" -gt 0 ]; then
+    local why stale
+    if [ "$dirty" = 1 ]; then why="dirty"; else why="diverged from"; fi
+    stale="$dir.stale-$(date -u +%Y%m%dT%H%M%SZ)"
+    log "card-$n worktree is $why origin/$branch ($old..$new); setting aside at $(basename "$stale"), starting fresh"
+    mv "$dir" "$stale"
+    return 1
+  fi
+  git -C "$dir" merge -q --ff-only "origin/$branch"
+  log "synced card-$n to origin/$branch ($old..$new)"
+  return 0
+}
+
 prepare_worktree() {
   local n="$1"
   local dir="$WORKTREE_BASE/card-$n"
   if [ ! -d "$dir" ]; then
-    if ! $WATCHER_WORKTREE new "card-$n"; then
-      log "worktree create failed for #$n"
-      local attempts
-      attempts="$(bump_attempts "$n")"
-      if [ "$attempts" -ge 2 ]; then
-        park_stuck "$n" "Could not create the card's work folder (git worktree) twice in a row."
-      fi
-      return 1
-    fi
+    create_worktree "$n" || return 1
   else
-    log "reusing existing worktree for #$n at $dir"
+    sync_reused_worktree "$n" "$dir" || create_worktree "$n" || return 1
   fi
   WT_DIR="$dir"
 }
