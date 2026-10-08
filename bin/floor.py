@@ -392,7 +392,7 @@ def _minutes_since(when, now):
 
 def _idle_reason(lane, items_by_number, last_tick):
     """Plain words for why the desk is empty right now — never the internal name of
-    anything (`docs/talking-to-steve.md`, rule 7). Best-effort, not a re-implementation of
+    anything (`docs/talking-to-steve.md`, rule 8). Best-effort, not a re-implementation of
     the spawner's own pick: it only has to be honest about what it can see."""
     pending = any(
         it.get("state") == "OPEN"

@@ -115,7 +115,7 @@ For Steve:
 - **A. <option>** (recommended) — <why, one line>
 - **B. <option>** — <one line>
 
-Reply A or B on this card, then move it back to **In progress**.
+Reply A or B on this card, or say which way you lean, then move it back to **In progress**.
 ```
 
 No paths, commands, or code above the fold; the tick puts your file:line findings under

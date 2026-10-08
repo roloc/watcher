@@ -71,7 +71,7 @@ names one; otherwise you are the builder.
 person who asked ends up with, and where; the files that will change, in order; the test
 or check that proves the card is done (for a symptom card, the artifact you will re-fetch,
 §3); and the one risk you expect. Tell Steve you're starting — plain words, no paths above
-the fold (`docs/talking-to-steve.md` rule 7), and three bullets, which is all an `FYI:`
+the fold (`docs/talking-to-steve.md` rule 8), and three bullets, which is all an `FYI:`
 gets (rule 1). The file list is for the PR body and for `reviewer`, not for him:
 
 ```
@@ -450,10 +450,12 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   judgment** — a brief, a direction, a first mockup, nothing left to build — merge it on
   green before the card parks, rather than holding it open for his reply: an open PR is a
   branch two actors can collide on (the worktree-sync card on this board,
-  [#86](https://github.com/roloc/watcher/issues/86), has the incident). Go to Stuck (§4)
-  with the question once it is merged, and record his answer afterward with a small
-  follow-up PR, never by reopening the first one. A project whose own `CLAUDE.md` says
-  otherwise keeps its own rule.
+  [#86](https://github.com/roloc/watcher/issues/86), has the incident). Its body carries
+  **`Refs #<n>`, never `Closes #<n>`** — the card is not done until Steve answers, so it
+  stays open the same way a symptom card does (above). Merge it, then go to **Stuck**
+  (§4) with the question, and record his answer afterward with a small follow-up PR whose
+  body closes the card, never by reopening the first one. A project whose own `CLAUDE.md`
+  says otherwise keeps its own rule.
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
   force-push, never merge red, never push `main` directly, never touch a project's secrets.
@@ -501,14 +503,16 @@ does not need a second round to confirm. If the reply carries a preference *and*
 request (evidence, a change, a further question), carry out the request as part of
 acting on the preference, and say on the card which sentence you read the choice from.
 Only a reply that is purely a question, with no preference anywhere in it, earns a second
-round. Two rounds is the ceiling — a third round on the same question goes to the card as
-an `🤖 FYI:` with the tick's own call, never a third ask. (riffmap-site
-[#1](https://github.com/roloc/riffmap-site/issues/1), October 8, 2026: asked to pick a
-buyer, A, B or C, Steve wrote "I am leaning towards A and C first then eventually
-expanding into B but would love to know if there is intent and demand from either of
-those people first" — an answer with a request for evidence attached. The next tick did
-the research, then parked the card a second time to ask "A alone, or A and C?", a
-question his own words had already answered.)
+round. (riffmap-site [#1](https://github.com/roloc/riffmap-site/issues/1), October 8,
+2026: asked to pick a buyer, A, B or C, Steve wrote "I am leaning towards A and C first
+then eventually expanding into B but would love to know if there is intent and demand
+from either of those people first" — an answer with a request for evidence attached. The
+next tick did the research, then parked the card a second time to ask "A alone, or A and
+C?", a question his own words had already answered.) **This never becomes license to
+guess**: a product decision stays Steve's regardless of how many rounds it takes
+("Hard rules for every agent" in `how-it-works.md`) — a reply that is genuinely still
+just a question, with no lean anywhere in it, earns another honest round, however many
+of those there have already been.
 
 Move to **Stuck - Needs help** the moment you need Steve, rather than guessing —
 **comment first, then move**, so the Discord alert the move sends (see below) can quote
@@ -673,7 +677,9 @@ symptom ends in **Stuck - Needs help** with its PR merged and its `Refs #<n>` le
 card open (§3). That is a complete, honest tick, not a leak and not a failure: the code
 shipped, and the thing Steve reported did not change. Report it as `Outcome: stuck` and
 `Ended in: Stuck - Needs help`, and say in the `Needs Steve` line that the fix landed and
-the symptom survived.
+the symptom survived. A docs-only PR merged ahead of Steve's judgment (§3) ends the same
+way: `Refs #<n>` merged, card open, `Outcome: stuck`, and the `Needs Steve` line is the
+question itself rather than a fix that didn't take.
 
 **Remove `in-flight` on every one of those exits, without exception** — Done and In review
 included. It marks *a tick actively working*, nothing else. A leaked label strands the card

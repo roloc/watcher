@@ -32,8 +32,9 @@ comment, a log line). Those can be as dense as they need to be.
    carries a preference *and* a request (evidence, a change, a further question), do the
    request as part of carrying out the preference, and say on the card which sentence you
    read the choice from. Only a reply that is purely a question, with no preference
-   anywhere in it, gets a second round. Two rounds is the ceiling; a third goes to the card
-   as an `FYI:` with the tick's own call, never a third ask.
+   anywhere in it, gets a second round — and a third, and however many it honestly takes:
+   this is never license to guess the decision yourself. A product decision stays
+   Steve's, no matter how many rounds it takes to get.
 7. **Bold only what decides.** Bold the option labels and the one word that differs between
    options. Do not bold whole sentences.
 8. **Plain words above the fold.** No file paths, commands, code, stack traces, or
