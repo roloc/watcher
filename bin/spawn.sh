@@ -138,6 +138,15 @@ export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}" DISCORD_MENTION="${DISCORD
 PROJECT_REPO="${PROJECT_REPO:-$(git -C "$WATCHER_ROOT" remote get-url origin 2>/dev/null | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')}"
 [ -n "$PROJECT_REPO" ] && export GH_REPO="$PROJECT_REPO"
 WATCHER_CLAUDE="${WATCHER_CLAUDE:-claude}"
+# What a tick's SHELL finds as `claude` is bin/shim/claude, not the binary: Claude Code strips
+# CLAUDE_CODE_OAUTH_TOKEN from the environment of every Bash tool call, so a `claude` the tick
+# ran from the shell (riffmap's RIFFMAP_BACKEND=claude|record pipeline, a probe, an eval) was
+# logged out while the tick itself was not, and riffmap#602 parked on exactly that (watcher#82,
+# October 8, 2026). The shim puts the token back and execs the real binary — resolved HERE,
+# before the shim's directory goes on the tick's PATH, so the shim can never find itself. The
+# tick is launched through that resolved path too; only its shell's `claude` is the shim.
+WATCHER_SHIM_DIR="${WATCHER_SHIM_DIR:-$WATCHER_HERE/shim}"
+WATCHER_REAL_CLAUDE="$(command -v -- "$WATCHER_CLAUDE" 2>/dev/null || printf '%s' "$WATCHER_CLAUDE")"
 WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_DOCTOR="${WATCHER_DOCTOR:-$WATCHER_HERE/doctor.sh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"
@@ -763,7 +772,8 @@ Reply A, B or C on this card, then move it.
 print_claude_cmd() {
   local n="$1" dir="$2" ts="$3"
   cat <<EOF
-(cd "$dir" && $WATCHER_CLAUDE -p "$LANE_COMMAND $n" \\
+(cd "$dir" && PATH="$WATCHER_SHIM_DIR:\$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \\
+  "$WATCHER_REAL_CLAUDE" -p "$LANE_COMMAND $n" \\
   --dangerously-skip-permissions \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
   --output-format json \\
@@ -857,7 +867,8 @@ launch_tick() {
   set -m
   local launch_pwd="$PWD"
   cd "$dir"
-  "$WATCHER_CLAUDE" -p "$LANE_COMMAND $n" \
+  PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \
+  "$WATCHER_REAL_CLAUDE" -p "$LANE_COMMAND $n" \
       --dangerously-skip-permissions \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \
       --output-format json \

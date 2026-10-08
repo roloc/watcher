@@ -311,6 +311,17 @@ In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third
 `ANTHROPIC_API_KEY`, precisely because the key would outrank the login and bill the API
 instead (`README.md`, "Set up a box", step 1).
 
+The same login reaches what a tick runs **from its shell**. Claude Code strips
+`CLAUDE_CODE_OAUTH_TOKEN` from the environment of every Bash tool call, so until October 8,
+2026 a `claude` the tick ran itself — a project's pipeline on the subscription backend, a
+`claude -p` probe, an eval's before/after — answered `Not logged in · Please run /login`
+while the tick around it was logged in, and every card whose work needed such a run parked
+itself in Stuck as "this box isn't logged into the model" (riffmap#602; watcher#82). Now
+`bin/spawn.sh` puts `bin/shim/claude` first on the tick's `PATH`: when the variable is
+missing it re-reads **only** the token from `/etc/watcher/env` (a file the watcher user could
+already read) and execs the real binary, resolved by the spawner before the shim's directory
+went on `PATH` so it can never find itself. A tick needs to do nothing — `claude` just works.
+
 So every dollar amount the loop reports is **imputed**: `total_cost_usd` in a tick's JSON
 result is copied from `modelUsage.<model>.costUSD`, which is **tokens × API list price,
 computed client-side**. It is what the run *would* have cost on the API. It is a **usage

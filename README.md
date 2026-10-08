@@ -171,6 +171,9 @@ Then by hand, once:
    value in `/etc/watcher/env` as `CLAUDE_CODE_OAUTH_TOKEN=…`. That file must not set
    `ANTHROPIC_API_KEY` — the key outranks the login and would bill the API instead.
    `DISCORD_WEBHOOK_URL=…` goes in the same file if you want the channel (see above).
+   That one file logs in the tick *and* anything the tick runs from its shell: Claude Code
+   strips the token from every Bash tool call's environment, so `bin/shim/claude` — first
+   on the tick's `PATH` — reads it back from this file before exec'ing the real binary.
 2. **GitHub:** `su - watcher`, `gh auth login` as the bot account, `gh auth setup-git`. The bot
    needs write access to the repo and access to the Projects board.
 3. **Project:** `deploy/add-project.sh riffmap roloc/riffmap` (from your own machine, see

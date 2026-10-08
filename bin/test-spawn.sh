@@ -180,6 +180,7 @@ cat > "$BIN/claude" <<'STUB'
 #!/usr/bin/env bash
 echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
 echo "claude-env background-tasks-disabled=${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-unset}" >> "$TEST_LOG"
+echo "claude-env path-head=${PATH%%:*} real=${WATCHER_REAL_CLAUDE:-unset}" >> "$TEST_LOG"
 if [ "$1" = "-p" ] && [ "$2" = "reply ok" ]; then
   # untrusted_message: the real CLI names the exact key it checked in the warning, when
   # $CLAUDE_UNTRUSTED_KEY is set — round 4 fold-in, ensure_trust's parse_trust_key.
@@ -434,6 +435,7 @@ run --once >/dev/null; RC=$?
 if [ "$RC" = 0 ]; then pass "successful tick → spawn.sh --once exits 0"; else flunk "exit code" "got $RC"; fi
 if grepped "worktree.sh new card-20" && grepped "/watch 20"; then pass "worktree created and tick launched for #20"; else flunk "launch" "$(cat "$TESTLOG")"; fi
 if grepped "claude-env background-tasks-disabled=1"; then pass "the tick runs with background tasks disabled (a headless CI wait must block)"; else flunk "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS not passed to the tick" "$(cat "$TESTLOG")"; fi
+if grepped "claude-env path-head=$HERE/shim real=$BIN/claude"; then pass "the tick's shell finds bin/shim/claude first, and the shim knows the real binary (watcher#82)"; else flunk "shim not first on the tick's PATH, or WATCHER_REAL_CLAUDE missing" "$(grep claude-env "$TESTLOG")"; fi
 if not_grepped "board.py unclaim 20"; then pass "no unclaim: in-flight was never on the card"; else flunk "unexpected unclaim"; fi
 if not_grepped "worktree.sh remove card-20"; then pass "worktree kept: card is still OPEN"; else flunk "worktree should not be removed"; fi
 if not_grepped "board.py notify"; then pass "no Discord post from the spawner: an ordinary tick is not an event"; else flunk "unexpected board.py notify" "$(cat "$TESTLOG")"; fi
@@ -1690,6 +1692,30 @@ if [ "$(sweeps)" = 1 ]; then pass "…and is not retried every poll: it waits fo
 fresh_state; board_list ""; : > "$STATE/PAUSE"
 run --once >/dev/null 2>&1 || true
 if [ "$(sweeps)" = 0 ]; then pass "PAUSE present: no sweep"; else flunk "a paused lane swept" "$(cat "$TESTLOG")"; fi
+
+# ============================================================================
+echo "34. bin/shim/claude: a nested claude inside a tick gets the token back (watcher#82)"
+SHIM="$HERE/shim/claude"
+mkdir -p "$TMP/realclaude"
+cat > "$TMP/realclaude/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "real-claude token=${CLAUDE_CODE_OAUTH_TOKEN:-unset} discord=${DISCORD_WEBHOOK_URL:-unset} args=$*"
+STUB
+chmod +x "$TMP/realclaude/claude"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=tok-from-file\nDISCORD_WEBHOOK_URL=https://example.invalid/hook\n' > "$TMP/watcher.env"
+OUT="$(env -u CLAUDE_CODE_OAUTH_TOKEN -u DISCORD_WEBHOOK_URL WATCHER_TOKEN_FILE="$TMP/watcher.env" WATCHER_REAL_CLAUDE="$TMP/realclaude/claude" "$SHIM" -p hi)"
+if [ "$OUT" = "real-claude token=tok-from-file discord=unset args=-p hi" ]; then pass "no token in the environment → the file's token, the arguments intact, and nothing else from the file"; else flunk "shim with a missing token" "[$OUT]"; fi
+OUT="$(env CLAUDE_CODE_OAUTH_TOKEN=mine WATCHER_TOKEN_FILE="$TMP/watcher.env" WATCHER_REAL_CLAUDE="$TMP/realclaude/claude" "$SHIM" -p hi)"
+if [ "$OUT" = "real-claude token=mine discord=unset args=-p hi" ]; then pass "a token the caller already has is kept"; else flunk "shim overrode a present token" "[$OUT]"; fi
+OUT="$(env -u CLAUDE_CODE_OAUTH_TOKEN WATCHER_TOKEN_FILE="$TMP/does-not-exist" WATCHER_REAL_CLAUDE="$TMP/realclaude/claude" "$SHIM" -p hi)"; RC=$?
+if [ "$RC" = 0 ] && [ "$OUT" = "real-claude token=unset discord=unset args=-p hi" ]; then pass "no token file → the real binary still runs, logged out as before"; else flunk "shim without a token file" "rc=$RC [$OUT]"; fi
+OUT="$(env -u WATCHER_REAL_CLAUDE -u CLAUDE_CODE_OAUTH_TOKEN WATCHER_TOKEN_FILE="$TMP/watcher.env" PATH="$HERE/shim:$TMP/realclaude:$PATH" claude -p hi)"
+if [ "$OUT" = "real-claude token=tok-from-file discord=unset args=-p hi" ]; then pass "run by hand with no WATCHER_REAL_CLAUDE: finds the next claude on PATH, never itself"; else flunk "shim's own PATH walk" "[$OUT]"; fi
+mkdir -p "$TMP/nobin"; ln -sf "$(command -v bash)" "$TMP/nobin/bash"   # a PATH with bash on it and no claude
+OUT="$(env -u WATCHER_REAL_CLAUDE PATH="$HERE/shim:$TMP/nobin" "$SHIM" -p hi 2>&1)"; RC=$?
+if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "no real claude anywhere → exit 127 and says so, no exec loop"; else flunk "shim with nothing to exec" "rc=$RC [$OUT]"; fi
+OUT="$(env WATCHER_REAL_CLAUDE="$SHIM" PATH="$HERE/shim:$TMP/nobin" "$SHIM" -p hi 2>&1)"; RC=$?
+if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "WATCHER_REAL_CLAUDE naming the shim itself is ignored, not exec'd in a loop"; else flunk "shim pointed at itself" "rc=$RC [$OUT]"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

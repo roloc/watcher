@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# The `claude` a tick's shell finds first. bin/spawn.sh puts this directory at the head of
+# the tick's PATH and names the real binary in WATCHER_REAL_CLAUDE (resolved before the
+# shim's directory went on PATH, so this file can never find itself).
+#
+# Why it exists (watcher#82, October 8, 2026): Claude Code strips its own
+# CLAUDE_CODE_OAUTH_TOKEN from the environment of every Bash tool call. The tick itself runs
+# on that token, but any `claude` the tick runs FROM ITS SHELL — riffmap's
+# RIFFMAP_BACKEND=claude|record pipeline, a `claude -p` probe, an eval's --compare — came up
+# "Not logged in · Please run /login", and every card whose work needed such a run parked
+# itself in Stuck with "this box isn't logged into the model" (riffmap#602 the day before).
+# This puts the token back from the same file systemd read it from, then execs the real
+# binary.
+#
+# Only CLAUDE_CODE_OAUTH_TOKEN is re-exported — nothing else in that file reaches the child —
+# and a token the caller already has is never overridden. /etc/watcher/env is root:watcher
+# 0640, readable by the watcher user already, so this adds no exposure. WATCHER_TOKEN_FILE
+# overrides the path (tests).
+set -u
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  token_file="${WATCHER_TOKEN_FILE:-/etc/watcher/env}"
+  if [ -r "$token_file" ]; then
+    # Sourced in a subshell: the file's other variables die with it.
+    token="$(set +u; . "$token_file" >/dev/null 2>&1; printf '%s' "${CLAUDE_CODE_OAUTH_TOKEN:-}")"
+    [ -n "$token" ] && export CLAUDE_CODE_OAUTH_TOKEN="$token"
+  fi
+fi
+# "Not this file" is `-ef` (same inode), a test builtin: nothing here may depend on an
+# external command, because a PATH without one would otherwise make the shim exec ITSELF
+# forever (found by the test with a PATH holding nothing but bash).
+self="${BASH_SOURCE[0]}"
+real="${WATCHER_REAL_CLAUDE:-}"
+[ -n "$real" ] && [ "$real" -ef "$self" ] && real=""
+if [ -z "$real" ]; then
+  # Run by hand, outside a tick: the next `claude` on PATH that is not this file.
+  IFS=: read -r -a dirs <<< "$PATH"
+  for d in "${dirs[@]}"; do
+    [ -n "$d" ] && [ -x "$d/claude" ] || continue
+    [ "$d/claude" -ef "$self" ] && continue
+    real="$d/claude"; break
+  done
+fi
+[ -n "$real" ] || { echo "claude shim: no real claude found on PATH" >&2; exit 127; }
+exec "$real" "$@"

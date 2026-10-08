@@ -22,7 +22,7 @@ elif [ ! -d /opt/watcher ]; then
   git clone -q "$REPO_URL" /opt/watcher || { echo "clone failed — rsync the repo to /opt/watcher instead" >&2; exit 1; }
 fi
 chown -R watcher:watcher /opt/watcher
-chmod +x /opt/watcher/bin/*.sh /opt/watcher/deploy/*.sh
+chmod +x /opt/watcher/bin/*.sh /opt/watcher/bin/shim/* /opt/watcher/deploy/*.sh
 # The chmod above must never read as a local change to git: the deployer refuses to update
 # a checkout with changes of its own (deploy/autodeploy.sh sets this too).
 su - watcher -c "git -C /opt/watcher config core.fileMode false" 2>/dev/null || true
@@ -51,7 +51,7 @@ if grep -qsx 'LANE_CHANNEL=canary' /opt/watcher/projects/*.env 2>/dev/null; then
     || echo "warning: could not clone the canary checkout to /opt/watcher-canary" >&2
   if [ -d /opt/watcher-canary/.git ]; then
     chown -R watcher:watcher /opt/watcher-canary
-    chmod +x /opt/watcher-canary/bin/*.sh /opt/watcher-canary/deploy/*.sh 2>/dev/null
+    chmod +x /opt/watcher-canary/bin/*.sh /opt/watcher-canary/bin/shim/* /opt/watcher-canary/deploy/*.sh 2>/dev/null
     su - watcher -c "git -C /opt/watcher-canary config core.fileMode false" 2>/dev/null || true
     install -d -o watcher -g watcher /home/watcher/.claude-canary
     ln -sfn /opt/watcher-canary/commands /home/watcher/.claude-canary/commands

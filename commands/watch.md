@@ -681,6 +681,12 @@ bullets is enough).
   `error_max_budget_usd` when crossed, which is the point: it stops a tick that is looping.
   Full explanation in `$WATCHER_HOME/docs/how-it-works.md`, "The dollar figure is quota,
   not a bill".
+- **A `claude` you run from your shell is logged in too.** The `claude` on your `PATH` is
+  `$WATCHER_HOME/bin/shim/claude`, which puts the box's login back (Claude Code strips it
+  from your shell's environment) and runs the real binary. So a project's pipeline on its
+  subscription backend, a `claude -p` probe or an eval's before/after run works from a
+  tick, on the same quota; never park a card as "this box isn't logged into the model"
+  without first running the command and reading its actual error.
 - **The project's own API spend is the one real bill.** When a project calls a model itself,
   through its own env file and its own key, that is money, with no enforced cap unless the
   project's `CLAUDE.md` says otherwise. A project whose lane pins a subscription backend

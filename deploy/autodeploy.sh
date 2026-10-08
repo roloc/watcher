@@ -485,7 +485,7 @@ canary_stage() {
       return 2
     fi
     cgit "config core.fileMode false" || true
-    as_user "chmod +x '$CANARY_DIR'/bin/*.sh '$CANARY_DIR'/deploy/*.sh" 2>/dev/null || true
+    as_user "chmod +x '$CANARY_DIR'/bin/*.sh '$CANARY_DIR'/bin/shim/* '$CANARY_DIR'/deploy/*.sh" 2>/dev/null || true
     lanes="$(canary_lanes | tr '\n' ' ')"
     for l in $lanes; do systemctl restart "watcher@$l" && say "watcher@$l restarted on the canary checkout at ${tgt:0:7}"; done
     canary_unpause
