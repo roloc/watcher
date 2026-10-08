@@ -51,7 +51,7 @@ if grep -qsx 'LANE_CHANNEL=canary' /opt/watcher/projects/*.env 2>/dev/null; then
     || echo "warning: could not clone the canary checkout to /opt/watcher-canary" >&2
   if [ -d /opt/watcher-canary/.git ]; then
     chown -R watcher:watcher /opt/watcher-canary
-    chmod +x /opt/watcher-canary/bin/*.sh /opt/watcher-canary/bin/shim/* /opt/watcher-canary/deploy/*.sh 2>/dev/null
+    chmod +x /opt/watcher-canary/bin/*.sh /opt/watcher-canary/bin/shim/* /opt/watcher-canary/deploy/*.sh 2>/dev/null || true
     su - watcher -c "git -C /opt/watcher-canary config core.fileMode false" 2>/dev/null || true
     install -d -o watcher -g watcher /home/watcher/.claude-canary
     ln -sfn /opt/watcher-canary/commands /home/watcher/.claude-canary/commands

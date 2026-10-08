@@ -30,6 +30,8 @@ fi
 # forever (found by the test with a PATH holding nothing but bash).
 self="${BASH_SOURCE[0]}"
 real="${WATCHER_REAL_CLAUDE:-}"
+# A bare name is not a resolved binary: `exec claude` would search PATH and find this file.
+case "$real" in */*) ;; *) real="" ;; esac
 [ -n "$real" ] && [ "$real" -ef "$self" ] && real=""
 if [ -z "$real" ]; then
   # Run by hand, outside a tick: the next `claude` on PATH that is not this file.

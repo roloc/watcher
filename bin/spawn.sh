@@ -146,7 +146,12 @@ WATCHER_CLAUDE="${WATCHER_CLAUDE:-claude}"
 # before the shim's directory goes on the tick's PATH, so the shim can never find itself. The
 # tick is launched through that resolved path too; only its shell's `claude` is the shim.
 WATCHER_SHIM_DIR="${WATCHER_SHIM_DIR:-$WATCHER_HERE/shim}"
-WATCHER_REAL_CLAUDE="$(command -v -- "$WATCHER_CLAUDE" 2>/dev/null || printf '%s' "$WATCHER_CLAUDE")"
+# A name `command -v` cannot resolve is refused here, not handed to the shim: with the bare
+# name as "the real binary" the shim would find itself on PATH and exec in a loop until the
+# watchdog (found in review). Before the shim the same misconfiguration was an immediate
+# 127 per tick; now it is one journal line and systemd's restart, until someone fixes PATH.
+WATCHER_REAL_CLAUDE="$(command -v -- "$WATCHER_CLAUDE" 2>/dev/null || true)"
+[ -n "$WATCHER_REAL_CLAUDE" ] || { echo "spawn.sh: claude not found: '$WATCHER_CLAUDE' is not an executable on PATH ($PATH); nothing can be launched" >&2; exit 69; }
 WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_DOCTOR="${WATCHER_DOCTOR:-$WATCHER_HERE/doctor.sh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"

@@ -386,7 +386,7 @@ run() {
   DOCTOR_FAIL="${DOCTOR_FAIL:-0}" DOCTOR_FAIL_REASON="${DOCTOR_FAIL_REASON:-}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
   BOARD_OWNER="${BOARD_OWNER:-test-owner}" BOARD_NUMBER="${BOARD_NUMBER:-7}" \
-  WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
+  WATCHER_CLAUDE="${WATCHER_CLAUDE_OVERRIDE:-$BIN/claude}" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
   WATCHER_DOCTOR="$BIN/doctor.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
   WATCHER_CLAUDE_JSON="${CLAUDE_JSON_PATH:-$TMP/unused-claude.json}" \
@@ -1716,6 +1716,13 @@ OUT="$(env -u WATCHER_REAL_CLAUDE PATH="$HERE/shim:$TMP/nobin" "$SHIM" -p hi 2>&
 if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "no real claude anywhere → exit 127 and says so, no exec loop"; else flunk "shim with nothing to exec" "rc=$RC [$OUT]"; fi
 OUT="$(env WATCHER_REAL_CLAUDE="$SHIM" PATH="$HERE/shim:$TMP/nobin" "$SHIM" -p hi 2>&1)"; RC=$?
 if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "WATCHER_REAL_CLAUDE naming the shim itself is ignored, not exec'd in a loop"; else flunk "shim pointed at itself" "rc=$RC [$OUT]"; fi
+OUT="$(env -u CLAUDE_CODE_OAUTH_TOKEN WATCHER_REAL_CLAUDE=claude WATCHER_TOKEN_FILE="$TMP/watcher.env" PATH="$HERE/shim:$TMP/realclaude:$TMP/nobin" "$SHIM" -p hi 2>&1)"; RC=$?
+if [ "$RC" = 0 ] && [ "$OUT" = "real-claude token=tok-from-file discord=unset args=-p hi" ]; then pass "WATCHER_REAL_CLAUDE as a bare name is not trusted: the PATH walk finds the real one, never itself"; else flunk "shim with a bare-name WATCHER_REAL_CLAUDE" "rc=$RC [$OUT]"; fi
+# The spawner's side of the same loop: a WATCHER_CLAUDE that PATH cannot resolve is refused
+# at startup, never handed to the shim as "the real binary".
+fresh_state; board_list $'36\tP1\tbuilder\t-\tCard thirty-six'
+WATCHER_CLAUDE_OVERRIDE="no-such-claude-binary" run --once >/dev/null 2>"$TMP/noclaude.err"; RC=$?
+if [ "$RC" = 69 ] && grep -q "claude not found: 'no-such-claude-binary'" "$TMP/noclaude.err" && not_grepped "/watch 36"; then pass "a WATCHER_CLAUDE PATH cannot resolve: exit 69 with the name in the journal, nothing launched"; else flunk "unresolvable WATCHER_CLAUDE" "rc=$RC err=[$(cat "$TMP/noclaude.err")]"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail
