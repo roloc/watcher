@@ -342,8 +342,9 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 ## 3. Ship it
 
 - Open a PR whose body contains **`Closes #<n>`**, so the merge closes the card by itself —
-  unless the card's symptom is still there at the end, which is the one case that takes
-  `Refs #<n>` instead (next bullet).
+  unless the card's symptom is still there at the end (next bullet) or it is a docs-only
+  PR merging ahead of Steve's judgment (below), the two cases that take `Refs #<n>`
+  instead.
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
