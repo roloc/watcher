@@ -26,10 +26,17 @@ comment, a log line). Those can be as dense as they need to be.
 4. **Lettered options, one line each.** `A.`, `B.`, `C.`. Put your recommendation **first**
    and mark it `(recommended)`. Three options is plenty. Two is fine.
 5. **Say how to answer.** Always end with the exact action: *"Reply A, B or C on this card,
-   then move it back to In progress."*
-6. **Bold only what decides.** Bold the option labels and the one word that differs between
+   or say which way you lean, then move it back to In progress."*
+6. **Reading a reply.** A letter, or a stated preference in any words ("leaning A", "A and
+   C first", "go with the first one"), is the answer; record it and proceed. If the reply
+   carries a preference *and* a request (evidence, a change, a further question), do the
+   request as part of carrying out the preference, and say on the card which sentence you
+   read the choice from. Only a reply that is purely a question, with no preference
+   anywhere in it, gets a second round. Two rounds is the ceiling; a third goes to the card
+   as an `FYI:` with the tick's own call, never a third ask.
+7. **Bold only what decides.** Bold the option labels and the one word that differs between
    options. Do not bold whole sentences.
-7. **Plain words above the fold.** No file paths, commands, code, stack traces, or
+8. **Plain words above the fold.** No file paths, commands, code, stack traces, or
    unexpanded acronyms in the bullets. Say "the build" not "CI `verify`", say "the meeting
    summary format" not "the `MeetingMap` contract".
    **This covers the project's own names for the things on a screen.** A widget, panel,
@@ -42,17 +49,17 @@ comment, a log line). Those can be as dense as they need to be.
    whether he had seen "the ruler" or "the ribbon"; his answer was that there is nothing
    called a ribbon on that page. Both are real names in `template.html`. Neither is a
    name a reader has).
-8. **Details go under a fold.** Everything an engineer would want (paths, diffs, logs, the
+9. **Details go under a fold.** Everything an engineer would want (paths, diffs, logs, the
    exact error) goes at the bottom inside `<details><summary>Details</summary> … </details>`.
    A link is not a detail — see the next rule.
-9. **Links he has to open go right above the question.** A hosted mockup, a screenshot, a
-   live page, the PR that shows the thing: a `**Look:**` list between the bullets and the
-   question, one link per line, what it is in plain words and then the URL. The fold is
-   collapsed on the phone app, and Steve reviews on his phone, so a link under it is a
-   link he never sees. A repo path is not a link; it stays under the fold.
-10. **American English**, dates like *September 7, 2026*. Never *favour*, *optimise*,
+10. **Links he has to open go right above the question.** A hosted mockup, a screenshot, a
+    live page, the PR that shows the thing: a `**Look:**` list between the bullets and the
+    question, one link per line, what it is in plain words and then the URL. The fold is
+    collapsed on the phone app, and Steve reviews on his phone, so a link under it is a
+    link he never sees. A repo path is not a link; it stays under the fold.
+11. **American English**, dates like *September 7, 2026*. Never *favour*, *optimise*,
     *behaviour*.
-11. **Never write "needs input".** Say what input. Never restate the card title as the ask.
+12. **Never write "needs input".** Say what input. Never restate the card title as the ask.
 
 A good test: could Steve answer with a single letter, from the first screen, without opening
 the details? If the answer needs him to look at something, is the link to it on that first
@@ -78,7 +85,7 @@ screen? If not, rewrite.
 - **B. <option>** — <why not, in one line>
 - **C. <option>** — <why not, in one line>
 
-Reply A, B or C on this card, then move it back to **In progress**.
+Reply A, B or C on this card, or say which way you lean, then move it back to **In progress**.
 
 <details><summary>Details</summary>
 
@@ -139,7 +146,7 @@ A quiet tick (nothing claimable) is one line: `Quiet tick: nothing claimable in 
 > - **B. Worked out at display time** — no format change; other tools never see the names.
 > - **C. In a separate file** — no format change; two files to keep in sync.
 >
-> Reply A, B or C on this card, then move it back to **In progress**.
+> Reply A, B or C on this card, or say which way you lean, then move it back to **In progress**.
 >
 > <details><summary>Details</summary>
 >

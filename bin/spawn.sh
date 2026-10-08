@@ -749,7 +749,7 @@ park_stuck() {
 - **B. Fix the card first** — make it smaller or clearer, then move it back to **In progress**.
 - **C. Drop it** — close the card.
 
-Reply A, B or C on this card, then move it.
+Reply A, B or C on this card, or say which way you lean, then move it.
 
 <details><summary>Details</summary>
 

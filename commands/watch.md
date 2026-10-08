@@ -446,7 +446,14 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Stuck too. (riffmap#349, September 17, 2026: a four-line list conflict, both sides
   appending a mockup entry, went to Steve as a decision and cost a day's round trip.)
 - Docs-only changes go through a PR the same way; they get no `reviewer` pass, unless they
-  touch the merge gate (§2).
+  touch the merge gate (§2). **When a docs-only PR's only open question is Steve's
+  judgment** — a brief, a direction, a first mockup, nothing left to build — merge it on
+  green before the card parks, rather than holding it open for his reply: an open PR is a
+  branch two actors can collide on (the worktree-sync card on this board,
+  [#86](https://github.com/roloc/watcher/issues/86), has the incident). Go to Stuck (§4)
+  with the question once it is merged, and record his answer afterward with a small
+  follow-up PR, never by reopening the first one. A project whose own `CLAUDE.md` says
+  otherwise keeps its own rule.
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
   is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
   force-push, never merge red, never push `main` directly, never touch a project's secrets.
@@ -487,6 +494,21 @@ body,comments` again: Steve, or a session on his Mac, may have answered while yo
 and a question already answered on the card costs him a round trip for nothing. (riffmap
 [#454](https://github.com/roloc/riffmap/issues/454), September 21, 2026: a tick parked
 asking for a share link that had been put on the card eight minutes after it started.)
+
+**A stated lean is an answer.** A letter, or a preference stated in any words — "leaning
+A", "A and C first", "go with the first one" — is the answer; record it and proceed, it
+does not need a second round to confirm. If the reply carries a preference *and* a
+request (evidence, a change, a further question), carry out the request as part of
+acting on the preference, and say on the card which sentence you read the choice from.
+Only a reply that is purely a question, with no preference anywhere in it, earns a second
+round. Two rounds is the ceiling — a third round on the same question goes to the card as
+an `🤖 FYI:` with the tick's own call, never a third ask. (riffmap-site
+[#1](https://github.com/roloc/riffmap-site/issues/1), October 8, 2026: asked to pick a
+buyer, A, B or C, Steve wrote "I am leaning towards A and C first then eventually
+expanding into B but would love to know if there is intent and demand from either of
+those people first" — an answer with a request for evidence attached. The next tick did
+the research, then parked the card a second time to ask "A alone, or A and C?", a
+question his own words had already answered.)
 
 Move to **Stuck - Needs help** the moment you need Steve, rather than guessing —
 **comment first, then move**, so the Discord alert the move sends (see below) can quote
@@ -558,7 +580,7 @@ shape:
 - **B. <option>** — <why not, in one line>
 - **C. <option>** — <why not, in one line>
 
-Reply A, B or C on this card, then move it back to **In progress**.
+Reply A, B or C on this card, or say which way you lean, then move it back to **In progress**.
 
 <details><summary>Details</summary>
 
