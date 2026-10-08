@@ -39,6 +39,26 @@ WORKTREE_BASE="$(dirname "$FAKE_ROOT")/$(basename "$FAKE_ROOT")-worktrees"
 # for a test that names it as the parsed key (test 23) to resolve.
 mkdir -p "$FAKE_ROOT" "$WORKTREE_BASE"
 
+# A real local "origin" (bare) and a real git repo at $FAKE_ROOT with it as `origin` and a
+# `main` branch — the actual production topology (every card worktree is `git worktree
+# add`ed off $FAKE_ROOT, sharing its .git) — so the sync tests below (12b-12e) exercise
+# real git: fetch, ff-only merge, `worktree move`, branch rename. Never the network: both
+# ends are local paths. Harmless to every OTHER test in this file, which never runs real
+# git against $FAKE_ROOT (worktree.sh is the stub below unless a test opts into the real
+# one via WATCHER_WORKTREE_OVERRIDE) and always passes its own fixed PROJECT_REPO, so
+# $FAKE_ROOT being a real repo with a throwaway local origin changes nothing it asserts on.
+GIT_ORIGIN="$TMP/git-origin.git"
+git init -q --bare "$GIT_ORIGIN"
+git init -q "$FAKE_ROOT"
+git -C "$FAKE_ROOT" config user.email t@example.com
+git -C "$FAKE_ROOT" config user.name test
+echo "root" > "$FAKE_ROOT/root.txt"
+git -C "$FAKE_ROOT" add root.txt
+git -C "$FAKE_ROOT" commit -q -m "root seed"
+git -C "$FAKE_ROOT" branch -M main
+git -C "$FAKE_ROOT" remote add origin "$GIT_ORIGIN"
+git -C "$FAKE_ROOT" push -q origin main
+
 # --- stubs --------------------------------------------------------------------------------
 # board.py: `list` prints $BOARD_LIST_FILE (or fails if $BOARD_LIST_FAIL=1); `show`
 # prints $BOARD_SHOW_FILE, but:
@@ -309,32 +329,30 @@ exit 0
 STUB
 chmod +x "$BIN/worktree.sh"
 
-# Git fixtures for sync_reused_worktree (card #86): real git, local-only — a bare repo on
-# disk standing in for GitHub, so fetch/merge/divergence are exercised for real rather than
-# re-implemented in a stub. Never touches the network: everything here is file:// local.
-GIT_ORIGIN="$TMP/git-origin.git"
-git init -q --bare "$GIT_ORIGIN"
-
-# seed_worktree <n> — a worktree dir at $WORKTREE_BASE/card-<n> the way worktree.sh would
-# leave one: branch card-<n> checked out, one commit, 'origin' remote set, that same commit
-# already pushed (so origin/card-<n> exists and matches HEAD — the common "nothing to sync"
-# starting point every sub-case below mutates from).
+# seed_worktree <n> — a worktree at $WORKTREE_BASE/card-<n> the way worktree.sh's own `new`
+# really builds one: `git worktree add` off $FAKE_ROOT, sharing its .git (never a standalone
+# `git init` — card #86 review: a worktree set aside with `sync_reused_worktree`'s fallback
+# calls REAL `git worktree move` / `branch -m` against $FAKE_ROOT, and a standalone repo has
+# neither to find). One commit beyond $FAKE_ROOT's own, pushed to origin/card-<n>, so
+# origin/card-<n> exists and matches HEAD — the common "nothing to sync" starting point
+# every sub-case below mutates from.
+#
+# Two `local` statements, not one `local n=.. dir=..$n..`: every RHS in a single `local`
+# command is expanded before ANY of its assignments take effect, so a combined form reads
+# the OUTER (test-counter) $n, not this function's own $1 — found while writing this
+# fixture, the dirs it built were silently named after the suite's pass/flunk counter.
 seed_worktree() {
-  # Two `local` statements, not one `local n=.. dir=..$n..`: every RHS in a single `local`
-  # command is expanded before ANY of its assignments take effect, so a combined form reads
-  # the OUTER (test-counter) $n, not this function's own $1 — found while writing this
-  # fixture, the dirs it built were silently named after the suite's pass/flunk counter.
   local n="$1"
   local dir="$WORKTREE_BASE/card-$n"
   rm -rf "$dir"
-  git init -q "$dir"
+  git -C "$FAKE_ROOT" worktree prune -q 2>/dev/null || true
+  git -C "$FAKE_ROOT" branch -D "card-$n" >/dev/null 2>&1 || true
+  git -C "$FAKE_ROOT" worktree add -q "$dir" -b "card-$n" --no-track origin/main
   git -C "$dir" config user.email t@example.com
   git -C "$dir" config user.name test
-  git -C "$dir" checkout -q -b "card-$n"
   echo "seed" > "$dir/f.txt"
   git -C "$dir" add f.txt
   git -C "$dir" commit -q -m "seed card-$n"
-  git -C "$dir" remote add origin "$GIT_ORIGIN"
   git -C "$dir" push -q origin "card-$n"
 }
 
@@ -431,7 +449,8 @@ run() {
   DOCTOR_FAIL="${DOCTOR_FAIL:-0}" DOCTOR_FAIL_REASON="${DOCTOR_FAIL_REASON:-}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
   BOARD_OWNER="${BOARD_OWNER:-test-owner}" BOARD_NUMBER="${BOARD_NUMBER:-7}" \
-  WATCHER_CLAUDE="${WATCHER_CLAUDE_OVERRIDE:-$BIN/claude}" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" WATCHER_WORKTREE="$BIN/worktree.sh" \
+  WATCHER_CLAUDE="${WATCHER_CLAUDE_OVERRIDE:-$BIN/claude}" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" \
+  WATCHER_WORKTREE="${WATCHER_WORKTREE_OVERRIDE:-$BIN/worktree.sh}" \
   WATCHER_DOCTOR="$BIN/doctor.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
   WATCHER_CLAUDE_JSON="${CLAUDE_JSON_PATH:-$TMP/unused-claude.json}" \
@@ -804,7 +823,7 @@ if not_grepped "worktree.sh new card-140"; then pass "no fresh worktree created:
 if [ "$(git -C "$WORKTREE_BASE/card-140" rev-parse HEAD)" = "$NEW_HEAD" ]; then pass "worktree HEAD now matches origin"; else flunk "HEAD not advanced"; fi
 if grepped "/watch 140"; then pass "the tick still launched, on the synced worktree"; else flunk "tick never launched" "$(cat "$TESTLOG")"; fi
 
-echo "12c. …diverged (commits on both sides): set aside, a fresh worktree takes its place"
+echo "12c. …diverged (commits on both sides): set aside with a real worktree move + branch rename, a fresh worktree resumes at origin's own head (card #86 review round 1: a bare mv here left the branch and worktree still claimed at the old path, so the fresh create always failed)"
 fresh_state
 seed_worktree 141
 board_list $'141\tP1\tbuilder\t-\tCard one forty-one'
@@ -813,10 +832,14 @@ advance_origin 141
 dir="$WORKTREE_BASE/card-141"
 echo "local only" >> "$dir/f.txt"
 git -C "$dir" commit -qam "local-only commit"
-run --once >/dev/null 2>"$TMP/sync141.err"
+ORIGIN_HEAD="$(git -C "$GIT_ORIGIN" rev-parse card-141)"
+WATCHER_WORKTREE_OVERRIDE="$HERE/worktree.sh" run --once >/dev/null 2>"$TMP/sync141.err"
+unset WATCHER_WORKTREE_OVERRIDE
 if grep -qF "card-141 worktree is diverged from origin/card-141" "$TMP/sync141.err"; then pass "diverged worktree: logged as diverged"; else flunk "diverged log line" "$(cat "$TMP/sync141.err")"; fi
-if grepped "worktree.sh new card-141"; then pass "a fresh worktree was created for the tick to launch on"; else flunk "no fresh worktree created" "$(cat "$TESTLOG")"; fi
-if ls -d "$dir".stale-* >/dev/null 2>&1; then pass "the diverged directory was renamed aside, not deleted"; else flunk "no stale directory found" "$(ls "$WORKTREE_BASE")"; fi
+stale="$(ls -d "$dir".stale-* 2>/dev/null | head -1)"
+if [ -n "$stale" ] && grep -q "local only" "$stale/f.txt" 2>/dev/null; then pass "the diverged directory was set aside as a usable git tree, local-only commit intact"; else flunk "no usable stale directory found" "stale=[$stale] $(ls "$WORKTREE_BASE")"; fi
+if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$ORIGIN_HEAD" ]; then pass "the real, fresh worktree at the original path resumes at origin's own head for card-141 (not a from-main restart)"; else flunk "fresh worktree not at origin's head" "got [$(git -C "$dir" rev-parse HEAD 2>/dev/null)] want [$ORIGIN_HEAD]"; fi
+if ! git -C "$dir" log --oneline 2>/dev/null | grep -q "local-only commit"; then pass "the local-only commit did not leak into the fresh worktree"; else flunk "local-only commit present in the fresh worktree"; fi
 
 echo "12d. …dirty (uncommitted changes), even just behind: set aside rather than guessing"
 fresh_state
@@ -826,22 +849,24 @@ board_show '{"number":142,"state":"OPEN","status":"In progress","labels":[]}'
 advance_origin 142
 dir="$WORKTREE_BASE/card-142"
 echo "uncommitted edit" >> "$dir/f.txt"
-run --once >/dev/null 2>"$TMP/sync142.err"
+ORIGIN_HEAD="$(git -C "$GIT_ORIGIN" rev-parse card-142)"
+WATCHER_WORKTREE_OVERRIDE="$HERE/worktree.sh" run --once >/dev/null 2>"$TMP/sync142.err"
+unset WATCHER_WORKTREE_OVERRIDE
 if grep -qF "card-142 worktree is dirty" "$TMP/sync142.err"; then pass "dirty worktree: logged as dirty"; else flunk "dirty log line" "$(cat "$TMP/sync142.err")"; fi
-if grepped "worktree.sh new card-142"; then pass "a fresh worktree was created"; else flunk "no fresh worktree created" "$(cat "$TESTLOG")"; fi
 stale="$(ls -d "$dir".stale-* 2>/dev/null | head -1)"
 if [ -n "$stale" ] && grep -q "uncommitted edit" "$stale/f.txt" 2>/dev/null; then pass "the uncommitted edit survives, set aside rather than lost"; else flunk "uncommitted edit lost" "stale=[$stale]"; fi
+if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$ORIGIN_HEAD" ] && [ -z "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then pass "the real, fresh worktree at the original path is clean, at origin's head"; else flunk "fresh worktree not clean at origin's head"; fi
 
 echo "12e. …never pushed: left exactly as it is, no fetch error treated as divergence"
 fresh_state
 dir="$WORKTREE_BASE/card-143"
 rm -rf "$dir"
-git init -q "$dir"
+git -C "$FAKE_ROOT" worktree prune -q 2>/dev/null || true
+git -C "$FAKE_ROOT" branch -D card-143 >/dev/null 2>&1 || true
+git -C "$FAKE_ROOT" worktree add -q "$dir" -b card-143 --no-track origin/main
 git -C "$dir" config user.email t@example.com
 git -C "$dir" config user.name test
-git -C "$dir" checkout -q -b card-143
 echo "seed" > "$dir/f.txt"; git -C "$dir" add f.txt; git -C "$dir" commit -q -m seed
-git -C "$dir" remote add origin "$GIT_ORIGIN"
 PRE_HEAD="$(git -C "$dir" rev-parse HEAD)"
 board_list $'143\tP1\tbuilder\t-\tCard one forty-three'
 board_show '{"number":143,"state":"OPEN","status":"In progress","labels":[]}'

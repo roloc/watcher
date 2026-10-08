@@ -819,14 +819,17 @@ do_dry_run() {
 
 # --- section 1, step 4: the worktree ------------------------------------------------------
 
-# create_worktree <n> — the create-from-scratch path, shared by prepare_worktree's two
-# entries into it: a card with no worktree yet, and a reused one sync_reused_worktree just
-# set aside as unsyncable. A failed create counts as an attempt either way (card #65 review
-# fold-in: a worktree that never gets created must still count toward the two-attempt Stuck
-# rule).
+# create_worktree <n> [base] — the create-from-scratch path, shared by prepare_worktree's
+# two entries into it: a card with no worktree yet (base defaults to "main"), and a reused
+# one sync_reused_worktree just set aside as unsyncable (base is that same card's own branch
+# name, so worktree.sh resolves it to THAT branch's origin counterpart — see
+# sync_reused_worktree — rather than branching fresh off main and quietly dropping whatever
+# origin already had on it). A failed create counts as an attempt either way (card #65
+# review fold-in: a worktree that never gets created must still count toward the
+# two-attempt Stuck rule).
 create_worktree() {
-  local n="$1"
-  if $WATCHER_WORKTREE new "card-$n"; then return 0; fi
+  local n="$1" base="${2:-main}"
+  if $WATCHER_WORKTREE new "card-$n" "$base"; then return 0; fi
   log "worktree create failed for #$n"
   local attempts
   attempts="$(bump_attempts "$n")"
@@ -841,12 +844,13 @@ create_worktree() {
 # riffmap-site #1, October 8 2026: a reused worktree sat on its previous head while another
 # lane pushed to the same branch, and only a hand `git pull --ff-only` kept that tick's push
 # from being refused as non-fast-forward). Returns 1 when the directory was renamed aside —
-# dirty, or the branch diverged — so the caller falls through to create_worktree for a fresh
-# one at origin's head; 0 otherwise, with $dir left exactly as found. A branch strictly
-# ahead of its own origin counterpart (unpushed local commits, clean or not) is left alone
-# too: there is nothing on origin to sync to, and touching a dirty tree the tick may be
-# resuming (watch.md: "resume it, never start the card over") is only ever safe when origin
-# actually moved past it.
+# dirty, or the branch diverged — so the caller falls through to `create_worktree "$n"
+# "$branch"` for a fresh one at origin's head for THIS branch (never plain `create_worktree
+# "$n"`, which would branch from main and silently drop whatever origin already had); 0
+# otherwise, with $dir left exactly as found. A branch strictly ahead of its own origin
+# counterpart (unpushed local commits, clean or not) is left alone too: there is nothing on
+# origin to sync to, and touching a dirty tree the tick may be resuming (watch.md: "resume
+# it, never start the card over") is only ever safe when origin actually moved past it.
 sync_reused_worktree() {
   local n="$1" dir="$2" branch="card-$n"
   git -C "$dir" fetch -q origin "$branch" 2>/dev/null || true
@@ -871,12 +875,27 @@ sync_reused_worktree() {
   local dirty=0
   [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ] && dirty=1
   if [ "$dirty" = 1 ] || [ "$ahead" -gt 0 ]; then
-    local why stale
+    local why ts stale
     if [ "$dirty" = 1 ]; then why="dirty"; else why="diverged from"; fi
-    stale="$dir.stale-$(date -u +%Y%m%dT%H%M%SZ)"
-    log "card-$n worktree is $why origin/$branch ($old..$new); setting aside at $(basename "$stale"), starting fresh"
-    mv "$dir" "$stale"
-    return 1
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    stale="$dir.stale-$ts"
+    # `git worktree move`, never a bare `mv`: this worktree shares $WATCHER_ROOT's .git, so
+    # a plain rename leaves it still registered — and its branch still named "$branch" —
+    # against the OLD path, and create_worktree's next `git worktree add -b "$branch"` at
+    # that same path then fails outright ("branch already exists" / "already registered
+    # worktree" — found in review). `worktree move` relocates the administrative link
+    # along with the directory, so the set-aside copy stays a fully usable git tree (dirty
+    # changes included), and the branch rename right after frees the name for the fresh
+    # worktree create_worktree is about to make. If the move itself fails (a locked
+    # worktree, an old git), don't make things worse than before this fix: leave the
+    # directory exactly where it is and let the tick launch on it as-is.
+    if git -C "$WATCHER_ROOT" worktree move "$dir" "$stale" 2>/dev/null; then
+      git -C "$WATCHER_ROOT" branch -m "$branch" "$branch.stale-$ts" 2>/dev/null || true
+      log "card-$n worktree is $why origin/$branch ($old..$new); set aside at $(basename "$stale"), starting fresh"
+      return 1
+    fi
+    log "card-$n worktree is $why origin/$branch ($old..$new) but could not be set aside (git worktree move failed); reusing it as-is"
+    return 0
   fi
   git -C "$dir" merge -q --ff-only "origin/$branch"
   log "synced card-$n to origin/$branch ($old..$new)"
@@ -889,7 +908,7 @@ prepare_worktree() {
   if [ ! -d "$dir" ]; then
     create_worktree "$n" || return 1
   else
-    sync_reused_worktree "$n" "$dir" || create_worktree "$n" || return 1
+    sync_reused_worktree "$n" "$dir" || create_worktree "$n" "card-$n" || return 1
   fi
   WT_DIR="$dir"
 }
