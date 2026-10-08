@@ -24,11 +24,14 @@ refresh. Close it with the ×, or tap outside
 it — nothing there can change a card either. If the page ever shows a red line saying its own code hit an error,
 that is the page telling you it is broken: file a card.
 
-**Studio**, top of the floor page, is the same thing as a room: each bot is a little person
-who walks to its desk when it is working, the lounge when it is idle, the couch when it is
-asleep, and a podium by the door when it needs you — with a light over the door that turns
-red the moment anyone does. Tap one for what it just said; tap that for the full Peek.
-**Floor** takes you back. Still read-only, still just a look.
+**Studio**, top of the floor page, is the same thing as a room: one row per board, with the
+board's name on it, and each bot a little person in its own row — at its desk when it is
+working, standing by it with a mug when it is idle, hands up when it is paused. It leaves
+the row for two places only: the couch under the rows when it is asleep, and the podium by
+the door when it needs you, with a light over the door that turns red the moment anyone
+does. The strip along the bottom is the last cards worked, newest first; it slides sideways
+on a phone. Tap a bot for what it just said; tap that for the full Peek. **Floor** takes you
+back. Still read-only, still just a look.
 
 ## The columns
 

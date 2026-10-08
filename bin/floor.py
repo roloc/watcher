@@ -1135,6 +1135,13 @@ INDEX_HTML = """<!doctype html>
     border-radius: 14px; overflow: hidden;
   }
   @media (min-width: 700px) { #room { aspect-ratio: 16 / 10; } }
+  /* The room is rows: one band per project, its name at the left edge, its stations
+     (dispatch counter, a desk per lane, the ship dock) spread across it. A lane stays in
+     its own project's row whatever it is doing — except on the couch (asleep after a
+     failure) and at the podium (needs Steve), the two places that are the room's, not a
+     project's. The first studio sent idle lanes to a shared lounge of five fixed spots;
+     on a box with six idle lanes the sixth stood on the first, and nothing said which
+     project any of them belonged to. */
   .room-label {
     position: absolute; font-size: 10px; color: var(--dim); font-weight: 600;
     text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
@@ -1152,18 +1159,33 @@ INDEX_HTML = """<!doctype html>
   .beacon-green { background: var(--working); }
   .beacon-amber { background: var(--paused); }
   .beacon-red { background: var(--needs); animation: blink 1.2s infinite; }
-  .desk-furniture {
-    position: absolute; width: 11%; height: 7%; transform: translate(-50%, -40%);
-    border: 1px solid var(--line); border-radius: 3px;
-    background: color-mix(in srgb, var(--dim) 8%, transparent);
+  .podium {
+    position: absolute; left: 80%; top: 13%; transform: translate(-50%, -100%);
+    width: 22px; height: 14px; border-radius: 3px 3px 1px 1px;
+    background: color-mix(in srgb, var(--dim) 30%, transparent); border: 1px solid var(--line);
   }
-  .dispatch-counter {
-    position: absolute; width: 16%; height: 6%; transform: translate(-50%, -30%);
+  .zone {
+    position: absolute; left: 2%; right: 2%; border-radius: 8px;
+    border: 1px dashed var(--line); background: color-mix(in srgb, var(--dim) 4%, transparent);
+  }
+  .zone-name {
+    position: absolute; left: 3.5%; font-size: 12px; font-weight: 700; color: var(--ink);
+    white-space: nowrap; text-decoration: none;
+  }
+  .zone-name:hover { text-decoration: underline; }
+  #room-desks .zone-name { pointer-events: auto; }
+  .desk-furniture {
+    position: absolute; width: 44px; height: 18px; transform: translate(-50%, -155%);
     border: 1px solid var(--line); border-radius: 3px;
     background: color-mix(in srgb, var(--dim) 10%, transparent);
   }
+  .dispatch-counter {
+    position: absolute; width: 44px; height: 14px; transform: translate(-50%, -200%);
+    border: 1px solid var(--line); border-radius: 3px;
+    background: color-mix(in srgb, var(--dim) 14%, transparent);
+  }
   .desk-monitor {
-    position: absolute; width: 16px; height: 11px; transform: translate(-50%, -135%);
+    position: absolute; width: 16px; height: 11px; transform: translate(50%, -345%);
     border-radius: 2px; background: var(--line); overflow: hidden;
   }
   .desk-monitor .scanline {
@@ -1175,30 +1197,36 @@ INDEX_HTML = """<!doctype html>
      only moves, while the desk is lit. */
   .desk-monitor.lit .scanline { opacity: .6; animation: scan 1.1s linear infinite; }
   .couch {
-    position: absolute; left: 50%; top: 84%; transform: translate(-50%, -50%);
-    width: 32%; height: 7%; border-radius: 10px;
+    position: absolute; left: 50%; top: 81%; transform: translate(-50%, -50%);
+    width: 30%; height: 7%; border-radius: 10px;
     background: color-mix(in srgb, var(--dim) 14%, transparent); border: 1px solid var(--line);
   }
   .coffee {
-    position: absolute; left: 50%; top: 72%; transform: translate(-50%, -50%);
+    position: absolute; left: 72%; top: 81%; transform: translate(-50%, -50%);
     width: 14px; height: 16px; border-radius: 2px 2px 6px 6px; background: var(--dim);
   }
-  .dock-line {
-    position: absolute; left: 50%; top: 62%; transform: translate(-50%, -50%);
-    width: 70%; height: 2px; background: var(--line);
-  }
+  /* The wall by the door: a strip along the bottom, every card whole. It scrolls
+     sideways on a narrow screen rather than clipping a card in half. */
   .pin-wall {
-    position: absolute; right: 2%; top: 14%; width: 16%; max-height: 34%; overflow: hidden;
-    display: flex; flex-direction: column; gap: 4px;
+    position: absolute; left: 2%; right: 2%; top: 87%; bottom: 2%;
+    display: flex; gap: 6px; align-items: flex-start; overflow-x: auto; overflow-y: hidden;
+    padding: 0 2px; scrollbar-width: none;
   }
+  .pin-wall::-webkit-scrollbar { display: none; }
+  /* More cards than fit: the strip scrolls sideways, and its right edge fades to say so,
+     instead of showing a card cut in half. */
+  .pin-wall.scrolls { mask-image: linear-gradient(to right, #000 88%, transparent); -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); }
   .pin-card {
-    font-size: 9px; line-height: 1.3; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 3px; padding: 3px 4px; text-decoration: none; color: inherit;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .12); display: block;
+    flex: 0 0 auto; font-size: 10px; line-height: 1.3; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; text-decoration: none;
+    color: inherit; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); display: block; white-space: nowrap;
   }
+  .pin-card b { font-weight: 600; }
   #room-desks, #room-characters { position: absolute; inset: 0; pointer-events: none; }
   .character {
-    position: absolute; width: 30px; transform: translate(-50%, -100%);
+    /* As wide as its own plate (not a fixed 30px that the plate overflowed to the right),
+       so translate(-50%) centers the figure and the words together over the spot. */
+    position: absolute; width: max-content; transform: translate(-50%, -100%);
     transition: left 1s ease, top 1s ease; cursor: pointer; text-align: center;
     pointer-events: auto;
   }
@@ -1216,8 +1244,9 @@ INDEX_HTML = """<!doctype html>
     display: block; margin: 0 auto; max-width: 46px; max-height: 34px; border-radius: 3px;
   }
   .character .plate {
-    font-size: 8px; color: var(--dim); white-space: nowrap; margin-top: 2px; line-height: 1.2;
+    font-size: 9px; color: var(--ink); font-weight: 600; white-space: nowrap; margin-top: 2px; line-height: 1.2;
   }
+  .character .plate .where { color: var(--dim); font-weight: 500; }
   .bubble {
     position: absolute; transform: translate(-50%, calc(-100% - 10px));
     background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -1262,12 +1291,10 @@ window.addEventListener("unhandledrejection", function () {
   <div id="room">
     <div id="beacon" class="beacon-green"></div>
     <div class="room-door"></div>
-    <div class="room-label" style="left:14%;top:8%;transform:translate(-50%,0)">Dispatch</div>
-    <div class="room-label" style="left:72%;top:8%;transform:translate(-50%,0)">Podium</div>
-    <div class="dispatch-counter" style="left:14%;top:26%"></div>
-    <div class="couch"></div>
-    <div class="coffee"></div>
-    <div class="dock-line"></div>
+    <div class="room-label" style="right:2%;top:2%">Podium</div>
+    <div class="podium"></div>
+    <div class="couch" id="couch"></div>
+    <div class="coffee" id="coffee"></div>
     <div class="pin-wall" id="pin-wall"></div>
     <div id="room-desks"></div>
     <div id="room-characters"></div>
@@ -1659,6 +1686,9 @@ function characterSVG(pill, look) {
       : armRRaised;
   const sleepy = pill === "sleeping"
     ? `<text x="17" y="3" style="font:700 7px sans-serif;fill:var(--dim)">z</text>` : "";
+  // Idle: standing by its own station with a mug, waiting for a card.
+  const mug = pill === "idle"
+    ? `<rect x="20.5" y="19" width="5" height="5.5" rx="1" style="fill:#f3f4f6;opacity:.9"/>` : "";
   const glasses = look.glasses
     ? `<rect x="9" y="6" width="3.5" height="2.5" rx=".5" style="fill:none;stroke:#1b1f24;stroke-width:.6"/>
        <rect x="13.5" y="6" width="3.5" height="2.5" rx=".5" style="fill:none;stroke:#1b1f24;stroke-width:.6"/>
@@ -1668,64 +1698,81 @@ function characterSVG(pill, look) {
     <rect x="6" y="12" width="14" height="13" rx="4" style="fill:${c}"/>${pattern}
     <circle cx="13" cy="7" r="6" style="fill:${look.skin}"/>
     <path d="M7 5 a6 6 0 0 1 12 0 v1 h-12 z" style="fill:${look.hair}"/>${glasses}
-    ${sleepy}</svg>`;
+    ${sleepy}${mug}</svg>`;
 }
 
-// Where things stand. Desks and the dispatch counter are furniture — fixed, one per
-// lane — and the room's four "somewhere else" spots (lounge, couch, podium) are a short
-// list of slots a lane takes one of, by its place in that state among the others sharing
-// it, so two lanes idle at once don't stand on top of each other.
-const LOUNGE_SLOTS = [{x: 18, y: 78}, {x: 82, y: 78}, {x: 18, y: 93}, {x: 82, y: 93}, {x: 50, y: 95}];
-const COUCH_SLOTS = [{x: 40, y: 85}, {x: 50, y: 87}, {x: 60, y: 85}];
-const NEEDS_SLOTS = [{x: 72, y: 22}, {x: 77, y: 30}, {x: 67, y: 30}];
-const DISPATCH_SLOTS = [{x: 14, y: 30}, {x: 9, y: 38}, {x: 19, y: 38}];
+// Where things stand. The room is rows: one band per project between ROWS_TOP and
+// ROWS_BOTTOM, the project's name at its left edge, its stations spread across it — the
+// dispatch counter (a triage lane), a desk per other lane, the ship dock last. A lane
+// stays in its own row whatever it is doing, so a row always shows its whole team: at its
+// desk working, by it with a mug when idle, hands up when paused. Only two places are the
+// room's rather than a project's — the couch (asleep after a failure) and the podium by
+// the door (needs Steve) — and a plate there says which project the lane came from. (The
+// first studio sent every idle lane to a shared lounge of five fixed spots: on a box with
+// six idle lanes the sixth stood on the first, and nothing said whose they were.)
+const ROWS_TOP = 17, ROWS_BOTTOM = 72, ROW_MAX = 20;
+const PODIUM = {x: 80, y: 16, span: 36};
+const COUCH = {x: 50, span: 24};
 
-function projectColumn(pIndex, pCount) {
-  const width = 54 / pCount;
-  return {left: 24 + pIndex * width, width};
+function rowBand(pIndex, pCount) {
+  const h = Math.min(ROW_MAX, (ROWS_BOTTOM - ROWS_TOP) / Math.max(pCount, 1));
+  return {top: ROWS_TOP + pIndex * h, height: h};
 }
-function deskSlot(pIndex, pCount, laneIndex) {
-  const {left, width} = projectColumn(pIndex, pCount);
-  const col = laneIndex % 2, row = Math.floor(laneIndex / 2);
-  return {x: left + width * ((col + 0.5) / 2), y: Math.min(28 + row * 13, 58)};
+// Where the rows end: the couch sits just under the last one, the wall under that, so a
+// box with one project is not a room with everything in its top third.
+function rowsBottom(pCount) { return rowBand(Math.max(pCount, 1) - 1, pCount).top + rowBand(0, pCount).height; }
+// `n` spots spread evenly across a span centered on `cx` — never a fixed list that wraps
+// around and puts the (n+1)th on top of the first.
+function spread(i, n, cx, span) {
+  if (n <= 1) return cx;
+  return cx - span / 2 + i * (span / (n - 1));
 }
-function dockSlot(i, n) {
-  if (n <= 1) return {x: 50, y: 62};
-  const span = 46;
-  return {x: 50 - span / 2 + i * (span / (n - 1)), y: 62};
-}
+function stationX(i, n) { return spread(i, n, 51, 74); }
 
 function computeStudio(state) {
   const projects = state.projects || [];
-  const lanes = [];
-  let triageIndex = 0;
+  const lanes = [], ships = [], rows = [];
   projects.forEach((p, pIndex) => {
-    let deskIndex = 0;
-    (p.lanes || []).forEach((l) => {
-      const home = l.kind === "Triage" ? DISPATCH_SLOTS[triageIndex++ % DISPATCH_SLOTS.length]
-                                        : deskSlot(pIndex, projects.length, deskIndex++);
-      lanes.push({...l, project: p.name, home});
-    });
+    const band = rowBand(pIndex, projects.length);
+    const feetY = band.top + band.height * 0.9;
+    const ordered = [...(p.lanes || [])].sort(
+      (a, b) => (a.kind === "Triage" ? 0 : 1) - (b.kind === "Triage" ? 0 : 1));
+    const n = ordered.length + 1; // the ship dock is the last station
+    rows.push({name: p.name, board_url: p.board_url, top: band.top, height: band.height});
+    ordered.forEach((l, i) => lanes.push({...l, project: p.name, home: {x: stationX(i, n), y: feetY}}));
+    ships.push({name: p.name, ship: p.ship, pos: {x: stationX(n - 1, n), y: feetY}});
   });
-  let idleN = 0, sleepN = 0, needsN = 0;
-  for (const l of lanes) {
-    // Working and paused stand at their own desk (card: "a paused lane stands by its desk
-    // with its hands up") — everyone else walks to the room's shared spot for their state.
-    if (l.pill === "working" || l.pill === "paused") l.pos = l.home;
-    else if (l.pill === "idle") l.pos = LOUNGE_SLOTS[idleN++ % LOUNGE_SLOTS.length];
-    else if (l.pill === "sleeping") l.pos = COUCH_SLOTS[sleepN++ % COUCH_SLOTS.length];
-    else if (l.pill === "needs_steve") l.pos = NEEDS_SLOTS[needsN++ % NEEDS_SLOTS.length];
-    else l.pos = l.home;
-  }
-  const ships = projects.map((p, i) => ({name: p.name, ship: p.ship, pos: dockSlot(i, projects.length)}));
-  return {lanes, ships};
+  const sleeping = lanes.filter(l => l.pill === "sleeping");
+  const needs = lanes.filter(l => l.pill === "needs_steve");
+  const couchY = rowsBottom(projects.length) + 9;
+  for (const l of lanes) { l.pos = l.home; l.away = false; }
+  sleeping.forEach((l, i) => {
+    l.pos = {x: spread(i, sleeping.length, COUCH.x, Math.min(COUCH.span, 10 * (sleeping.length - 1))), y: couchY};
+    l.away = true;
+  });
+  needs.forEach((l, i) => {
+    l.pos = {x: spread(i, needs.length, PODIUM.x, Math.min(PODIUM.span, 12 * (needs.length - 1))), y: PODIUM.y};
+    l.away = true;
+  });
+  return {lanes, ships, rows, bottom: rowsBottom(projects.length)};
 }
 
-function renderRoomDesks(lanes) {
-  document.getElementById("room-desks").innerHTML = lanes.filter(l => l.kind !== "Triage").map(l => `
-    <div class="desk-furniture" style="left:${l.home.x}%;top:${l.home.y}%"></div>
-    <div class="desk-monitor${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
-         style="left:${l.home.x}%;top:${l.home.y}%"><div class="scanline"></div></div>`).join("");
+function renderRoomDesks(lanes, rows) {
+  const zones = rows.map(r => `
+    <div class="zone" style="top:${r.top}%;height:${r.height - 1.5}%"></div>
+    <a class="zone-name" style="top:${r.top + 1}%" href="${esc(r.board_url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`);
+  const furniture = lanes.map(l => l.kind === "Triage"
+    ? `<div class="dispatch-counter" style="left:${l.home.x}%;top:${l.home.y}%"></div>`
+    : `<div class="desk-furniture" style="left:${l.home.x}%;top:${l.home.y}%"></div>
+       <div class="desk-monitor${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
+            style="left:${l.home.x}%;top:${l.home.y}%"><div class="scanline"></div></div>`);
+  document.getElementById("room-desks").innerHTML = zones.join("") + furniture.join("");
+}
+
+// The plate under a character: what it is (Build, Design, Triage), and — only when it has
+// left its row for the couch or the podium — whose it is.
+function plateHTML(kind, project, away) {
+  return `<div class="plate">${esc(kind)}${away ? ` <span class="where">· ${esc(project)}</span>` : ""}</div>`;
 }
 
 // Characters keep the same DOM node across renders, so moving `left`/`top` is a CSS
@@ -1747,11 +1794,11 @@ function renderCharacters(lanes) {
     }
     el.dataset.kind = l.kind;
     el.dataset.pill = l.pill;
+    el.dataset.project = l.project;
     // Held up over the waving character, the same mockup the floor's own desk shows — the
     // room Steve walks instead of the card he'd otherwise click through to (card #91).
     const held = l.pill === "needs_steve" ? mockupThumbsHTML((l.images || []).slice(0, 1), "character-mockup") : "";
-    el.innerHTML = held + characterSVG(l.pill, laneLook(l.lane))
-      + `<div class="plate">${esc(l.lane)}<br>${esc(l.project)}</div>`;
+    el.innerHTML = held + characterSVG(l.pill, laneLook(l.lane)) + plateHTML(l.kind, l.project, l.away);
     el.style.left = l.pos.x + "%";
     el.style.top = l.pos.y + "%";
   }
@@ -1773,7 +1820,7 @@ function renderShipDock(ships) {
       shipEls[s.name] = el;
     }
     const st = shipState(s.ship);
-    el.innerHTML = shipSVG(st.mode, st.pill) + `<div class="plate">Ship<br>${esc(s.name)}</div>`;
+    el.innerHTML = shipSVG(st.mode, st.pill) + plateHTML("Ship", s.name, false);
     el.style.left = s.pos.x + "%";
     el.style.top = s.pos.y + "%";
   }
@@ -1781,11 +1828,13 @@ function renderShipDock(ships) {
 }
 
 function renderPinWall(recent) {
-  // Newest on top: `state.recent` already sorts newest-first, and the wall stacks top to
-  // bottom in that same order.
-  document.getElementById("pin-wall").innerHTML = (recent || []).slice(0, 6).map(r => `
-    <a class="pin-card" href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}
-      · ${esc(r.lane)}<br>${relTime(r.when)}</a>`).join("");
+  // Newest first: `state.recent` already sorts newest-first, and the strip runs left to
+  // right in that same order. Each card names the issue and the project it is on.
+  const wall = document.getElementById("pin-wall");
+  wall.innerHTML = (recent || []).slice(0, 8).map(r => `
+    <a class="pin-card" href="${esc(r.card.url)}" target="_blank" rel="noopener"><b>#${r.card.number}</b>
+      · ${esc(r.project)}<br>${relTime(r.when)}</a>`).join("");
+  wall.classList.toggle("scrolls", wall.scrollWidth > wall.clientWidth + 1);
 }
 
 function renderBeacon(state) {
@@ -1804,8 +1853,10 @@ function renderBeacon(state) {
 }
 
 function renderStudio(state) {
-  const {lanes, ships} = computeStudio(state);
-  renderRoomDesks(lanes);
+  const {lanes, ships, rows, bottom} = computeStudio(state);
+  for (const id of ["couch", "coffee"]) document.getElementById(id).style.top = (bottom + 9) + "%";
+  document.getElementById("pin-wall").style.top = (bottom + 15) + "%";
+  renderRoomDesks(lanes, rows);
   renderCharacters(lanes);
   renderShipDock(ships);
   renderPinWall(state.recent);
@@ -1893,20 +1944,23 @@ function buildDemoStates() {
      projects: [proj("alpha", [L("alpha", "Build", "working", {card: {number: 10, url: "#"}, stage: "Building", minutes: 4}),
                                L("alpha-design", "Design", "idle", {reason: "Nothing to pick up right now."}),
                                L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
-                "passing")],
+                "passing"),
+                proj("beta", [L("beta", "Build", "idle", {reason: "Nothing to pick up right now."})], "passing")],
      recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}]},
     {header: {box: "demo", time: now, needs_steve_total: 1},
      projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B",
                                images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQVR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC"]}),
                                L("alpha-design", "Design", "paused", {}),
                                L("alpha-triage", "Triage", "working", {card: {number: 12, url: "#"}, stage: "Claimed", minutes: 1})],
-                "failing")],
+                "failing"),
+                proj("beta", [L("beta", "Build", "sleeping", {reason: "Card #2 did not finish; trying again shortly."})], "passing")],
      recent: [{project: "alpha", lane: "alpha", card: {number: 11, url: "#"}, when: now, quota: "~$0.90 equivalent (subscription — not billed)"}]},
     {header: {box: "demo", time: now, needs_steve_total: 0},
      projects: [proj("alpha", [L("alpha", "Build", "sleeping", {reason: "Card #9 did not finish; trying again shortly."}),
                                L("alpha-design", "Design", "idle", {reason: "Nothing to pick up right now."}),
                                L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
-                "running")],
+                "running"),
+                proj("beta", [L("beta", "Build", "working", {card: {number: 2, url: "#"}, stage: "Building", minutes: 12})], "running")],
      recent: []},
   ];
 }
