@@ -636,7 +636,18 @@ try:
               b.eval(NO_OVERLAP) == [], b.eval(NO_OVERLAP))
         check("...and the room still fits the screen",
               b.eval("document.documentElement.scrollWidth <= window.innerWidth"))
+        check("eight cards on a phone-wide wall: it scrolls, and its edge fades to say so",
+              b.eval("document.getElementById('pin-wall').classList.contains('scrolls')"))
         shot(b, "studio-live-shaped-phone.png")
+        # The same wall drawn while the studio was closed (every 30s poll draws it hidden)
+        # and then opened: the fade has to be there on the first open, not the next poll.
+        b.click("#floor-btn")
+        b.wait_for("!" + STUDIO_OPEN)
+        b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); true")
+        b.click("#studio-btn")
+        b.wait_for(STUDIO_OPEN)
+        check("a wall drawn while the studio was hidden still fades the moment it opens",
+              b.eval("document.getElementById('pin-wall').classList.contains('scrolls')"))
         check("a character walks: the CSS transition is on by default",
               b.eval("getComputedStyle(document.querySelector('.character')).transitionDuration") != "0s")
 

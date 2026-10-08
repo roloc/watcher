@@ -1638,6 +1638,7 @@ function showStudio() {
   document.getElementById("floor-view").style.display = "none";
   document.getElementById("studio").classList.add("open");
   document.getElementById("studio-btn").style.display = "none";
+  markWallScroll();
 }
 function showFloor() {
   closeBubble();
@@ -1834,6 +1835,12 @@ function renderPinWall(recent) {
   wall.innerHTML = (recent || []).slice(0, 8).map(r => `
     <a class="pin-card" href="${esc(r.card.url)}" target="_blank" rel="noopener"><b>#${r.card.number}</b>
       · ${esc(r.project)}<br>${relTime(r.when)}</a>`).join("");
+  markWallScroll();
+}
+// Whether the wall overflows is only measurable while the studio is showing (a hidden
+// strip is 0 wide), so this runs again the moment it opens, not just on each redraw.
+function markWallScroll() {
+  const wall = document.getElementById("pin-wall");
   wall.classList.toggle("scrolls", wall.scrollWidth > wall.clientWidth + 1);
 }
 
