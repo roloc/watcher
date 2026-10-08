@@ -14,6 +14,7 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py notify <issue> released|breach ["<detail>"]
     python3 scripts/board.py dump                   # every open+closed item, as JSON (one call)
     python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
+    python3 scripts/board.py images <issue>          # direct image links under its "Look:" section, one per line
 
 Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), a move to Stuck posts the alert
 after it lands (with the ask taken from the card's latest `Needs Steve` comment, or from
@@ -28,7 +29,7 @@ proceed" — in particular `list` exits 1 for a column name the board does not h
 rather than printing nothing and looking like an empty column.
 """
 import json
-import os, subprocess, sys
+import os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notify  # noqa: E402  (bin/notify.py, beside this file)
@@ -184,10 +185,11 @@ def pr_for(issue):
     return prs[0] if prs else None
 
 
-def needs_steve_ask(issue):
-    """The first line of the card's newest `Needs Steve` comment, or "". The tick posts
-    that comment before it moves the card to Stuck (watch.md §4), so the alert can carry
-    the ask; the spawner passes its own reason with `--why` instead."""
+def _latest_needs_steve_comment(issue):
+    """The full body of the card's newest `Needs Steve`-shaped comment, or "" if it has
+    none. Shared by `needs_steve_ask` (the first line) and `needs_steve_images` (the
+    `**Look:**` section below it) so there is exactly one reader of "which comment is the
+    ask", not two that could disagree."""
     n = issue_num(issue)
     try:
         r = subprocess.run(["gh", "issue", "view", str(n), "--json", "comments"],
@@ -196,11 +198,54 @@ def needs_steve_ask(issue):
     except Exception:
         return ""
     for c in reversed(comments):
-        first = (c.get("body") or "").strip().splitlines()
+        body = c.get("body") or ""
+        first = body.strip().splitlines()
         first = first[0].strip() if first else ""
         if "Needs Steve:" in first:
-            return first.replace("🤖", "", 1).strip()
+            return body
     return ""
+
+
+def needs_steve_ask(issue):
+    """The first line of the card's newest `Needs Steve` comment, or "". The tick posts
+    that comment before it moves the card to Stuck (watch.md §4), so the alert can carry
+    the ask; the spawner passes its own reason with `--why` instead."""
+    body = _latest_needs_steve_comment(issue)
+    if not body:
+        return ""
+    return body.strip().splitlines()[0].replace("🤖", "", 1).strip()
+
+
+# The `**Look:**` section sits between that heading and `**Question:` (talking-to-steve.md
+# rule 10: "one link per line, what it is in plain words and then the URL"). Only a direct
+# image URL is ever returned — the PR link and a live-page link in the same section are
+# left as links, never embedded, because there is nothing to show inline for them.
+_LOOK_SECTION_RE = re.compile(r"\*\*Look:\*\*(.*?)(?:\n\s*\*\*Question:|\Z)", re.S)
+_LOOK_LINE_RE = re.compile(r"^-\s*.+?:\s*(https?://\S+)\s*$")
+_IMAGE_URL_RE = re.compile(r"\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$", re.I)
+MAX_LOOK_IMAGES = 3
+
+
+def _parse_look_images(body, max_images=MAX_LOOK_IMAGES):
+    m = _LOOK_SECTION_RE.search(body)
+    if not m:
+        return []
+    urls = []
+    for line in m.group(1).splitlines():
+        lm = _LOOK_LINE_RE.match(line.strip())
+        if not lm:
+            continue
+        url = lm.group(1)
+        if _IMAGE_URL_RE.search(url) and url not in urls:
+            urls.append(url)
+    return urls[:max_images]
+
+
+def needs_steve_images(issue):
+    """Direct image links — a mockup or a screenshot — under the newest `Needs Steve`
+    comment's `**Look:**` section (card #91: bin/floor.py's inline preview, so a reader
+    never has to open the card to find the picture its own ask is about)."""
+    return _parse_look_images(_latest_needs_steve_comment(issue))
 
 
 def announce(kind, card, detail="", with_pr=False):
@@ -370,10 +415,19 @@ def cmd_ask(issue):
     return 0
 
 
+def cmd_images(issue):
+    """One image URL per line (board.py's `needs_steve_images`) — the same comment `ask`
+    reads, for a caller that wants the mockup or screenshot it points at (bin/floor.py's
+    inline preview, card #91) without moving the card."""
+    for u in needs_steve_images(issue):
+        print(u)
+    return 0
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
-                            "dump", "ask"):
+                            "dump", "ask", "images"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
@@ -385,6 +439,7 @@ if __name__ == "__main__":
                   "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),
                   "unclaim": lambda: cmd_unclaim(a[1]),
                   "dump": lambda: cmd_dump(),
-                  "ask": lambda: cmd_ask(a[1])}[a[0]]())
+                  "ask": lambda: cmd_ask(a[1]),
+                  "images": lambda: cmd_images(a[1])}[a[0]]())
     except IndexError:
         sys.exit(__doc__)

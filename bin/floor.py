@@ -7,8 +7,11 @@ ssh or journalctl (card #40 — mocked up with Steve on September 28, 2026).
 
 One page for the whole box, not one per project: it groups every lane in `projects/*.env`
 by the board it works, and for each lane shows one of exactly five states — **working**
-(a card, its Stage, minutes since launch), **idle** (why), **needs Steve** (the card and
-the first line of its ask), **paused** (a `PAUSE` file), or **sleeping** (a died tick,
+(a card, its Stage, minutes since launch), **idle** (why), **needs Steve** (the card, the
+first line of its ask, and — when its Stuck comment points at a mockup or a screenshot —
+the picture itself, right there, on the floor and in the studio alike, so approving it
+never means clicking through to the card first; card #91), **paused** (a `PAUSE` file), or
+**sleeping** (a died tick,
 inside the spawner's own ten-minute retry sleep — `how-it-works.md`, "step 8"). A "Recent
 ticks" list, across every project, closes the loop: project, lane, card, when, quota. A
 **Peek** button on **every** lane's desk opens a panel decoded from that lane's own Claude
@@ -94,7 +97,7 @@ ALLOWED_FIELDS = {
     "projects", "name", "board_url", "counts", "ready", "in_progress", "backlog",
     "lanes", "board_error",
     "lane", "kind", "unit", "unit_active", "pill", "link", "card", "stage", "minutes",
-    "reason", "ask", "number", "url",
+    "reason", "ask", "images", "number", "url",
     "recent", "project", "when", "quota",
     # the ship station (after the lanes): CI on main, and the box's own deployer
     "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
@@ -407,14 +410,17 @@ def _idle_reason(lane, items_by_number, last_tick):
     return "Nothing to pick up right now."
 
 
-def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None):
+def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None,
+              images=None):
     """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
     `last_tick` is the lane's own newest log entry (a `metrics.Tick`, or None — loaded
     once by the caller, not re-read here: a lane's own `Cache` refresh used to parse every
     log file twice, once for this and once for the recent-ticks list). `ask` is a callable
     `(issue, project_repo) -> str` (board.py's `needs_steve_ask`, injected so tests never
-    touch the network); `unit_active` is `systemctl is-active`'s answer, already looked up
-    by the caller (None when it could not be checked)."""
+    touch the network); `images` is the same shape for `needs_steve_images` — a mockup or
+    a screenshot to show right on the desk (card #91), never required to be called for a
+    pill other than needs_steve; `unit_active` is `systemctl is-active`'s answer, already
+    looked up by the caller (None when it could not be checked)."""
     base = {"lane": lane["lane"], "kind": lane_kind(lane), "unit": lane["unit"]}
     if unit_active is not None:
         base["unit_active"] = unit_active
@@ -445,8 +451,10 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
         if (it.get("status") or "").strip() == STUCK_STATUS:
             url = it.get("url") or board_url
             text = ask(last_tick.issue, lane["project_repo"]) if ask else ""
+            pics = images(last_tick.issue, lane["project_repo"]) if images else []
             return {**base, "pill": "needs_steve", "link": url,
-                    "card": {"number": last_tick.issue, "url": url}, "ask": text or ""}
+                    "card": {"number": last_tick.issue, "url": url}, "ask": text or "",
+                    "images": pics or []}
 
     if last_tick is not None and last_tick.died:
         age = _minutes_since(last_tick.mtime, now)
@@ -858,7 +866,8 @@ def _fmt_quota(cost):
 # --- assembling the page's data -----------------------------------------------------------
 
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
-                 now=None, box_name=None, ci_fetcher=None, deploy_fn=None, deploy_repo=None):
+                 images_fn=None, now=None, box_name=None, ci_fetcher=None, deploy_fn=None,
+                 deploy_repo=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -888,7 +897,7 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
             active = unit_active_fn(lane["unit"]) if unit_active_fn else None
             desk = lane_desk(lane, items_by_number, p["board_url"], now,
                               last_tick=ticks[-1] if ticks else None,
-                              unit_active=active, ask=ask_fn)
+                              unit_active=active, ask=ask_fn, images=images_fn)
             if desk["pill"] == "needs_steve":
                 needs_steve_total += 1
             lane_out.append(desk)
@@ -961,6 +970,24 @@ def board_ask(issue, project_repo, board_py=None, timeout=20):
     return (r.stdout or "").strip() if r.returncode == 0 else ""
 
 
+def board_images(issue, project_repo, board_py=None, timeout=20):
+    """Direct image links — a mockup or a screenshot — under the card's newest `Needs
+    Steve` comment (`board.py images`, which wraps `needs_steve_images`): the floor
+    page's inline preview (card #91), so a reader never has to open the card to find the
+    picture its own ask is about. Same `GH_REPO` pinning as `board_ask`, for the same
+    reason — several projects share this one box."""
+    board_py = board_py or os.path.join(HERE, "board.py")
+    env = dict(os.environ, GH_REPO=project_repo)
+    try:
+        r = subprocess.run([sys.executable, board_py, "images", str(issue)],
+                            capture_output=True, text=True, env=env, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if r.returncode != 0:
+        return []
+    return [line.strip() for line in r.stdout.splitlines() if line.strip()]
+
+
 # --- the HTTP server -----------------------------------------------------------------------
 
 INDEX_HTML = """<!doctype html>
@@ -1017,6 +1044,13 @@ INDEX_HTML = """<!doctype html>
   .pill.paused { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
   .pill.sleeping { background: color-mix(in srgb, var(--sleep) 18%, transparent); color: var(--sleep); }
   .detail { font-size: 13px; margin-top: 6px; color: var(--dim); }
+  /* A mockup or a screenshot a Needs Steve comment pointed at, shown right on the desk
+     instead of making Steve click through to the card to find it (card #91). */
+  .mockups { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .mockup-thumb {
+    max-width: 120px; max-height: 90px; border-radius: 6px; border: 1px solid var(--line);
+    object-fit: cover;
+  }
   /* The characters (card #40: "a small character at a desk"): one pose per pill. */
   .sprite { display: block; width: 100%; max-width: 150px; height: 84px; margin-bottom: 4px; }
   .sprite .desk-top, .sprite .monitor { fill: var(--dim); }
@@ -1175,6 +1209,12 @@ INDEX_HTML = """<!doctype html>
     .character-wave { animation: none; }
   }
   .character svg { width: 30px; height: 34px; display: block; margin: 0 auto; }
+  /* Held up over a waving character's head — the same mockup the floor's own desk shows
+     (card #91), shrunk to fit the room. */
+  .character-mockup { margin-bottom: 2px; }
+  .character-mockup .mockup-thumb {
+    display: block; margin: 0 auto; max-width: 46px; max-height: 34px; border-radius: 3px;
+  }
   .character .plate {
     font-size: 8px; color: var(--dim); white-space: nowrap; margin-top: 2px; line-height: 1.2;
   }
@@ -1390,6 +1430,17 @@ function shipHTML(ship, project) {
   </div>`;
 }
 
+// A mockup or a screenshot a Needs Steve card's own Stuck comment pointed at (card #91),
+// shown right here instead of making Steve click through to the card to find it. Several
+// thumbnails stack in one row; a broken or slow image collapses to nothing rather than a
+// visible placeholder box, since a missing picture is not itself news.
+function mockupThumbsHTML(images, cls) {
+  if (!images || !images.length) return "";
+  return `<div class="${cls || "mockups"}">${images.map(u => `
+    <img class="mockup-thumb" src="${esc(u)}" alt="Mockup to approve" loading="lazy"
+         onerror="this.style.display='none'">`).join("")}</div>`;
+}
+
 function deskHTML(d) {
   let detail = "";
   if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
@@ -1406,6 +1457,7 @@ function deskHTML(d) {
       <div class="unit">${esc(d.unit)}</div>
       <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
       <div class="detail">${detail}</div>
+      ${d.pill === "needs_steve" ? mockupThumbsHTML(d.images) : ""}
     </a>
     <button class="peek-btn" type="button" data-peek-lane="${esc(d.lane)}" data-peek-name="${esc(d.kind)} (${esc(d.lane)})">Peek</button>
   </div>`;
@@ -1695,7 +1747,10 @@ function renderCharacters(lanes) {
     }
     el.dataset.kind = l.kind;
     el.dataset.pill = l.pill;
-    el.innerHTML = characterSVG(l.pill, laneLook(l.lane))
+    // Held up over the waving character, the same mockup the floor's own desk shows — the
+    // room Steve walks instead of the card he'd otherwise click through to (card #91).
+    const held = l.pill === "needs_steve" ? mockupThumbsHTML((l.images || []).slice(0, 1), "character-mockup") : "";
+    el.innerHTML = held + characterSVG(l.pill, laneLook(l.lane))
       + `<div class="plate">${esc(l.lane)}<br>${esc(l.project)}</div>`;
     el.style.left = l.pos.x + "%";
     el.style.top = l.pos.y + "%";
@@ -1841,7 +1896,8 @@ function buildDemoStates() {
                 "passing")],
      recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}]},
     {header: {box: "demo", time: now, needs_steve_total: 1},
-     projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B"}),
+     projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B",
+                               images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQVR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC"]}),
                                L("alpha-design", "Design", "paused", {}),
                                L("alpha-triage", "Triage", "working", {card: {number: 12, url: "#"}, stage: "Claimed", minutes: 1})],
                 "failing")],
@@ -2024,6 +2080,7 @@ def main(argv):
     def build():
         return build_state(projects_dir, state_root, fetch_board,
                             unit_active_fn=systemctl_is_active, ask_fn=board_ask,
+                            images_fn=board_images,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo))
 

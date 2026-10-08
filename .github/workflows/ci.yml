@@ -66,6 +66,9 @@ jobs:
       - name: The Discord suite
         run: python3 bin/test-notify.py
 
+      - name: The board suite
+        run: python3 bin/test-board.py
+
       - name: The floor page suite
         run: python3 bin/test-floor.py
 

@@ -574,7 +574,16 @@ try:
         check("a needs_steve lane waves, not just stands with its hands up",
               b.eval("!!document.querySelector("
                     "'.character[data-pill=\"needs_steve\"] .character-wave')"))
+        check("...and holds up the mockup its card is waiting on an answer for (card #91), "
+              "right there in the room — no click through to the card needed",
+              b.eval("!!document.querySelector("
+                    "'.character[data-pill=\"needs_steve\"] .character-mockup img')"))
         shot(b, "studio-demo.png")
+        b.click("#floor-btn")
+        b.wait_for("!" + STUDIO_OPEN)
+        check("the floor's own desk shows the same mockup inline too, not just a link to the card",
+              b.eval("!!document.querySelector('.desk .mockup-thumb')"))
+        shot(b, "floor-demo-mockup.png")
         check("still no errors after cycling demo states", b.errors == [], b.errors)
 except browse.BrowseError as e:
     print(e, file=sys.stderr)

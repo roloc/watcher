@@ -18,7 +18,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - `commands/triage.md` — the `/triage` contract, the triage lane's tick: put the one
   `agent:` label on an unlabeled card, record what it waits on, stop. Generic the same way.
 - `agents/reviewer.md` — the one review pass. Read-only, blocking findings only, one round.
-- `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper.
+- `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper. `bin/test-board.py`
+  is `board.py`'s offline suite — the Needs-Steve comment reading (`ask`, and `images`: the
+  mockups and screenshots under a Stuck comment's `Look:` section, which `bin/floor.py` shows
+  inline instead of making Steve click through to the card, card #91). `python3 bin/test-board.py`
+  (CI runs it); run it after touching either of those two readers.
 - `bin/notify.py` — Discord posts, called only from `board.py` (a `move` to Stuck, and
   `notify`). It posts when a card is stuck or something broke, and for nothing else.
   `python3 bin/test-notify.py` is its offline test; run it after touching either file.

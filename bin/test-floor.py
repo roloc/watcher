@@ -268,6 +268,7 @@ def stub_unit_active(unit):
 
 
 ASK_CALLS = []
+IMAGES_CALLS = []
 
 
 def stub_ask(issue, project_repo):
@@ -275,9 +276,14 @@ def stub_ask(issue, project_repo):
     return {777: "Needs Steve: which of two mockups did you mean?"}.get(issue, "")
 
 
+def stub_images(issue, project_repo):
+    IMAGES_CALLS.append((issue, project_repo))
+    return {777: ["https://example.com/mockup-a.png", "https://example.com/mockup-b.png"]}.get(issue, [])
+
+
 print("5. lane_desk: each of the five pills, from its own fixture")
 state = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
-                           ask_fn=stub_ask, now=NOW, box_name="test-box")
+                           ask_fn=stub_ask, images_fn=stub_images, now=NOW, box_name="test-box")
 lanes_by_name = {(p["name"], l["lane"]): l for p in state["projects"] for l in p["lanes"]}
 
 d = lanes_by_name[("watcher", "watcher")]
@@ -306,6 +312,11 @@ check("riffmap-triage: card #777 and the ask from board.py's own comment reader"
 check("the ask was resolved against riffmap-triage's OWN repo, not whatever repo "
       "this process happens to run in — several projects share one box (review finding)",
       (777, "roloc/riffmap") in ASK_CALLS, ASK_CALLS)
+check("riffmap-triage: the mockups its own Stuck comment pointed at, shown without a click "
+      "through to the card (card #91)", d["images"] == ["https://example.com/mockup-a.png",
+      "https://example.com/mockup-b.png"], d["images"])
+check("the images lookup was resolved against riffmap-triage's OWN repo too",
+      (777, "roloc/riffmap") in IMAGES_CALLS, IMAGES_CALLS)
 
 d = lanes_by_name[("second", "second")]
 check("second: idle, something of its own sitting in Ready",
@@ -319,6 +330,8 @@ d = lanes_by_name[("fourth", "fourth")]
 check("fourth: needs_steve, not sleeping — the board (a spawner park, no Stuck-shaped "
       "comment from the tick) outranks a recently-died log (review finding)",
       d["pill"] == "needs_steve" and d["card"]["number"] == 99, d)
+check("fourth: no mockup in its comment — an empty list, never a missing field",
+      d["images"] == [], d)
 
 print("6. header and counts")
 check("needs_steve_total counts exactly the two lanes in that state (riffmap-triage, fourth)",
