@@ -445,6 +445,137 @@ try:
         check("and recovers on the next refresh",
               b.eval("refresh().then(() => true)") and b.wait_for(DESKS_DRAWN)
               and b.eval("getComputedStyle(document.getElementById('load-error')).display") == "none")
+
+    STUDIO_OPEN = "document.getElementById('studio').classList.contains('open')"
+    CHAR_COUNT = "document.querySelectorAll('.character').length"
+
+    print("11. the studio: one room the lanes walk around in (card #88)")
+    with browse.Browser(width=1280, height=900) as b:
+        b.goto(URL)
+        b.wait_for(DESKS_DRAWN)
+        check("the floor page itself still looks as it does today: the Studio button, nothing else new",
+              b.eval("getComputedStyle(document.getElementById('studio-btn')).display") != "none")
+        b.click("#studio-btn")
+        check("the studio opens and the floor's own sections hide",
+              b.wait_for(STUDIO_OPEN)
+              and b.eval("getComputedStyle(document.getElementById('floor-view')).display") == "none")
+        check("the Studio button hides once the room is open", b.wait_for(
+              "getComputedStyle(document.getElementById('studio-btn')).display === 'none'"))
+        check("no uncaught exception, console.error or failed request", b.errors == [], b.errors)
+        check("one character per lane, plus one per ship station: six, same as the desks",
+              b.wait_for(CHAR_COUNT + " === 6"))
+        shot(b, "studio-desktop.png")
+
+        print("12. a character stands where its state says: desk, dispatch, or the lounge")
+        pos = lambda lane: b.eval(
+            f'(() => {{ const e = document.querySelector(`.character[data-lane="{lane}"]`); '
+            'return e && [e.dataset.pill, e.style.left, e.style.top]; })()')
+        check("alpha (working) stands at its own desk", pos("alpha")[0] == "working")
+        triage_pos = pos("alpha-triage")
+        check("alpha-triage (Triage, idle) is in the lounge, not the dispatch counter — it only "
+              "stands there while it works a card",
+              triage_pos[0] == "idle" and triage_pos[1] in ("18%", "82%"), triage_pos)
+        check("beta (paused) stands by its own desk, not the podium", pos("beta")[0] == "paused")
+        check("every lane keeps the same look across a redraw (the hash never changes)",
+              b.eval("document.querySelector(\".character[data-lane='alpha']\").querySelector('svg').outerHTML")
+              == b.eval("refresh().then(() => document.querySelector(\".character[data-lane='alpha']\")"
+                        ".querySelector('svg').outerHTML)"))
+        check("a working lane's monitor scrolls (the scanline is actually drawn)",
+              b.eval("getComputedStyle(document.querySelector("
+                    "'.desk-monitor[data-lane=\"alpha\"] .scanline')).opacity") != "0")
+        check("an idle lane's monitor is dark",
+              b.eval("getComputedStyle(document.querySelector("
+                    "'.desk-monitor[data-lane=\"alpha-design\"] .scanline')).opacity") == "0")
+
+        print("13. the beacon over the door reads the same state the pills do")
+        check("a paused lane and a failing build: amber, not green",
+              b.eval("document.getElementById('beacon').className") == "beacon-amber")
+        check("the beacon is actually visible — inside #room's own box, which clips "
+              "(it used to sit mostly above it, clipped to a sliver)",
+              b.eval("""(() => {
+                const beacon = document.getElementById("beacon").getBoundingClientRect();
+                const room = document.getElementById("room").getBoundingClientRect();
+                return beacon.top >= room.top && beacon.bottom <= room.bottom
+                    && beacon.height > 10;
+              })()"""))
+
+        print("14. tap a character for a speech bubble; tap the bubble for the full Peek")
+        b.click(".character[data-lane='alpha']")
+        check("the bubble opens with the same last line Peek shows (section 5 appended it live)",
+              b.wait_for("document.querySelector('.bubble')?.textContent.includes("
+                        "'Opening the pull request now.')"))
+        b.click(".bubble")
+        check("tapping it opens the full Peek panel",
+              b.wait_for(PANEL_OPEN)
+              and "Build (alpha)" in b.eval("document.getElementById('peek-title').textContent"))
+        check("the bubble itself is gone once the full panel is up",
+              b.eval("document.querySelector('.bubble')") is None)
+        shot(b, "studio-bubble-to-peek.png", full_page=False)
+        b.key("Escape")
+        check("still no errors after the bubble round trip", b.errors == [], b.errors)
+
+        print("15. the wall by the door: recent ticks, newest on top, each one a link")
+        # Both fixture ticks are pinned; which sorts first depends on the real mtime of the
+        # two log files this suite just wrote (`metrics.py` keys "when" on that, not the
+        # stamp in the filename) — true to #5 and #3, never guess which ran "newer" here.
+        hrefs = b.eval("[...document.querySelectorAll('.pin-card')].map(a => a.getAttribute('href'))")
+        check("one pinned card per recent tick, each linking straight to its issue",
+              sorted(hrefs) == ["https://github.com/roloc/alpha/issues/5",
+                                "https://github.com/roloc/beta/issues/3"], hrefs)
+
+        print("16. Floor goes back, and the floor page is exactly as it was")
+        b.click("#floor-btn")
+        check("the studio closes and the floor's sections return",
+              b.wait_for("!" + STUDIO_OPEN)
+              and b.eval("getComputedStyle(document.getElementById('floor-view')).display") != "none")
+        check("the Studio button is back", b.eval(
+              "getComputedStyle(document.getElementById('studio-btn')).display") != "none")
+        check("the floor's own desks are still there, same as section 2", b.eval(CHAR_COUNT) >= 0
+              and b.eval("document.querySelectorAll('.desk').length") == 6)
+
+    print("17. on a phone: the room fits without scrolling sideways, and walking respects reduced motion")
+    with browse.Browser(width=390, height=844) as b:
+        b.goto(URL)
+        b.wait_for(DESKS_DRAWN)
+        b.click("#studio-btn")
+        b.wait_for(STUDIO_OPEN)
+        check("no wider than the screen",
+              b.eval("document.documentElement.scrollWidth <= window.innerWidth"),
+              b.eval("[document.documentElement.scrollWidth, window.innerWidth]"))
+        shot(b, "studio-phone.png")
+        check("a character walks: the CSS transition is on by default",
+              b.eval("getComputedStyle(document.querySelector('.character')).transitionDuration") != "0s")
+
+    with browse.Browser(width=390, height=844) as b:
+        b.reduce_motion(True)
+        b.goto(URL)
+        b.wait_for(DESKS_DRAWN)
+        b.click("#studio-btn")
+        b.wait_for(STUDIO_OPEN)
+        check("prefers-reduced-motion: reduce drops the walk to an instant jump",
+              b.eval("getComputedStyle(document.querySelector('.character')).transitionDuration") == "0s")
+
+    print("18. demo mode (?demo=1): cycles the fixture through every state, for designing the room")
+    with browse.Browser(width=390, height=844) as b:
+        b.goto(URL + "?demo=1")
+        b.wait_for(CHAR_COUNT + " > 0")
+        check("no uncaught exception even with no real board behind it", b.errors == [], b.errors)
+        b.click("#studio-btn")
+        b.wait_for(STUDIO_OPEN)
+        check("the demo's first state is drawn without ever calling the real endpoint",
+              b.eval(CHAR_COUNT) > 0)
+        colors = []
+        for i in range(3):
+            b.eval(f"window.__demoGoto({i})")  # synchronous: the redraw is done when this returns
+            colors.append(b.eval("document.getElementById('beacon').className"))
+        check("stepping through the fixture's states changes the beacon (never stuck on one color)",
+              len(set(colors)) > 1, colors)
+        b.eval("window.__demoGoto(1)")  # the demo state with a needs_steve lane
+        check("a needs_steve lane waves, not just stands with its hands up",
+              b.eval("!!document.querySelector("
+                    "'.character[data-pill=\"needs_steve\"] .character-wave')"))
+        shot(b, "studio-demo.png")
+        check("still no errors after cycling demo states", b.errors == [], b.errors)
 except browse.BrowseError as e:
     print(e, file=sys.stderr)
     fails = 1

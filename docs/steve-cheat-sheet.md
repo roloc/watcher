@@ -24,6 +24,12 @@ refresh. Close it with the ×, or tap outside
 it — nothing there can change a card either. If the page ever shows a red line saying its own code hit an error,
 that is the page telling you it is broken: file a card.
 
+**Studio**, top of the floor page, is the same thing as a room: each bot is a little person
+who walks to its desk when it is working, the lounge when it is idle, the couch when it is
+asleep, and a podium by the door when it needs you — with a light over the door that turns
+red the moment anyone does. Tap one for what it just said; tap that for the full Peek.
+**Floor** takes you back. Still read-only, still just a look.
+
 ## The columns
 
 - **Backlog** — yours. The bots never start anything from here. They will **put a card

@@ -1085,12 +1085,116 @@ INDEX_HTML = """<!doctype html>
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
+  /* ---- The studio: one room the lanes walk around in (card #88). The floor page above
+     is untouched; this is a second view of the same data, toggled by one button. ---- */
+  .view-toggle {
+    font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  }
+  .view-toggle:hover { border-color: var(--dim); }
+  #studio { display: none; }
+  #studio.open { display: block; }
+  #studio-head { display: flex; justify-content: center; margin-bottom: 10px; }
+  #room {
+    position: relative; width: 100%; max-width: 900px; margin: 0 auto;
+    aspect-ratio: 3 / 4; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; overflow: hidden;
+  }
+  @media (min-width: 700px) { #room { aspect-ratio: 16 / 10; } }
+  .room-label {
+    position: absolute; font-size: 10px; color: var(--dim); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+  }
+  .room-door {
+    position: absolute; left: 50%; top: 2%; transform: translate(-50%, 0);
+    width: 60px; height: 8px; background: var(--line); border-radius: 2px;
+  }
+  #beacon {
+    /* Inside #room's own box (which clips: `overflow: hidden`), not above it — a beacon
+       placed outside that box is a beacon nobody sees. */
+    position: absolute; left: 50%; top: 1%; transform: translate(-50%, 0);
+    width: 12px; height: 12px; border-radius: 50%;
+  }
+  .beacon-green { background: var(--working); }
+  .beacon-amber { background: var(--paused); }
+  .beacon-red { background: var(--needs); animation: blink 1.2s infinite; }
+  .desk-furniture {
+    position: absolute; width: 11%; height: 7%; transform: translate(-50%, -40%);
+    border: 1px solid var(--line); border-radius: 3px;
+    background: color-mix(in srgb, var(--dim) 8%, transparent);
+  }
+  .dispatch-counter {
+    position: absolute; width: 16%; height: 6%; transform: translate(-50%, -30%);
+    border: 1px solid var(--line); border-radius: 3px;
+    background: color-mix(in srgb, var(--dim) 10%, transparent);
+  }
+  .desk-monitor {
+    position: absolute; width: 16px; height: 11px; transform: translate(-50%, -135%);
+    border-radius: 2px; background: var(--line); overflow: hidden;
+  }
+  .desk-monitor .scanline {
+    position: absolute; left: 2px; right: 2px; top: 1px; height: 1.5px;
+    background: var(--working); opacity: 0;
+  }
+  @keyframes scan { 0% { top: 1px; } 100% { top: 8px; } }
+  /* An idle screen is dark (card: "an idle screen is dark") — the line only exists, and
+     only moves, while the desk is lit. */
+  .desk-monitor.lit .scanline { opacity: .6; animation: scan 1.1s linear infinite; }
+  .couch {
+    position: absolute; left: 50%; top: 84%; transform: translate(-50%, -50%);
+    width: 32%; height: 7%; border-radius: 10px;
+    background: color-mix(in srgb, var(--dim) 14%, transparent); border: 1px solid var(--line);
+  }
+  .coffee {
+    position: absolute; left: 50%; top: 72%; transform: translate(-50%, -50%);
+    width: 14px; height: 16px; border-radius: 2px 2px 6px 6px; background: var(--dim);
+  }
+  .dock-line {
+    position: absolute; left: 50%; top: 62%; transform: translate(-50%, -50%);
+    width: 70%; height: 2px; background: var(--line);
+  }
+  .pin-wall {
+    position: absolute; right: 2%; top: 14%; width: 16%; max-height: 34%; overflow: hidden;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .pin-card {
+    font-size: 9px; line-height: 1.3; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 3px; padding: 3px 4px; text-decoration: none; color: inherit;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .12); display: block;
+  }
+  #room-desks, #room-characters { position: absolute; inset: 0; pointer-events: none; }
+  .character {
+    position: absolute; width: 30px; transform: translate(-50%, -100%);
+    transition: left 1s ease, top 1s ease; cursor: pointer; text-align: center;
+    pointer-events: auto;
+  }
+  @keyframes character-wave { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+  .character-wave { animation: character-wave .6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .character { transition: none; }
+    .character-wave { animation: none; }
+  }
+  .character svg { width: 30px; height: 34px; display: block; margin: 0 auto; }
+  .character .plate {
+    font-size: 8px; color: var(--dim); white-space: nowrap; margin-top: 2px; line-height: 1.2;
+  }
+  .bubble {
+    position: absolute; transform: translate(-50%, calc(-100% - 10px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 4px 8px; font-size: 11px; max-width: 160px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .18); cursor: pointer; z-index: 5;
+  }
+  .bubble::after {
+    content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: var(--panel);
+  }
 </style>
 </head>
 <body>
 <header>
   <h1 id="box">The floor</h1>
   <div class="muted" id="clock"></div>
+  <button class="view-toggle" id="studio-btn" type="button">Studio</button>
 </header>
 <div class="alert" id="load-error" style="display:none">Can't reach the floor's own data right now — retrying&hellip;</div>
 <div class="alert" id="script-error" style="display:none">This page's own code hit an error, so what is below may be empty or out of date. If a reload does not clear this line, the page is broken and needs a card.</div>
@@ -1106,11 +1210,29 @@ window.addEventListener("unhandledrejection", function () {
   document.getElementById("script-error").style.display = "block";
 });
 </script>
+<div id="floor-view">
 <div id="projects"></div>
 <section class="project">
   <h2>Recent ticks</h2>
   <div class="table-wrap"><table id="recent"><thead><tr><th>Project</th><th>Lane</th><th>Card</th><th>When</th><th>Quota</th></tr></thead><tbody></tbody></table></div>
 </section>
+</div>
+<div id="studio">
+  <div id="studio-head"><button class="view-toggle" id="floor-btn" type="button">Floor</button></div>
+  <div id="room">
+    <div id="beacon" class="beacon-green"></div>
+    <div class="room-door"></div>
+    <div class="room-label" style="left:14%;top:8%;transform:translate(-50%,0)">Dispatch</div>
+    <div class="room-label" style="left:72%;top:8%;transform:translate(-50%,0)">Podium</div>
+    <div class="dispatch-counter" style="left:14%;top:26%"></div>
+    <div class="couch"></div>
+    <div class="coffee"></div>
+    <div class="dock-line"></div>
+    <div class="pin-wall" id="pin-wall"></div>
+    <div id="room-desks"></div>
+    <div id="room-characters"></div>
+  </div>
+</div>
 <div id="peek-overlay">
   <div id="peek-panel">
     <div class="peek-head">
@@ -1314,7 +1436,9 @@ function render(state) {
 async function refresh() {
   try {
     const r = await fetch("/api/state.json", {cache: "no-store"});
-    render(await r.json());
+    const state = await r.json();
+    render(state);
+    renderStudio(state);
     document.getElementById("load-error").style.display = "none";
   } catch (e) {
     // The first load has no "last good state" to fall back on, so a failed fetch would
@@ -1325,12 +1449,6 @@ async function refresh() {
     document.getElementById("load-error").style.display = "block";
   }
 }
-refresh();
-setInterval(refresh, 30000);
-// A backgrounded tab has its timers throttled by the browser, so a tab opened and then
-// left in the background can sit well past one failed load before its next retry fires.
-// Refresh the moment it is looked at again, rather than waiting on the interval.
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
 // Peek: a lane's session, decoded the same way bin/tail.sh prints it on the command line —
 // live while the lane works, its last session when it does not. Polls only while the panel
@@ -1431,6 +1549,340 @@ document.addEventListener("click", (e) => {
   if (!btn) return;
   openPeek({lane: btn.dataset.peekLane, ship: btn.dataset.peekShip}, btn.dataset.peekName);
 });
+
+// ---- The studio: one room the lanes walk around in (card #88) -----------------------
+// A second view of the same data `render()` already has: no new endpoint, no new field.
+// Toggled by one button; `render()` above is untouched, `refresh()` just hands it the
+// same state it was already given.
+
+function showStudio() {
+  document.getElementById("floor-view").style.display = "none";
+  document.getElementById("studio").classList.add("open");
+  document.getElementById("studio-btn").style.display = "none";
+}
+function showFloor() {
+  closeBubble();
+  document.getElementById("studio").classList.remove("open");
+  document.getElementById("floor-view").style.display = "";
+  document.getElementById("studio-btn").style.display = "";
+}
+document.getElementById("studio-btn").addEventListener("click", showStudio);
+document.getElementById("floor-btn").addEventListener("click", showFloor);
+
+// Each lane is a recognizable person: hair, skin tone and shirt pattern come from a hash
+// of its name, so the same lane always looks the same and two different lanes (almost
+// always) look different from each other — never from anything that changes tick to tick.
+function laneHash(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (Math.imul(h, 31) + name.charCodeAt(i)) >>> 0;
+  return h;
+}
+const HAIR = ["#3b3a36", "#8a5a2b", "#c6a15b", "#1b1f24", "#7a3b2e", "#5b4636"];
+const SKIN = ["#e8a27c", "#c68642", "#f0c8a0", "#8d5524", "#ffdbac"];
+const SHIRT_PATTERN = ["solid", "stripe", "dot"];
+function laneLook(name) {
+  const h = laneHash(name);
+  return {hair: HAIR[h % HAIR.length], skin: SKIN[(h >> 3) % SKIN.length],
+          pattern: SHIRT_PATTERN[(h >> 6) % SHIRT_PATTERN.length], glasses: (h >> 9) % 2 === 0};
+}
+
+// A standing figure, one pose per pill — the same colour-by-state `spriteSVG` uses, so the
+// room and the desks never disagree about what a state means.
+function characterSVG(pill, look) {
+  const c = `var(${PILL_COLOR[pill] || "--idle"})`;
+  const armsUp = pill === "paused" || pill === "needs_steve";
+  const pattern = look.pattern === "stripe"
+    ? `<rect x="7" y="15" width="12" height="2.5" style="fill:rgba(0,0,0,.15)"/>`
+    : look.pattern === "dot" ? `<circle cx="13" cy="18" r="1.4" style="fill:rgba(0,0,0,.2)"/>` : "";
+  const armL = armsUp
+    ? `<rect x="2" y="7" width="3" height="8" rx="1" style="fill:${c}" transform="rotate(-35 3.5 15)"/>`
+    : `<rect x="3" y="15" width="3" height="7" rx="1" style="fill:${c}"/>`;
+  // Paused: both hands up, still. Needs Steve: it is waving — one arm animated (wrapped in
+  // its own <g>, so the CSS animation's `transform` adds to the SVG attribute's rotation
+  // instead of replacing it), the card's "walks to the podium and waves".
+  const armRRaised = `<rect x="21" y="7" width="3" height="8" rx="1" style="fill:${c}" transform="rotate(35 22.5 15)"/>`;
+  const armR = !armsUp ? `<rect x="20" y="15" width="3" height="7" rx="1" style="fill:${c}"/>`
+    : pill === "needs_steve"
+      ? `<g class="character-wave" style="transform-box:fill-box;transform-origin:50% 100%">${armRRaised}</g>`
+      : armRRaised;
+  const sleepy = pill === "sleeping"
+    ? `<text x="17" y="3" style="font:700 7px sans-serif;fill:var(--dim)">z</text>` : "";
+  const glasses = look.glasses
+    ? `<rect x="9" y="6" width="3.5" height="2.5" rx=".5" style="fill:none;stroke:#1b1f24;stroke-width:.6"/>
+       <rect x="13.5" y="6" width="3.5" height="2.5" rx=".5" style="fill:none;stroke:#1b1f24;stroke-width:.6"/>
+       <path d="M12.5 7.2 h1" style="stroke:#1b1f24;stroke-width:.6"/>` : "";
+  return `<svg viewBox="0 0 26 30" aria-hidden="true">
+    ${armL}${armR}
+    <rect x="6" y="12" width="14" height="13" rx="4" style="fill:${c}"/>${pattern}
+    <circle cx="13" cy="7" r="6" style="fill:${look.skin}"/>
+    <path d="M7 5 a6 6 0 0 1 12 0 v1 h-12 z" style="fill:${look.hair}"/>${glasses}
+    ${sleepy}</svg>`;
+}
+
+// Where things stand. Desks and the dispatch counter are furniture — fixed, one per
+// lane — and the room's four "somewhere else" spots (lounge, couch, podium) are a short
+// list of slots a lane takes one of, by its place in that state among the others sharing
+// it, so two lanes idle at once don't stand on top of each other.
+const LOUNGE_SLOTS = [{x: 18, y: 78}, {x: 82, y: 78}, {x: 18, y: 93}, {x: 82, y: 93}, {x: 50, y: 95}];
+const COUCH_SLOTS = [{x: 40, y: 85}, {x: 50, y: 87}, {x: 60, y: 85}];
+const NEEDS_SLOTS = [{x: 72, y: 22}, {x: 77, y: 30}, {x: 67, y: 30}];
+const DISPATCH_SLOTS = [{x: 14, y: 30}, {x: 9, y: 38}, {x: 19, y: 38}];
+
+function projectColumn(pIndex, pCount) {
+  const width = 54 / pCount;
+  return {left: 24 + pIndex * width, width};
+}
+function deskSlot(pIndex, pCount, laneIndex) {
+  const {left, width} = projectColumn(pIndex, pCount);
+  const col = laneIndex % 2, row = Math.floor(laneIndex / 2);
+  return {x: left + width * ((col + 0.5) / 2), y: Math.min(28 + row * 13, 58)};
+}
+function dockSlot(i, n) {
+  if (n <= 1) return {x: 50, y: 62};
+  const span = 46;
+  return {x: 50 - span / 2 + i * (span / (n - 1)), y: 62};
+}
+
+function computeStudio(state) {
+  const projects = state.projects || [];
+  const lanes = [];
+  let triageIndex = 0;
+  projects.forEach((p, pIndex) => {
+    let deskIndex = 0;
+    (p.lanes || []).forEach((l) => {
+      const home = l.kind === "Triage" ? DISPATCH_SLOTS[triageIndex++ % DISPATCH_SLOTS.length]
+                                        : deskSlot(pIndex, projects.length, deskIndex++);
+      lanes.push({...l, project: p.name, home});
+    });
+  });
+  let idleN = 0, sleepN = 0, needsN = 0;
+  for (const l of lanes) {
+    // Working and paused stand at their own desk (card: "a paused lane stands by its desk
+    // with its hands up") — everyone else walks to the room's shared spot for their state.
+    if (l.pill === "working" || l.pill === "paused") l.pos = l.home;
+    else if (l.pill === "idle") l.pos = LOUNGE_SLOTS[idleN++ % LOUNGE_SLOTS.length];
+    else if (l.pill === "sleeping") l.pos = COUCH_SLOTS[sleepN++ % COUCH_SLOTS.length];
+    else if (l.pill === "needs_steve") l.pos = NEEDS_SLOTS[needsN++ % NEEDS_SLOTS.length];
+    else l.pos = l.home;
+  }
+  const ships = projects.map((p, i) => ({name: p.name, ship: p.ship, pos: dockSlot(i, projects.length)}));
+  return {lanes, ships};
+}
+
+function renderRoomDesks(lanes) {
+  document.getElementById("room-desks").innerHTML = lanes.filter(l => l.kind !== "Triage").map(l => `
+    <div class="desk-furniture" style="left:${l.home.x}%;top:${l.home.y}%"></div>
+    <div class="desk-monitor${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
+         style="left:${l.home.x}%;top:${l.home.y}%"><div class="scanline"></div></div>`).join("");
+}
+
+// Characters keep the same DOM node across renders, so moving `left`/`top` is a CSS
+// transition — a walk — rather than a jump cut (`prefers-reduced-motion` drops it to a
+// jump cut on purpose).
+const charEls = {};
+function renderCharacters(lanes) {
+  const container = document.getElementById("room-characters");
+  const seen = new Set();
+  for (const l of lanes) {
+    seen.add(l.lane);
+    let el = charEls[l.lane];
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "character";
+      el.dataset.lane = l.lane;
+      container.appendChild(el);
+      charEls[l.lane] = el;
+    }
+    el.dataset.kind = l.kind;
+    el.dataset.pill = l.pill;
+    el.innerHTML = characterSVG(l.pill, laneLook(l.lane))
+      + `<div class="plate">${esc(l.lane)}<br>${esc(l.project)}</div>`;
+    el.style.left = l.pos.x + "%";
+    el.style.top = l.pos.y + "%";
+  }
+  for (const name of Object.keys(charEls)) if (!seen.has(name)) { charEls[name].remove(); delete charEls[name]; }
+}
+
+const shipEls = {};
+function renderShipDock(ships) {
+  const container = document.getElementById("room-characters");
+  const seen = new Set();
+  for (const s of ships) {
+    seen.add(s.name);
+    let el = shipEls[s.name];
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "character";
+      el.dataset.ship = s.name;
+      container.appendChild(el);
+      shipEls[s.name] = el;
+    }
+    const st = shipState(s.ship);
+    el.innerHTML = shipSVG(st.mode, st.pill) + `<div class="plate">Ship<br>${esc(s.name)}</div>`;
+    el.style.left = s.pos.x + "%";
+    el.style.top = s.pos.y + "%";
+  }
+  for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }
+}
+
+function renderPinWall(recent) {
+  // Newest on top: `state.recent` already sorts newest-first, and the wall stacks top to
+  // bottom in that same order.
+  document.getElementById("pin-wall").innerHTML = (recent || []).slice(0, 6).map(r => `
+    <a class="pin-card" href="${esc(r.card.url)}" target="_blank" rel="noopener">#${r.card.number}
+      · ${esc(r.lane)}<br>${relTime(r.when)}</a>`).join("");
+}
+
+function renderBeacon(state) {
+  let color = "green";
+  if ((state.header.needs_steve_total || 0) > 0) {
+    color = "red";
+  } else {
+    let amber = false;
+    for (const p of state.projects || []) {
+      for (const l of p.lanes || []) if (l.pill === "paused" || l.pill === "sleeping") amber = true;
+      if (shipState(p.ship).pill === "blocked") amber = true;
+    }
+    color = amber ? "amber" : "green";
+  }
+  document.getElementById("beacon").className = "beacon-" + color;
+}
+
+function renderStudio(state) {
+  const {lanes, ships} = computeStudio(state);
+  renderRoomDesks(lanes);
+  renderCharacters(lanes);
+  renderShipDock(ships);
+  renderPinWall(state.recent);
+  renderBeacon(state);
+}
+
+// Tap a character for a speech bubble with the last line of what it is doing (the same
+// line Peek shows); tap the bubble to open the full Peek. It polls only while open, same
+// as Peek itself — never in the background, never per character.
+let bubbleEl = null, bubbleTimer = null, bubbleLane = null, bubbleShip = null, bubbleTarget = null;
+function closeBubble() {
+  if (bubbleEl) { bubbleEl.remove(); bubbleEl = null; }
+  if (bubbleTimer) { clearInterval(bubbleTimer); bubbleTimer = null; }
+  bubbleLane = null; bubbleShip = null; bubbleTarget = null;
+}
+async function pollBubble() {
+  if (!bubbleEl) return;
+  const lane = bubbleLane, ship = bubbleShip;
+  // The character it is pinned to may have walked since the last poll (its state changed
+  // under it); follow, rather than leaving the bubble pointing at an empty desk.
+  if (bubbleTarget) { bubbleEl.style.left = bubbleTarget.style.left; bubbleEl.style.top = bubbleTarget.style.top; }
+  let text = "…";
+  try {
+    if (lane) {
+      const r = await fetch("/api/tail.json?" + new URLSearchParams({lane}).toString(), {cache: "no-store"});
+      const data = await r.json();
+      const lines = data.lines || [];
+      text = lines.length ? lines[lines.length - 1]
+           : data.status === "waiting" ? `Starting #${data.card}…`
+           : "Nothing to show yet.";
+    } else if (ship) {
+      const r = await fetch("/api/ship.json?" + new URLSearchParams({project: ship}).toString(), {cache: "no-store"});
+      const data = await r.json();
+      text = data.sub || "…";
+    }
+  } catch (e) {
+    text = "can't reach it right now — retrying";
+  }
+  if (bubbleLane === lane && bubbleShip === ship && bubbleEl) bubbleEl.firstChild.textContent = text;
+}
+function openBubble(el, lane, ship, name) {
+  closeBubble();
+  bubbleLane = lane; bubbleShip = ship; bubbleTarget = el;
+  bubbleEl = document.createElement("div");
+  bubbleEl.className = "bubble";
+  bubbleEl.appendChild(document.createTextNode("…"));
+  bubbleEl.style.left = el.style.left;
+  bubbleEl.style.top = el.style.top;
+  bubbleEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openPeek({lane, ship}, name);
+    closeBubble();
+  });
+  document.getElementById("room").appendChild(bubbleEl);
+  pollBubble();
+  // A lane's session can write a new line at any time; the ship station only changes as
+  // often as the real Peek panel polls it (its own server-side cache is this long too).
+  bubbleTimer = setInterval(pollBubble, ship ? 15000 : 2000);
+}
+document.getElementById("room-characters").addEventListener("click", (e) => {
+  const el = e.target.closest(".character");
+  if (!el) return;
+  e.stopPropagation();
+  const lane = el.dataset.lane || null, ship = el.dataset.ship || null;
+  if (bubbleEl && bubbleLane === lane && bubbleShip === ship) { closeBubble(); return; }
+  const name = lane ? `${el.dataset.kind} (${lane})` : `Ship (${ship})`;
+  openBubble(el, lane, ship, name);
+});
+document.getElementById("room").addEventListener("click", (e) => {
+  if (!e.target.closest(".character") && !e.target.closest(".bubble")) closeBubble();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBubble(); });
+
+// A canned fixture for ?demo=1 — every pill, every ship state, cycled on a timer, for
+// designing the room and for the screenshot script to catch every pose even on a quiet day.
+function buildDemoStates() {
+  const now = new Date().toISOString();
+  const proj = (name, lanes, ciState, dep) => ({
+    name, board_url: "#", counts: {ready: 2, in_progress: 1, backlog: 3},
+    lanes, ship: {ci: {state: ciState, sha: "abc1234", url: "#"}, ...(dep ? {deploy: dep} : {})},
+  });
+  const L = (lane, kind, pill, extra) => ({lane, kind, unit: `watcher@${lane}`, pill, link: "#", ...extra});
+  return [
+    {header: {box: "demo", time: now, needs_steve_total: 0},
+     projects: [proj("alpha", [L("alpha", "Build", "working", {card: {number: 10, url: "#"}, stage: "Building", minutes: 4}),
+                               L("alpha-design", "Design", "idle", {reason: "Nothing to pick up right now."}),
+                               L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
+                "passing")],
+     recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}]},
+    {header: {box: "demo", time: now, needs_steve_total: 1},
+     projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B"}),
+                               L("alpha-design", "Design", "paused", {}),
+                               L("alpha-triage", "Triage", "working", {card: {number: 12, url: "#"}, stage: "Claimed", minutes: 1})],
+                "failing")],
+     recent: [{project: "alpha", lane: "alpha", card: {number: 11, url: "#"}, when: now, quota: "~$0.90 equivalent (subscription — not billed)"}]},
+    {header: {box: "demo", time: now, needs_steve_total: 0},
+     projects: [proj("alpha", [L("alpha", "Build", "sleeping", {reason: "Card #9 did not finish; trying again shortly."}),
+                               L("alpha-design", "Design", "idle", {reason: "Nothing to pick up right now."}),
+                               L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
+                "running")],
+     recent: []},
+  ];
+}
+
+// Demo mode (?demo=1): cycles the fixture above through every state on a timer, for
+// designing the studio and for the screenshot script — never the real data, and never
+// both at once. Last in the script, after every const and function it calls.
+const DEMO_STATES = buildDemoStates();
+let demoIndex = 0;
+function demoTick() {
+  render(DEMO_STATES[demoIndex]);
+  renderStudio(DEMO_STATES[demoIndex]);
+  demoIndex = (demoIndex + 1) % DEMO_STATES.length;
+}
+window.__demoGoto = function (i) {
+  demoIndex = ((i % DEMO_STATES.length) + DEMO_STATES.length) % DEMO_STATES.length;
+  render(DEMO_STATES[demoIndex]);
+  renderStudio(DEMO_STATES[demoIndex]);
+  demoIndex = (demoIndex + 1) % DEMO_STATES.length;
+};
+
+if (new URLSearchParams(location.search).get("demo")) {
+  demoTick();
+  setInterval(demoTick, 4000);
+} else {
+  refresh();
+  setInterval(refresh, 30000);
+  // A backgrounded tab has its timers throttled by the browser, so a tab opened and then
+  // left in the background can sit well past one failed load before its next retry fires.
+  // Refresh the moment it is looked at again, rather than waiting on the interval.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+}
 </script>
 </body>
 </html>

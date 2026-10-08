@@ -340,6 +340,14 @@ class Browser:
                    {"width": width, "height": height, "deviceScaleFactor": 1,
                     "mobile": width < 600})
 
+    def reduce_motion(self, reduce=True):
+        """Emulate `prefers-reduced-motion: reduce` (or clear it) — the only way to check
+        a page's own reduced-motion CSS from here: there is no DOM state to assert on
+        otherwise, since the browser, not the page, decides the media query."""
+        value = "reduce" if reduce else "no-preference"
+        self._send("Emulation.setEmulatedMedia",
+                   {"features": [{"name": "prefers-reduced-motion", "value": value}]})
+
     def text(self):
         return self.eval("document.body ? document.body.innerText : ''") or ""
 
