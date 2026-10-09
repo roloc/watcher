@@ -202,7 +202,10 @@ ROUNDS = {778: [{"when": "2026-10-09T08:00:00Z", "images": [
     {"url": TINY_PNG, "label": "phone", "letter": "B", "recommended": False},
     {"url": TINY_PNG, "label": "desktop", "letter": "B", "recommended": False},
 ]}]}
-ASKS = {778: "Needs Steve: pick a direction for the earlier thing"}
+# The real comment's first line keeps its own `**...**` wrapping (card #100: "the ask line
+# shows raw ** markdown") — the fixture carries that so the rendering fix actually gets
+# exercised, not just a pre-cleaned string.
+ASKS = {778: "**Needs Steve: pick a direction for the earlier thing**"}
 
 
 class LiveCache:
@@ -368,66 +371,86 @@ try:
                   "new Date('2026-10-09T20:00:00Z').toLocaleTimeString()"))
         shot(b, "floor-desktop.png")
 
-        print("2b. the Needs Steve strip (card #96): a mockup to approve right on the "
-              "floor, for a card Stuck on the board even though no lane's own desk shows it")
-        check("#778's ask is on the strip, though no lane's last tick is #778",
+        print("2b. the Needs Steve strip (card #100): no raw markdown, a chip per "
+              "direction, and a Review button that opens the pictures over the whole "
+              "window instead of a sliver inline")
+        check("#778's ask is on the strip, rendered, though no lane's last tick is #778",
               "pick a direction for the earlier thing" in text, text[:800])
-        slide = "document.querySelector('.carousel[data-carousel=\"778\"]')"
-        check("the carousel is drawn, with a picture", b.wait_for(f"!!{slide}?.querySelector('.car-img')"))
-        check("it opens on direction A, recommended, 1 of 4",
-              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
-              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "phone"
-              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "1 of 4")
-        b.click('[data-car-next="778"]')
+        check("no raw ** markdown reached the page (card #100's own complaint about #96)",
+              "**" not in b.text(), b.text()[:800])
+        check("the ask is actually bold, not just stripped",
+              b.eval("document.querySelector('#projects .needs-ask strong')") is not None)
+        chips = "[...document.querySelectorAll('#projects .direction-chip')].map(c => c.textContent)"
+        check("the strip names both directions it offers, A marked recommended",
+              b.eval(chips) == ["A ★", "B"], b.eval(chips))
+        check("the old inline sliver is gone; a Review button stands in its place",
+              b.eval("document.querySelector('#projects .car-img')") is None
+              and b.eval("document.querySelector('#projects [data-review=\"778\"]')") is not None)
+
+        print("2c. tapping Review opens the pictures over the whole window (card #100)")
+        OPEN = "document.getElementById('review-overlay').classList.contains('open')"
+        IMG = "document.getElementById('review-img')"
+        CAP = "document.getElementById('review-caption').textContent"
+        CNT = "document.getElementById('review-counter').textContent"
+        NEWTAB = "document.getElementById('review-newtab')"
+        b.click('#projects [data-review="778"]')
+        check("the overlay opens", b.wait_for(OPEN))
+        check("the picture fills at least the viewport's width, not a sliver",
+              b.eval(f"{IMG}.getBoundingClientRect().width") >= b.eval("window.innerWidth") * 0.85,
+              b.eval(f"{IMG}.getBoundingClientRect().width"))
+        check("it opens on direction A, recommended, the phone shot, 1 of 4",
+              b.eval(CAP) == "A ★ — phone" and b.eval(CNT) == "1 of 4", (b.eval(CAP), b.eval(CNT)))
+        shot(b, "review-overlay-desktop.png", full_page=False)
+        check("the page behind does not scroll while it is open",
+              b.eval("getComputedStyle(document.body).overflow") == "hidden")
+        b.click("#review-next")
         check("next: still A, now the desktop shot, 2 of 4",
-              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
-              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
-              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
-        b.click('[data-car-next="778"]')
+              b.eval(CAP) == "A ★ — desktop" and b.eval(CNT) == "2 of 4", (b.eval(CAP), b.eval(CNT)))
+        b.click("#review-next")
         check("next again: direction B, not recommended, phone, 3 of 4",
-              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "B"
-              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "phone"
-              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
-        b.click('[data-car-prev="778"]')
+              b.eval(CAP) == "B — phone" and b.eval(CNT) == "3 of 4", (b.eval(CAP), b.eval(CNT)))
+        b.click("#review-prev")
         check("previous: back to direction A's desktop shot, 2 of 4",
-              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
-              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
-              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
-        check("no uncaught exception after flipping through the carousel", b.errors == [], b.errors)
+              b.eval(CAP) == "A ★ — desktop" and b.eval(CNT) == "2 of 4", (b.eval(CAP), b.eval(CNT)))
+        check("the open-in-new-tab control carries the current picture's own URL and opens in a new tab",
+              b.eval(f"{NEWTAB}.href") == TINY_PNG and b.eval(f"{NEWTAB}.target") == "_blank")
+        check("no uncaught exception after flipping through the overlay", b.errors == [], b.errors)
 
-        # Arrow keys, pressed more than once in a row: a re-render replaces the carousel's
-        # own DOM node on every step, which used to drop focus to <body> after the first
-        # key — so the first ArrowRight worked and every one after it silently did nothing.
-        b.eval(f"{slide}.focus()")
-        check("the carousel can take keyboard focus", b.eval(f"document.activeElement === {slide}"))
-        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
-               "{key: 'ArrowRight', bubbles: true}))")
-        check("first ArrowRight: direction B's phone shot, 3 of 4",
-              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
-        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
-               "{key: 'ArrowRight', bubbles: true}))")
-        check("second ArrowRight in a row still moves it: direction B's desktop shot, 4 of 4",
-              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "4 of 4")
-        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
-               "{key: 'ArrowLeft', bubbles: true}))")
-        check("ArrowLeft steps back: 3 of 4",
-              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
-
-        # A swipe: the same prev/next, from a touch gesture rather than a tap on an arrow.
+        print("2d. arrow keys and a swipe flip it too, same as the old carousel did")
+        b.key("ArrowRight")
+        check("ArrowRight: direction B's phone shot, 3 of 4", b.eval(CNT) == "3 of 4", b.eval(CNT))
+        b.key("ArrowRight")
+        check("ArrowRight again: direction B's desktop shot, 4 of 4", b.eval(CNT) == "4 of 4", b.eval(CNT))
+        b.key("ArrowLeft")
+        check("ArrowLeft steps back: 3 of 4", b.eval(CNT) == "3 of 4", b.eval(CNT))
         swipe = """((dx) => {
-          const el = document.querySelector('.carousel[data-carousel="778"]');
+          const el = document.getElementById('review-img');
           const r = el.getBoundingClientRect(), y = r.top + r.height / 2, x = r.left + r.width / 2;
           const touch = (cx) => new Touch({identifier: 1, target: el, clientX: cx, clientY: y});
           el.dispatchEvent(new TouchEvent('touchstart', {touches: [touch(x)], changedTouches: [touch(x)], bubbles: true}));
           el.dispatchEvent(new TouchEvent('touchend', {touches: [], changedTouches: [touch(x + dx)], bubbles: true}));
         })"""
         b.eval(f"{swipe}(-80)")  # a swipe left: forward, same as next
-        check("a swipe left moves forward: direction B's desktop shot, 4 of 4",
-              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "4 of 4")
+        check("a swipe left moves forward: direction B's desktop shot, 4 of 4", b.eval(CNT) == "4 of 4", b.eval(CNT))
         b.eval(f"{swipe}(80)")  # a swipe right: back
-        check("a swipe right moves back: 3 of 4",
-              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        check("a swipe right moves back: 3 of 4", b.eval(CNT) == "3 of 4", b.eval(CNT))
         check("no uncaught exception after the keyboard and swipe round trip", b.errors == [], b.errors)
+
+        print("2e. zoom: a double-click zooms in and resets when the picture flips")
+        b.eval(f"{IMG}.dispatchEvent(new MouseEvent('dblclick', {{bubbles: true}}))")
+        check("a double-click zooms in",
+              "scale(2.5)" in b.eval(f"{IMG}.style.transform"), b.eval(f"{IMG}.style.transform"))
+        b.key("ArrowRight")
+        check("flipping to the next picture resets the zoom",
+              "scale(1)" in b.eval(f"{IMG}.style.transform"), b.eval(f"{IMG}.style.transform"))
+        check("no uncaught exception after zooming", b.errors == [], b.errors)
+
+        print("2f. Escape closes the overlay, same as Peek's")
+        b.key("Escape")
+        check("the overlay closes", b.wait_for("!" + OPEN))
+        check("the page behind can scroll again",
+              b.eval("getComputedStyle(document.body).overflow") != "hidden")
+        check("still no errors after the whole Review round trip", b.errors == [], b.errors)
         shot(b, "floor-needs-strip.png")
 
         print("2c. card #106: the Ship desk names which release each lane on the box is on")
@@ -572,14 +595,24 @@ try:
         check("the page is no wider than the screen",
               b.eval("document.documentElement.scrollWidth <= window.innerWidth"),
               b.eval("[document.documentElement.scrollWidth, window.innerWidth]"))
-        check("the Needs Steve carousel fills the width on a phone, one picture at a time, "
-              "and its arrows are big enough for a thumb",
-              b.eval("""(() => {
-                const c = document.querySelector('.carousel[data-carousel="778"]').getBoundingClientRect();
-                const btn = document.querySelector('[data-car-next="778"]').getBoundingClientRect();
-                return c.right <= window.innerWidth + 1 && btn.width >= 20 && btn.height >= 20;
-              })()"""))
+        check("the Review button sits on the strip within the screen's width",
+              b.eval("""(() => { const r = document.querySelector('#projects [data-review="778"]').getBoundingClientRect();
+                      return r.right <= window.innerWidth + 1; })()"""))
         shot(b, "floor-phone.png")
+        b.click('#projects [data-review="778"]')
+        check("Review opens full-window on a phone too, the picture filling the width "
+              "and the flip arrows thumb-sized",
+              b.wait_for("document.getElementById('review-overlay').classList.contains('open')"))
+        check("the picture fills the phone's width",
+              b.eval("document.getElementById('review-img').getBoundingClientRect().width")
+              >= b.eval("window.innerWidth") * 0.85)
+        check("the flip arrows are big enough for a thumb",
+              b.eval("""(() => { const r = document.getElementById('review-next').getBoundingClientRect();
+                      return r.width >= 40 && r.height >= 40; })()"""))
+        shot(b, "review-overlay-phone.png", full_page=False)
+        b.key("Escape")
+        check("it closes, same as on a desktop",
+              b.wait_for("!document.getElementById('review-overlay').classList.contains('open')"))
         b.click(peek_button("alpha"))
         check("Peek opens and fills at phone width",
               b.wait_for(PANEL_TEXT + ".includes('Opening the pull request now.')"))
@@ -695,8 +728,15 @@ try:
         check("#778's chip is in the in-tray, after its board's name",
               b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778"
               and b.eval("document.querySelector('.tray-board')?.textContent") == "alpha")
-        check("...and the tray's own carousel shows its picture too",
-              b.wait_for("!!document.querySelector('#room-stuck .car-img')"))
+        check("...and the tray's own Review button opens the same overlay (card #100), "
+              "not an inline sliver",
+              b.eval("document.querySelector('#room-stuck .car-img')") is None
+              and b.eval("document.querySelector('#room-stuck [data-review=\"778\"]')") is not None)
+        b.click('#room-stuck [data-review="778"]')
+        check("tapping it opens the full-window overlay with #778's first picture",
+              b.wait_for("document.getElementById('review-overlay').classList.contains('open')")
+              and b.eval("document.getElementById('review-caption').textContent") == "A ★ — phone")
+        b.key("Escape")
         check("the tray is in Steve's office, in front of his desk, and the office grew to hold it",
               b.eval("""(() => { const t = document.querySelector('.in-tray').getBoundingClientRect();
                       const o = document.querySelector('.office-room.boss').getBoundingClientRect();
@@ -900,6 +940,13 @@ try:
         b.eval("stepCarousel(11, 1)")
         check("stepping the shared carousel (card #96) moves what the podium holds too, "
               "not just the floor's own strip", b.eval(HELD_ALT) == "phone dark", b.eval(HELD_ALT))
+        check("the podium figure keeps holding the picture, and it is tappable (card #100)",
+              b.eval("!!document.querySelector('.character-mockup[data-review]')"))
+        b.click(".character-mockup[data-review]")
+        check("tapping the held mockup opens the same overlay, not the speech bubble",
+              b.wait_for("document.getElementById('review-overlay').classList.contains('open')")
+              and b.eval("document.querySelector('.bubble')") is None)
+        b.key("Escape")
         settled(b)
         check("it walked to Steve's office, and its plate says whose it is",
               info(b, "alpha") == ["needs_steve", "Steve's office", "Build\nalpha"], info(b, "alpha"))
@@ -916,6 +963,12 @@ try:
         b.wait_for("!" + STUDIO_OPEN)
         check("the floor's own desk shows the same mockup inline too, not just a link to the card",
               b.eval("!!document.querySelector('.desk .mockup-thumb')"))
+        check("...and the design lane's own desk tile also carries the Review button (card #100)",
+              b.eval("!!document.querySelector('.desk [data-review]')"))
+        b.click(".desk [data-review]")
+        check("tapping it from the desk opens the overlay too",
+              b.wait_for("document.getElementById('review-overlay').classList.contains('open')"))
+        b.key("Escape")
         shot(b, "floor-demo-mockup.png")
         check("still no errors after cycling demo states", b.errors == [], b.errors)
 except browse.BrowseError as e:
