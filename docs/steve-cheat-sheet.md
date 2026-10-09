@@ -13,6 +13,14 @@ to be idle, or held (a red flag, with its card). Working, idle, needing you, pau
 asleep after a failure — one look, phone-friendly, light and dark. Read-only: it never
 changes a card.
 
+**A board whose cards are waiting on you gets its own strip, pictures and all.** Any card
+in Stuck shows there — not only the one a lane's desk happens to be sitting on — with the
+ask above it and every picture its Needs Steve comment pointed at: flip through with the
+arrows (or a swipe), lettered A/B/C when there were directions to choose from, the
+recommended one marked. Asked more than once? It opens on the newest round; older ones are
+still there, past the last picture, each dated. Nothing to approve yet — the card linked a
+page instead of a picture — and you'll see its ask with no carousel under it, just a link.
+
 **Peek** at any desk to see what that bot is actually doing, not just which card it holds.
 Every desk has a **Peek** button, busy or not: on a working desk it opens that bot's
 session live, one short line at a time, updating as it works; on a quiet desk it shows the
@@ -28,8 +36,10 @@ that is the page telling you it is broken: file a card.
 board's name on it, and each bot a little person in its own row — at its desk when it is
 working, standing by it with a mug when it is idle, hands up when it is paused. It leaves
 the row for two places only: the couch under the rows when it is asleep, and the podium by
-the door when it needs you, with a light over the door that turns red the moment anyone
-does. The strip along the bottom is the last cards worked, newest first; it slides sideways
+the door when it needs you, holding up the same picture the strip is showing, with a light
+over the door that turns red the moment anyone does; its row also carries the strip itself,
+so a card waiting on you shows up there even before any bot walks to the podium for it. The
+strip along the bottom is the last cards worked, newest first; it slides sideways
 on a phone. Tap a bot for what it just said; tap that for the full Peek. **Floor** takes you
 back. Still read-only, still just a look.
 

@@ -173,11 +173,28 @@ open(os.path.join(STATE, "beta", "PAUSE"), "w").close()
 tick_log("beta", 3, "20260927T090000Z")
 transcript(f"{ROOT}/beta-worktrees", 3, [say("Parked: the build needs a decision.")])
 
+# A tiny real PNG, inline — no network, same one bin/floor.py's own demo fixture uses.
+TINY_PNG = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQ"
+            "VR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC")
+
 BOARDS = {
     ("roloc", 1): [{"number": 7, "state": "OPEN", "status": "In progress", "stage": "Building",
-                    "labels": [], "url": "https://github.com/roloc/alpha/issues/7"}],
+                    "labels": [], "url": "https://github.com/roloc/alpha/issues/7"},
+                   # #778 is Stuck but no lane's own last tick points at it (alpha's last
+                   # card is #7, alpha-design's is #5) — exactly card #96's "why nothing
+                   # shows today": a lane that moved on must not make this card invisible.
+                   {"number": 778, "state": "OPEN", "status": "Stuck - Needs help", "stage": "Parked",
+                    "labels": [], "url": "https://github.com/roloc/alpha/issues/778"}],
     ("roloc", 2): [],
 }
+
+ROUNDS = {778: [{"when": "2026-10-09T08:00:00Z", "images": [
+    {"url": TINY_PNG, "label": "phone", "letter": "A", "recommended": True},
+    {"url": TINY_PNG, "label": "desktop", "letter": "A", "recommended": True},
+    {"url": TINY_PNG, "label": "phone", "letter": "B", "recommended": False},
+    {"url": TINY_PNG, "label": "desktop", "letter": "B", "recommended": False},
+]}]}
+ASKS = {778: "Needs Steve: pick a direction for the earlier thing"}
 
 
 class LiveCache:
@@ -188,7 +205,9 @@ class LiveCache:
         if self.broken:
             raise RuntimeError("the fixture's data endpoint is switched off")
         return floor.build_state(PROJECTS, STATE, lambda o, n: BOARDS.get((o, n), []),
-                                 unit_active_fn=lambda u: True, ask_fn=lambda i, r: "",
+                                 unit_active_fn=lambda u: True,
+                                 ask_fn=lambda i, r: ASKS.get(i, ""),
+                                 rounds_fn=lambda i, r: ROUNDS.get(i, []),
                                  box_name="test-box")
 
 
@@ -313,6 +332,34 @@ try:
         check("every link on the drawn page opens in a new tab (card #62)",
               b.eval("[...document.querySelectorAll('a')].every(a => a.target === '_blank')"))
         shot(b, "floor-desktop.png")
+
+        print("2b. the Needs Steve strip (card #96): a mockup to approve right on the "
+              "floor, for a card Stuck on the board even though no lane's own desk shows it")
+        check("#778's ask is on the strip, though no lane's last tick is #778",
+              "pick a direction for the earlier thing" in text, text[:800])
+        slide = "document.querySelector('.carousel[data-carousel=\"778\"]')"
+        check("the carousel is drawn, with a picture", b.wait_for(f"!!{slide}?.querySelector('.car-img')"))
+        check("it opens on direction A, recommended, 1 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "phone"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "1 of 4")
+        b.click('[data-car-next="778"]')
+        check("next: still A, now the desktop shot, 2 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
+        b.click('[data-car-next="778"]')
+        check("next again: direction B, not recommended, phone, 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "B"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "phone"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        b.click('[data-car-prev="778"]')
+        check("previous: back to direction A's desktop shot, 2 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
+        check("no uncaught exception after flipping through the carousel", b.errors == [], b.errors)
+        shot(b, "floor-needs-strip.png")
 
         print("3. Peek is on every lane's desk, whatever the lane is doing (card #63)")
         for lane in LANES:
@@ -445,6 +492,13 @@ try:
         check("the page is no wider than the screen",
               b.eval("document.documentElement.scrollWidth <= window.innerWidth"),
               b.eval("[document.documentElement.scrollWidth, window.innerWidth]"))
+        check("the Needs Steve carousel fills the width on a phone, one picture at a time, "
+              "and its arrows are big enough for a thumb",
+              b.eval("""(() => {
+                const c = document.querySelector('.carousel[data-carousel="778"]').getBoundingClientRect();
+                const btn = document.querySelector('[data-car-next="778"]').getBoundingClientRect();
+                return c.right <= window.innerWidth + 1 && btn.width >= 20 && btn.height >= 20;
+              })()"""))
         shot(b, "floor-phone.png")
         b.click(peek_button("alpha"))
         check("Peek opens and fills at phone width",
@@ -532,6 +586,15 @@ try:
               b.eval("[...document.querySelectorAll('.zone-name')].every(a => a.href && a.target === '_blank')"))
         check("nobody stands on anybody", b.eval(NO_OVERLAP) == [], b.eval(NO_OVERLAP))
 
+        print("12a. the Needs Steve strip in the studio too (card #96): alpha's row names "
+              "#778 even though it is not any lane's own podium figure")
+        check("#778's chip is on alpha's row",
+              b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778")
+        check("...and the row's own carousel shows its picture too",
+              b.wait_for("!!document.querySelector('#room-stuck .car-img')"))
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "studio-needs-strip.png")
+
         print("12b. the floor Steve sent back on October 8, 2026: seven lanes, six idle, three boards")
         b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); true")
         settled(b)
@@ -574,8 +637,9 @@ try:
                     "'.desk-monitor[data-lane=\"alpha-design\"] .scanline')).opacity") == "0")
 
         print("13. the beacon over the door reads the same state the pills do")
-        check("a paused lane and a failing build: amber, not green",
-              b.eval("document.getElementById('beacon').className") == "beacon-amber")
+        check("a paused lane, a failing build, AND #778 sitting Stuck on alpha's board: red "
+              "— a Stuck card outranks amber even with no lane pointing at it (card #96)",
+              b.eval("document.getElementById('beacon').className") == "beacon-red")
         check("the beacon is actually visible — inside #room's own box, which clips "
               "(it used to sit mostly above it, clipped to a sliver)",
               b.eval("""(() => {
@@ -683,6 +747,12 @@ try:
               "right there in the room — no click through to the card needed",
               b.eval("!!document.querySelector("
                     "'.character[data-pill=\"needs_steve\"] .character-mockup img')"))
+        HELD_ALT = "document.querySelector('.character[data-pill=\"needs_steve\"] .character-mockup img')?.alt"
+        check("it starts on direction A's first shot",
+              b.eval(HELD_ALT) == "phone light", b.eval(HELD_ALT))
+        b.eval("stepCarousel(11, 1)")
+        check("stepping the shared carousel (card #96) moves what the podium holds too, "
+              "not just the floor's own strip", b.eval(HELD_ALT) == "phone dark", b.eval(HELD_ALT))
         settled(b)
         check("it walked to the podium by the door, above every row, and its plate says whose it is",
               b.eval("""(() => { const e = document.querySelector('.character[data-pill="needs_steve"]');

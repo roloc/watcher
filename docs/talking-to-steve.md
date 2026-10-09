@@ -57,7 +57,10 @@ comment, a log line). Those can be as dense as they need to be.
     live page, the PR that shows the thing: a `**Look:**` list between the bullets and the
     question, one link per line, what it is in plain words and then the URL. The fold is
     collapsed on the phone app, and Steve reviews on his phone, so a link under it is a
-    link he never sees. A repo path is not a link; it stays under the fold.
+    link he never sees. A repo path is not a link; it stays under the fold. A direct link
+    to an image (`.png`, `.jpg`, `.gif`, `.webp`) is also what the floor page's Needs Steve
+    carousel shows inline, captioned with the plain words written next to it — a `.html`
+    mockup or a live page has nothing to embed there and stays a link.
 11. **American English**, dates like *September 7, 2026*. Never *favour*, *optimise*,
     *behaviour*.
 12. **Never write "needs input".** Say what input. Never restate the card title as the ask.

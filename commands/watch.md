@@ -630,7 +630,11 @@ The rules behind the shape (full version in `talking-to-steve.md`):
 - **Links he has to open go right above the question, never under the fold.** A hosted
   mockup, a screenshot, a live page, the PR: a `**Look:**` list, one per line, what it is
   in plain words and then the URL. A link is not a path — a path is dead text on a phone,
-  a link is one tap. The `<details>` fold is collapsed on the phone app, so a link in there
+  a link is one tap. **A direct link to an image (`.png`, `.jpg`, `.gif`, `.webp`) is what
+  puts the picture on the floor page's own carousel** — name each one in plain words
+  ("Direction A — phone, light"), since that name is the caption Steve sees there; a
+  `.html` mockup or a live page has nothing to embed and stays a plain link. The
+  `<details>` fold is collapsed on the phone app, so a link in there
   is a link Steve never sees (riffmap cards #342 and #349, September 16, 2026: two design
   approvals stalled because the mockup links were under the fold).
 - **Say how to answer.** The last line above the fold is always the reply-and-move line.

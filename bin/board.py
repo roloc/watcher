@@ -15,6 +15,7 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py dump                   # every open+closed item, as JSON (one call)
     python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
     python3 scripts/board.py images <issue>          # direct image links under its "Look:" section, one per line
+    python3 scripts/board.py images <issue> --all-rounds  # every Needs Steve round, as JSON (bin/floor.py's carousel)
 
 Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), a move to Stuck posts the alert
 after it lands (with the ask taken from the card's latest `Needs Steve` comment, or from
@@ -30,6 +31,7 @@ rather than printing nothing and looking like an empty column.
 """
 import json
 import os, re, subprocess, sys
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notify  # noqa: E402  (bin/notify.py, beside this file)
@@ -185,19 +187,26 @@ def pr_for(issue):
     return prs[0] if prs else None
 
 
+def _comments(issue):
+    """Every comment on the card, oldest first, straight from `gh issue view --json
+    comments` — the one read both `_latest_needs_steve_comment` and `needs_steve_rounds`
+    build on, so there is exactly one reader of "what did Steve get asked", not two that
+    could disagree."""
+    n = issue_num(issue)
+    try:
+        r = subprocess.run(["gh", "issue", "view", str(n), "--json", "comments"],
+                           capture_output=True, text=True, timeout=20)
+        return json.loads(r.stdout).get("comments", []) if r.returncode == 0 else []
+    except Exception:
+        return []
+
+
 def _latest_needs_steve_comment(issue):
     """The full body of the card's newest `Needs Steve`-shaped comment, or "" if it has
     none. Shared by `needs_steve_ask` (the first line) and `needs_steve_images` (the
     `**Look:**` section below it) so there is exactly one reader of "which comment is the
     ask", not two that could disagree."""
-    n = issue_num(issue)
-    try:
-        r = subprocess.run(["gh", "issue", "view", str(n), "--json", "comments"],
-                           capture_output=True, text=True, timeout=20)
-        comments = json.loads(r.stdout).get("comments", []) if r.returncode == 0 else []
-    except Exception:
-        return ""
-    for c in reversed(comments):
+    for c in reversed(_comments(issue)):
         body = c.get("body") or ""
         first = body.strip().splitlines()
         first = first[0].strip() if first else ""
@@ -216,36 +225,170 @@ def needs_steve_ask(issue):
     return body.strip().splitlines()[0].replace("🤖", "", 1).strip()
 
 
-# The `**Look:**` section sits between that heading and `**Question:` (talking-to-steve.md
-# rule 10: "one link per line, what it is in plain words and then the URL"). Only a direct
-# image URL is ever returned — the PR link and a live-page link in the same section are
-# left as links, never embedded, because there is nothing to show inline for them.
-_LOOK_SECTION_RE = re.compile(r"\*\*Look:\*\*(.*?)(?:\n\s*\*\*Question:|\Z)", re.S)
-_LOOK_LINE_RE = re.compile(r"^-\s*.+?:\s*(https?://\S+)\s*$")
-_IMAGE_URL_RE = re.compile(r"\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$", re.I)
-MAX_LOOK_IMAGES = 3
+# --- the `**Look:**` section: every direct image link under it, lettered by direction ---
+#
+# The section sits between the `**Look:**` heading and the next bold heading line
+# (talking-to-steve.md rule 10: "one link per line, what it is in plain words and then the
+# URL"). A regex anchored on the literal word "Question" used to find that end, which broke
+# the moment a card asked more than one question (riffmap-site#19's `**Question 1:**` /
+# `**Question 2:**`): the terminator never matched, and the "section" ran to the end of the
+# comment, swallowing the question text, the reply line and the `<details>` fold with it.
+# Scanning for the next line that starts with `**` and is not itself a Look bullet (which
+# starts `- **`) stops at any heading, numbered or not, and needs no list of their names.
+
+_IMAGE_EXT_RE = re.compile(r"\.(?:png|jpe?g|gif|webp)(?:[?#]\S*)?$", re.I)
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((https?://[^)\s]+)\)")
+_BARE_URL_RE = re.compile(r"https?://\S+")
+_BARE_LABELED_RE = re.compile(r"^-?\s*(.+?):\s*(https?://\S+)\s*$")
+# A bullet's own leading words naming its direction: "Direction A", "A (recommended)", or
+# "A —" / "A -" (em dash, en dash, or a plain hyphen).
+_LETTER_PATTERNS = [
+    re.compile(r"^Direction\s+([A-Za-z])\b", re.I),
+    re.compile(r"^([A-Za-z])\s*\(recommended\)", re.I),
+    re.compile(r"^([A-Za-z])\s*[—–-]"),
+]
+# The same letter, read off a mockup or screenshot's own filename ("invitation-a.html",
+# "integrations-a-phone-light.png") when the bullet's words don't say it.
+_URL_LETTER_RE = re.compile(r"[-_]([A-Za-z])[-_.]")
+MAX_LOOK_IMAGES = 12  # enough for three directions of four shots (card #96)
+
+
+def _look_section(body):
+    """The raw text of the `**Look:**` section: every line after that heading, up to (not
+    including) the next line that is itself a bold heading — `**Question:**`,
+    `**Question 1:**`, or anything else of that shape. "" if the comment has no such
+    heading at all."""
+    lines = body.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == "**Look:**":
+            start = i + 1
+            break
+    if start is None:
+        return ""
+    out = []
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped.startswith("**") and not stripped.startswith("- "):
+            break
+        out.append(line)
+    return "\n".join(out)
+
+
+def _look_entries(section_text):
+    """Split the section into one block per top-level bullet (a line starting `- `),
+    folding any wrapped continuation line (no leading `-`, the designer's own line break
+    mid-thought — riffmap-site#18 puts each direction's shot links on the line below its
+    bullet) into the bullet above it."""
+    entries, cur = [], None
+    for line in section_text.splitlines():
+        if re.match(r"^\s*-\s", line):
+            if cur is not None:
+                entries.append(cur)
+            cur = line.strip()
+        elif cur is not None and line.strip():
+            cur += " " + line.strip()
+        elif cur is not None:
+            entries.append(cur)
+            cur = None
+    if cur is not None:
+        entries.append(cur)
+    return entries
+
+
+def _entry_letter(heading):
+    for pat in _LETTER_PATTERNS:
+        m = pat.match(heading)
+        if m:
+            return m.group(1).upper()
+    return None
+
+
+def _url_letter(url):
+    name = urlsplit(url).path.rsplit("/", 1)[-1]
+    m = _URL_LETTER_RE.search(name)
+    return m.group(1).upper() if m else None
+
+
+def _entry_images(entry):
+    """Every direct image link in one bullet block, as `(url, label)` — a markdown link's
+    own anchor text as the label, or, for the older one-url-per-bullet shape ("- what it
+    is: https://…"), the words before the colon."""
+    images, md_spans = [], []
+    for m in _MD_LINK_RE.finditer(entry):
+        md_spans.append((m.start(), m.end()))
+        label, url = m.group(1).strip(), m.group(2)
+        if _IMAGE_EXT_RE.search(url):
+            images.append((url, label))
+    remainder = entry
+    for start, end in sorted(md_spans, reverse=True):
+        remainder = remainder[:start] + remainder[end:]
+    remainder = remainder.strip()
+    labeled = _BARE_LABELED_RE.match(remainder)
+    if labeled:
+        label, url = labeled.group(1).strip(" *"), labeled.group(2).rstrip(").,;:")
+        if _IMAGE_EXT_RE.search(url):
+            images.append((url, label))
+    else:
+        heading = entry.lstrip("- ").lstrip("*").strip()
+        for m in _BARE_URL_RE.finditer(remainder):
+            url = m.group(0).rstrip(").,;:")
+            if _IMAGE_EXT_RE.search(url):
+                images.append((url, heading))
+    return images
 
 
 def _parse_look_images(body, max_images=MAX_LOOK_IMAGES):
-    m = _LOOK_SECTION_RE.search(body)
-    if not m:
-        return []
-    urls = []
-    for line in m.group(1).splitlines():
-        lm = _LOOK_LINE_RE.match(line.strip())
-        if not lm:
-            continue
-        url = lm.group(1)
-        if _IMAGE_URL_RE.search(url) and url not in urls:
-            urls.append(url)
-    return urls[:max_images]
+    """Every direct image link under `body`'s `**Look:**` section, each tagged with the
+    direction letter and recommendation its own bullet carries — deduplicated, ordered A's
+    then B's then C's then anything unlettered, capped at `max_images`. A picture that
+    matches no letter sits last, unlabeled (card #96)."""
+    out, seen = [], set()
+    for entry in _look_entries(_look_section(body)):
+        heading = entry.lstrip("- ").lstrip("*").strip()
+        letter = _entry_letter(heading)
+        recommended = "(recommended)" in entry.lower()
+        images = _entry_images(entry)
+        if letter is None:
+            for url, _ in images:
+                letter = _url_letter(url)
+                if letter:
+                    break
+        for url, label in images:
+            if url in seen:
+                continue
+            seen.add(url)
+            out.append({"url": url, "label": label, "letter": letter, "recommended": recommended})
+    out.sort(key=lambda d: (0, d["letter"]) if d["letter"] else (1, ""))
+    return out[:max_images]
 
 
 def needs_steve_images(issue):
     """Direct image links — a mockup or a screenshot — under the newest `Needs Steve`
     comment's `**Look:**` section (card #91: bin/floor.py's inline preview, so a reader
     never has to open the card to find the picture its own ask is about)."""
-    return _parse_look_images(_latest_needs_steve_comment(issue))
+    return [d["url"] for d in _parse_look_images(_latest_needs_steve_comment(issue))]
+
+
+def needs_steve_rounds(issue):
+    """Every `Needs Steve`-shaped comment — the same ones `_latest_needs_steve_comment`
+    picks from, not only ones with a formal `**Question:**` heading (riffmap-site#18 asks
+    with a plain "Reply with a letter…" line and still carries three directions of
+    pictures) — newest first, as `{"when": <ISO timestamp>, "images": [{"url", "label",
+    "letter", "recommended"}, …]}`. A status note with nothing to look at, like
+    riffmap-site#3's "still blocked, no action needed from you", is a round with an empty
+    `images` list, not one left out. For a reader that wants every round, not just the
+    last (bin/floor.py's carousel, card #96's own `--all-rounds`)."""
+    rounds = []
+    for c in _comments(issue):
+        body = c.get("body") or ""
+        first = body.strip().splitlines()
+        first = first[0].strip() if first else ""
+        if "Needs Steve:" not in first:
+            continue
+        rounds.append({"when": c.get("createdAt") or "", "images": _parse_look_images(body)})
+    rounds.sort(key=lambda r: r["when"], reverse=True)
+    return rounds
 
 
 def announce(kind, card, detail="", with_pr=False):
@@ -415,10 +558,17 @@ def cmd_ask(issue):
     return 0
 
 
-def cmd_images(issue):
+def cmd_images(issue, *rest):
     """One image URL per line (board.py's `needs_steve_images`) — the same comment `ask`
     reads, for a caller that wants the mockup or screenshot it points at (bin/floor.py's
-    inline preview, card #91) without moving the card."""
+    inline preview, card #91) without moving the card. `--all-rounds` prints
+    `needs_steve_rounds` instead, as one JSON array, for a caller that wants every round's
+    pictures, lettered by direction (bin/floor.py's carousel, card #96)."""
+    if rest == ("--all-rounds",):
+        print(json.dumps(needs_steve_rounds(issue)))
+        return 0
+    if rest:
+        sys.exit(f"board.py: images: unexpected arguments {list(rest)!r}")
     for u in needs_steve_images(issue):
         print(u)
     return 0
@@ -440,6 +590,6 @@ if __name__ == "__main__":
                   "unclaim": lambda: cmd_unclaim(a[1]),
                   "dump": lambda: cmd_dump(),
                   "ask": lambda: cmd_ask(a[1]),
-                  "images": lambda: cmd_images(a[1])}[a[0]]())
+                  "images": lambda: cmd_images(a[1], *a[2:])}[a[0]]())
     except IndexError:
         sys.exit(__doc__)

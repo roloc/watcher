@@ -240,6 +240,11 @@ BOARDS = {
          "state": "OPEN", "labels": [], "status": "In progress", "priority": "P1", "stage": "Building"},
         {"number": 777, "title": "ambiguous mockup", "url": "https://github.com/roloc/riffmap/issues/777",
          "state": "OPEN", "labels": [], "status": "Stuck - Needs help", "priority": "P2", "stage": "Parked"},
+        # a second Stuck card no lane's own last tick points at — the design lane ran this
+        # one earlier and moved on to #777 since (card #96's "why nothing shows today"):
+        # #778 must still show up on the board's own Needs Steve strip.
+        {"number": 778, "title": "an earlier pick, still unanswered", "url": "https://github.com/roloc/riffmap/issues/778",
+         "state": "OPEN", "labels": [], "status": "Stuck - Needs help", "priority": "P2", "stage": "Parked"},
         {"number": 900, "title": "in ready", "url": "https://github.com/roloc/riffmap/issues/900",
          "state": "OPEN", "labels": [], "status": "Backlog", "priority": "P2", "stage": None},
     ],
@@ -269,11 +274,13 @@ def stub_unit_active(unit):
 
 ASK_CALLS = []
 IMAGES_CALLS = []
+ROUNDS_CALLS = []
 
 
 def stub_ask(issue, project_repo):
     ASK_CALLS.append((issue, project_repo))
-    return {777: "Needs Steve: which of two mockups did you mean?"}.get(issue, "")
+    return {777: "Needs Steve: which of two mockups did you mean?",
+            778: "Needs Steve: pick a direction for the earlier thing"}.get(issue, "")
 
 
 def stub_images(issue, project_repo):
@@ -281,9 +288,16 @@ def stub_images(issue, project_repo):
     return {777: ["https://example.com/mockup-a.png", "https://example.com/mockup-b.png"]}.get(issue, [])
 
 
+def stub_rounds(issue, project_repo):
+    ROUNDS_CALLS.append((issue, project_repo))
+    return {778: [{"when": "2026-09-28T10:00:00Z", "images": [
+        {"url": "https://example.com/778-a.png", "label": "desktop", "letter": "A", "recommended": True}]}]}.get(issue, [])
+
+
 print("5. lane_desk: each of the five pills, from its own fixture")
 state = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
-                           ask_fn=stub_ask, images_fn=stub_images, now=NOW, box_name="test-box")
+                           ask_fn=stub_ask, images_fn=stub_images, rounds_fn=stub_rounds,
+                           now=NOW, box_name="test-box")
 lanes_by_name = {(p["name"], l["lane"]): l for p in state["projects"] for l in p["lanes"]}
 
 d = lanes_by_name[("watcher", "watcher")]
@@ -334,13 +348,39 @@ check("fourth: no mockup in its comment — an empty list, never a missing field
       d["images"] == [], d)
 
 print("6. header and counts")
-check("needs_steve_total counts exactly the two lanes in that state (riffmap-triage, fourth)",
-      state["header"]["needs_steve_total"] == 2, state["header"])
+check("needs_steve_total counts every Stuck CARD on every board (riffmap: #777 and #778; "
+      "fourth: #99) — not how many lane pills happen to read needs_steve, so #778 (no "
+      "lane's own last tick) is still counted, and #777 is counted once, not once per lane",
+      state["header"]["needs_steve_total"] == 3, state["header"])
 riffmap_counts = by_pname_state = next(p for p in state["projects"] if p["name"] == "riffmap")["counts"]
-check("riffmap counts: 1 in progress, 1 stuck (not counted as in progress), 1 backlog",
+check("riffmap counts: 1 in progress, Stuck cards not counted as in progress, 1 backlog",
       riffmap_counts == {"ready": 0, "in_progress": 1, "backlog": 1}, riffmap_counts)
 second_counts = next(p for p in state["projects"] if p["name"] == "second")["counts"]
 check("second counts: 1 ready", second_counts == {"ready": 1, "in_progress": 0, "backlog": 0}, second_counts)
+
+print("6b. the Needs Steve strip (card #96): every Stuck card on the board, independent "
+      "of which lane last touched it, with the round pictures it has been asked")
+riffmap_proj = next(p for p in state["projects"] if p["name"] == "riffmap")
+stuck_numbers = [s["card"]["number"] for s in riffmap_proj["stuck"]]
+check("both Stuck cards on riffmap's board, #778 included though no lane's desk shows it",
+      stuck_numbers == [777, 778], stuck_numbers)
+s777 = next(s for s in riffmap_proj["stuck"] if s["card"]["number"] == 777)
+check("#777's ask, read the same way the lane pill's is",
+      "which of two mockups" in s777["ask"], s777)
+s778 = next(s for s in riffmap_proj["stuck"] if s["card"]["number"] == 778)
+check("#778's own ask, even with no lane pointing at it",
+      "pick a direction for the earlier thing" in s778["ask"], s778)
+check("#778's rounds, newest first, lettered pictures and all",
+      s778["rounds"] == [{"when": "2026-09-28T10:00:00Z", "images": [
+          {"url": "https://example.com/778-a.png", "label": "desktop", "letter": "A",
+           "recommended": True}]}], s778)
+check("the rounds lookup was resolved against riffmap's OWN repo",
+      (778, "roloc/riffmap") in ROUNDS_CALLS, ROUNDS_CALLS)
+fourth_proj = next(p for p in state["projects"] if p["name"] == "fourth")
+check("fourth's own Stuck card shows up on its own strip too",
+      [s["card"]["number"] for s in fourth_proj["stuck"]] == [99], fourth_proj["stuck"])
+check("a board with nothing Stuck has an empty strip, never a missing key",
+      next(p for p in state["projects"] if p["name"] == "second")["stuck"] == [])
 
 print("7. recent ticks: project, lane, card link, when, quota — nothing else, newest first")
 recent = state["recent"]
