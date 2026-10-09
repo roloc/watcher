@@ -16,6 +16,19 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
     python3 scripts/board.py images <issue>          # direct image links under its "Look:" section, one per line
     python3 scripts/board.py images <issue> --all-rounds  # every Needs Steve round, as JSON (bin/floor.py's carousel)
+    python3 scripts/board.py ratelimit               # cached GraphQL remaining/resetAt/limit, as JSON (never a call of its own)
+
+Caching (card #98): `list`, `queue` and `dump` read `items()` through a short-lived file
+cache, one per board, so every lane and the floor page polling the same board inside the
+same window share one real read instead of each paying for their own. `WATCHER_CACHE_DIR`
+names the directory (default: `/var/cache/watcher`, falling back to `WATCHER_STATE_ROOT` or
+`~/.local/state/watcher`); `BOARD_CACHE_SEC` is the TTL in seconds (default 45; 0 disables
+the cache entirely — reads and writes both — which is what the offline suites set).
+`move`, `stage`, `unclaim` and `sweep-stages` invalidate it before they touch the board, so
+a lane that promotes a card and polls again right away sees the new column. `project()`
+(the board's fields and options) is cached the same way, for 10 minutes, and a miss on a
+field or option name invalidates it and retries once live — a column Steve just renamed is
+seen on that retry, not after the cache ages out on its own.
 
 Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), a move to Stuck posts the alert
 after it lands (with the ask taken from the card's latest `Needs Steve` comment, or from
@@ -30,7 +43,7 @@ proceed" — in particular `list` exits 1 for a column name the board does not h
 rather than printing nothing and looking like an empty column.
 """
 import json
-import os, re, subprocess, sys
+import os, re, subprocess, sys, tempfile, time
 from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -42,6 +55,142 @@ STAGE_FIELD = "Stage"
 STATUS_FIELD = "Status"
 STUCK_STATUS = "Stuck - Needs help"
 BOARD_URL = f"https://github.com/users/{OWNER}/projects/{NUMBER}"
+
+
+# --- the board cache (card #98) ---------------------------------------------------------
+# Every lane on the box, plus the floor page, read the same few boards once a minute each
+# for themselves — seven lanes and a floor poll all asking GitHub the same question inside
+# the same minute. A short-lived file per board, shared by whichever process gets there
+# first, turns that into one real read: `items()` and `project()` below serve it when it's
+# fresh enough and refill it when it's not. `WATCHER_CACHE_DIR` names the directory (one
+# file per board, so a project on a different board never collides); unset, this tries
+# `/var/cache/watcher` — the one place every lane AND the floor service can both reach, by
+# construction, since neither is keyed to a single lane's own state dir — falling back to
+# `WATCHER_STATE_ROOT` (or `~/.local/state/watcher`, the same derivation floor.py's own
+# default uses) if that isn't writable. `BOARD_CACHE_SEC` is the TTL for `items()` (default
+# 45s, a little under the lanes' own 60s poll); 0 disables the whole cache — reads and
+# writes both — which is what the offline suites set, so a test never touches a real
+# directory or sees a stale value a previous case wrote. `project()` (the board's fields
+# and options, which only change when Steve edits the board) gets its own, longer TTL.
+BOARD_CACHE_SEC_DEFAULT = 45
+PROJECT_CACHE_SEC_DEFAULT = 600
+RATELIMIT_CACHE_NAME = "ratelimit.json"
+
+_cache_dir_cached = None
+_cache_dir_warned = False
+
+
+def _cache_dir():
+    """The directory this process will read/write cache files in, or None if nowhere
+    writable was found (every reader of this falls back to a live call; the caller logs
+    nothing itself — this warns once per process instead, so a permissions problem on the
+    box shows up in the journal rather than as silent, repeated live reads)."""
+    global _cache_dir_cached, _cache_dir_warned
+    if _cache_dir_cached is not None:
+        return _cache_dir_cached
+    env = os.environ.get("WATCHER_CACHE_DIR")
+    candidates = [env] if env else [
+        "/var/cache/watcher",
+        os.environ.get("WATCHER_STATE_ROOT") or os.path.expanduser("~/.local/state/watcher"),
+    ]
+    for cand in candidates:
+        try:
+            os.makedirs(cand, exist_ok=True)
+            probe = os.path.join(cand, f".wtest-{os.getpid()}")
+            with open(probe, "w") as f:
+                f.write("")
+            os.remove(probe)
+            _cache_dir_cached = cand
+            return cand
+        except OSError:
+            continue
+    if not _cache_dir_warned:
+        sys.stderr.write("board.py: no writable cache directory (tried "
+                          + ", ".join(candidates) + "); reading live every call\n")
+        _cache_dir_warned = True
+    return None
+
+
+def _cache_path(name):
+    d = _cache_dir()
+    return os.path.join(d, name) if d else None
+
+
+def _cache_read(name, ttl_sec):
+    if ttl_sec <= 0:
+        return None
+    path = _cache_path(name)
+    if not path:
+        return None
+    try:
+        if time.time() - os.stat(path).st_mtime > ttl_sec:
+            return None
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _cache_read_any_age(name):
+    """The last value written, however old — for a reader with no live fallback at all
+    (`cmd_ratelimit`: there is no API call that costs nothing, so the only honest answer is
+    whatever the last real query happened to carry)."""
+    path = _cache_path(name)
+    if not path:
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _cache_write(name, data):
+    path = _cache_path(name)
+    if not path:
+        return
+    try:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, path)
+        except OSError:
+            os.remove(tmp)
+            raise
+    except OSError as e:
+        sys.stderr.write(f"board.py: could not write cache {path}: {e}\n")
+
+
+def _cache_invalidate(name):
+    path = _cache_path(name)
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _board_cache_sec():
+    try:
+        return int(os.environ.get("BOARD_CACHE_SEC", BOARD_CACHE_SEC_DEFAULT))
+    except ValueError:
+        return BOARD_CACHE_SEC_DEFAULT
+
+
+def _project_cache_sec():
+    # BOARD_CACHE_SEC=0 turns off the whole cache, project() included — one knob, so the
+    # offline suites never have to remember a second one.
+    return 0 if _board_cache_sec() <= 0 else PROJECT_CACHE_SEC_DEFAULT
+
+
+def _items_cache_name():
+    return f"items-{OWNER}-{NUMBER}.json"
+
+
+def _project_cache_name():
+    return f"project-{OWNER}-{NUMBER}.json"
 
 
 def gh(query, **vars):
@@ -60,10 +209,21 @@ def gh(query, **vars):
         sys.exit(f"board.py: gh returned no JSON: {(r.stdout or r.stderr)[:200]!r}")
     if "errors" in d:
         sys.exit(f"board.py: {d['errors'][0]['message']}")
-    return d["data"]
+    data = d["data"]
+    # Free with every query that asks for it (`items()` does): the floor page's own
+    # GraphQL-remaining line (card #98) reads this cache, never spending a call of its own.
+    rl = data.get("rateLimit") if isinstance(data, dict) else None
+    if rl:
+        _cache_write(RATELIMIT_CACHE_NAME, rl)
+    return data
 
 
-def project():
+def project(fresh=False):
+    name = _project_cache_name()
+    if not fresh:
+        cached = _cache_read(name, _project_cache_sec())
+        if cached is not None:
+            return cached["project"], cached["fields"]
     q = """query($owner:String!,$number:Int!){ user(login:$owner){ projectV2(number:$number){
       id title
       fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } }"""
@@ -73,11 +233,19 @@ def project():
         sys.exit(f"board.py: no project {OWNER}/#{NUMBER} — if it moved to an org, "
                  "this script's user(login:) query needs to become organization(login:)")
     fields = {f["name"]: f for f in p["fields"]["nodes"] if f.get("name")}
+    _cache_write(name, {"project": p, "fields": fields})
     return p, fields
 
 
-def items():
-    q = """query($owner:String!,$number:Int!,$cursor:String){ user(login:$owner){ projectV2(number:$number){
+def items(fresh=False):
+    name = _items_cache_name()
+    sec = _board_cache_sec()
+    if not fresh and sec > 0:
+        cached = _cache_read(name, sec)
+        if cached is not None:
+            return cached
+    q = """query($owner:String!,$number:Int!,$cursor:String){ rateLimit{ remaining resetAt limit }
+      user(login:$owner){ projectV2(number:$number){
       items(first:100, after:$cursor){ pageInfo{ hasNextPage endCursor }
         nodes{ id
           fieldValues(first:20){ nodes{ ... on ProjectV2ItemFieldSingleSelectValue{
@@ -107,6 +275,8 @@ def items():
                 "stage": sel.get(STAGE_FIELD),
             })
         if not page["pageInfo"]["hasNextPage"]:
+            if sec > 0:
+                _cache_write(name, out)
             return out
         cursor = page["pageInfo"]["endCursor"]
 
@@ -134,6 +304,15 @@ def resolve_status(name):
     for o in opts:
         if o.lower() == name.lower():
             return o
+    # A miss invalidates the cache and tries once live — a column Steve just renamed is
+    # invisible to project()'s 10-minute cache otherwise, and this is the only path that
+    # would ever notice (card #98).
+    _cache_invalidate(_project_cache_name())
+    _, fields = project(fresh=True)
+    opts = [o["name"] for o in fields[STATUS_FIELD]["options"]]
+    for o in opts:
+        if o.lower() == name.lower():
+            return o
     sys.exit(f"board.py: no '{STATUS_FIELD}' option {name!r}. Have: " + " | ".join(opts))
 
 
@@ -152,10 +331,16 @@ def set_option(issue, field_name, value):
     """Set a single-select field (Status, Stage) on the card to the option named `value`."""
     proj, fields = project()
     f = fields.get(field_name)
+    opt = next((o for o in f["options"] if o["name"].lower() == value.lower()), None) if f else None
+    if not f or not opt:
+        # Same miss-invalidates-and-retries-once-live rule as resolve_status (card #98).
+        _cache_invalidate(_project_cache_name())
+        proj, fields = project(fresh=True)
+        f = fields.get(field_name)
+        opt = next((o for o in f["options"] if o["name"].lower() == value.lower()), None) if f else None
     if not f:
         sys.exit(f"board.py: the board has no '{field_name}' field. Have: "
                  + " | ".join(sorted(fields)))
-    opt = next((o for o in f["options"] if o["name"].lower() == value.lower()), None)
     if not opt:
         sys.exit(f"board.py: no '{field_name}' option {value!r}. Have: "
                  + " | ".join(o["name"] for o in f["options"]))
@@ -428,6 +613,10 @@ def cmd_move(issue, status, *rest):
         rest = rest[2:]
     if rest:
         sys.exit(f"board.py: move: unexpected arguments {rest!r}")
+    # Invalidate before the mutation, not after: a lane that moves a card and polls again
+    # right away must see the new column, never the pre-move cache it just paid to warm
+    # (card #98).
+    _cache_invalidate(_items_cache_name())
     name, it = set_option(issue, STATUS_FIELD, status)
     print(f"#{issue} → {name}")
     # Stuck is the only column that reaches Discord. Every other move is on the floor page.
@@ -470,6 +659,7 @@ def cmd_sweep_stages():
     for good and sat in Done reading "Parked" (watcher#35, #36, #40, #43 and #44,
     September 28, 2026). The spawner calls this every few minutes. Quiet — no Discord
     post. One `items()` read; nothing else is fetched unless a card needs clearing."""
+    _cache_invalidate(_items_cache_name())  # card #98: a sweep must see the live board
     stale = [i for i in items() if i["state"] == "CLOSED" and i.get("stage")]
     if not stale:
         return 0
@@ -489,6 +679,7 @@ def cmd_stage(issue, stage):
     where it is. A board view grouped by Stage shows the columns Steve asked for, and the
     floor page shows it on the lane's desk. Quiet — no Discord post. `-` empties it
     (clear_stage)."""
+    _cache_invalidate(_items_cache_name())  # card #98: same as cmd_move
     if stage == "-":
         return clear_stage(issue)
     name, it = set_option(issue, STAGE_FIELD, stage)
@@ -525,6 +716,9 @@ def issue_num(v):
 def cmd_unclaim(issue):
     """Drop a leaked `in-flight` label. A tick that dies mid-claim strands its card."""
     n = issue_num(issue)
+    # The label lives inside the cached items() entry's own `labels` list; without this a
+    # card unclaimed here could still read in-flight for the rest of the TTL (card #98).
+    _cache_invalidate(_items_cache_name())
     r = subprocess.run(["gh", "issue", "edit", str(n), "--remove-label", "in-flight"],
                        capture_output=True, text=True)
     if r.returncode:
@@ -558,6 +752,15 @@ def cmd_ask(issue):
     return 0
 
 
+def cmd_ratelimit():
+    """The account's GraphQL budget, from the last real query that happened to carry it —
+    never a call of its own: `remaining`, `resetAt`, `limit`, or `{}` if nothing has been
+    cached yet (a fresh box, or a cache directory nothing can write to). bin/floor.py's
+    header line reads this (card #98)."""
+    print(json.dumps(_cache_read_any_age(RATELIMIT_CACHE_NAME) or {}))
+    return 0
+
+
 def cmd_images(issue, *rest):
     """One image URL per line (board.py's `needs_steve_images`) — the same comment `ask`
     reads, for a caller that wants the mockup or screenshot it points at (bin/floor.py's
@@ -577,7 +780,7 @@ def cmd_images(issue, *rest):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
-                            "dump", "ask", "images"):
+                            "dump", "ask", "images", "ratelimit"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
@@ -588,6 +791,7 @@ if __name__ == "__main__":
                   "show": lambda: cmd_show(a[1]),
                   "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),
                   "unclaim": lambda: cmd_unclaim(a[1]),
+                  "ratelimit": lambda: cmd_ratelimit(),
                   "dump": lambda: cmd_dump(),
                   "ask": lambda: cmd_ask(a[1]),
                   "images": lambda: cmd_images(a[1], *a[2:])}[a[0]]())

@@ -1981,5 +1981,81 @@ fresh_state; board_list $'36\tP1\tbuilder\t-\tCard thirty-six'
 WATCHER_CLAUDE_OVERRIDE="no-such-claude-binary" run --once >/dev/null 2>"$TMP/noclaude.err"; RC=$?
 if [ "$RC" = 69 ] && grep -q "claude not found: 'no-such-claude-binary'" "$TMP/noclaude.err" && not_grepped "/watch 36"; then pass "a WATCHER_CLAUDE PATH cannot resolve: exit 69 with the name in the journal, nothing launched"; else flunk "unresolvable WATCHER_CLAUDE" "rc=$RC err=[$(cat "$TMP/noclaude.err")]"; fi
 
+
+echo "35. card #98: one poll's several board.py reads collapse into far fewer real GraphQL calls, with the real board.py — a fake 'gh' standing only for the network"
+fresh_state
+CACHE_TEST_BIN="$TMP/cache-test-bin"
+CACHE_TEST_DIR="$TMP/cache-test-dir"
+mkdir -p "$CACHE_TEST_BIN"
+GRAPHQL_LOG="$TMP/graphql-calls.log"
+
+# A fake `gh` that answers only `api graphql` (board.py's own calls) — a project() shape
+# (Status/Stage fields and their options) when the query asks for fields, an items() shape
+# (empty board; rateLimit riding along, same as the real query card #98 added) otherwise.
+# Every other `gh` subcommand this poll might call (it should call none, with an empty
+# board and nothing claimable) just exits 0.
+cat > "$CACHE_TEST_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $*" >> "$GRAPHQL_LOG"
+case "$*" in
+  "api graphql"*)
+    if [[ "$*" == *"fields(first:40)"* ]]; then
+      cat <<'JSON'
+{"data":{"user":{"projectV2":{"id":"PVT_1","title":"t","fields":{"nodes":[
+{"name":"Status","id":"F_STATUS","options":[
+ {"id":"O1","name":"In progress"},{"id":"O2","name":"In review"},
+ {"id":"O3","name":"Stuck - Needs help"},{"id":"O4","name":"Ready"},
+ {"id":"O5","name":"Backlog"},{"id":"O6","name":"Done"}]},
+{"name":"Stage","id":"F_STAGE","options":[{"id":"O7","name":"Claimed"}]}
+]}}}}}
+JSON
+    else
+      cat <<'JSON'
+{"data":{"rateLimit":{"remaining":4000,"resetAt":"2026-10-09T20:00:00Z","limit":5000},
+"user":{"projectV2":{"items":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}
+JSON
+    fi
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$CACHE_TEST_BIN/gh"
+
+# One poll (`--once`), real board.py, nothing from this suite's own $BIN on PATH — only
+# this test's fake `gh`. $1 is BOARD_CACHE_SEC; prints how many real "gh api graphql"
+# calls that one poll made.
+one_poll_graphql_calls() {
+  : > "$GRAPHQL_LOG"
+  rm -rf "$CACHE_TEST_DIR"; mkdir -p "$CACHE_TEST_DIR"
+  rm -rf "$STATE"; mkdir -p "$STATE"
+  PATH="$CACHE_TEST_BIN:$PATH" \
+  GRAPHQL_LOG="$GRAPHQL_LOG" \
+  WATCHER_CACHE_DIR="$CACHE_TEST_DIR" BOARD_CACHE_SEC="$1" \
+  WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
+  BOARD_OWNER="cache-test-owner" BOARD_NUMBER="77" \
+  WATCHER_BOARD="python3 $HERE/board.py" \
+  WATCHER_CLAUDE="$BIN/claude" WATCHER_GH="$CACHE_TEST_BIN/gh" \
+  WATCHER_WORKTREE="$BIN/worktree.sh" WATCHER_DOCTOR="$BIN/doctor.sh" \
+  WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
+  WATCHER_CLAUDE_JSON="$TMP/unused-claude.json" \
+  WATCHER_SLEEP=0 WATCHER_MAX_POLLS=1 \
+  TEST_LOG="$TESTLOG" \
+  bash "$SPAWN" --once >/dev/null 2>&1
+  grep -c '^gh api graphql' "$GRAPHQL_LOG" 2>/dev/null || true
+}
+
+calls_cached="$(one_poll_graphql_calls 45)"
+calls_uncached="$(one_poll_graphql_calls 0)"
+
+if [ "${calls_cached:-99}" -lt "${calls_uncached:-0}" ] 2>/dev/null; then
+  pass "cached poll makes fewer real gh() calls than uncached (cached=$calls_cached, uncached=$calls_uncached)"
+else
+  flunk "caching did not reduce the real gh() call count" "cached=$calls_cached uncached=$calls_uncached"
+fi
+if [ "${calls_cached:-99}" -le 3 ] 2>/dev/null; then
+  pass "cached: at most 3 real calls for the whole poll (one items() and one project() fetch, not one pair per board.py invocation)"
+else
+  flunk "more real calls than expected with caching on" "$calls_cached"
+fi
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

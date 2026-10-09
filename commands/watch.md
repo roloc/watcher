@@ -426,8 +426,12 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   merged PRs, every link green, and the meeting looked exactly the same at the end as it
   did in the sentence that started it.)
 - Wait for the project's **required CI check** (its `CLAUDE.md` names it) **in the
-  foreground** — `gh pr checks <pr> --watch --fail-fast` blocks until it finishes — then
-  `gh pr merge --squash --delete-branch`. **You do the merging.** **Never end your turn to
+  foreground** — `gh pr checks <pr> --watch --interval 60 --fail-fast` blocks until it
+  finishes — then `gh pr merge --squash --delete-branch`. **Always pass `--interval 60`**:
+  left at its own default, `--watch` polls GraphQL every 10 seconds, which is 90 queries
+  for one ordinary 15-minute CI run — most of an hour's GraphQL budget on watching a check
+  box turn green (card #98). 60 seconds costs the same wait a tenth of the points and
+  still notices CI finish within a minute. **You do the merging.** **Never end your turn to
   wait** — not for CI, not for a subagent, not for anything: headless, ending the turn ends
   the process, the PR stays open, the card stays in-flight and the work is lost (three cards
   on the first night, watcher#4). **Backgrounding the wait is the same mistake**: a

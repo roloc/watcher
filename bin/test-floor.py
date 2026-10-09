@@ -294,10 +294,14 @@ def stub_rounds(issue, project_repo):
         {"url": "https://example.com/778-a.png", "label": "desktop", "letter": "A", "recommended": True}]}]}.get(issue, [])
 
 
+def stub_ratelimit():
+    return {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000}
+
+
 print("5. lane_desk: each of the five pills, from its own fixture")
 state = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
                            ask_fn=stub_ask, images_fn=stub_images, rounds_fn=stub_rounds,
-                           now=NOW, box_name="test-box")
+                           now=NOW, box_name="test-box", ratelimit_fn=stub_ratelimit)
 lanes_by_name = {(p["name"], l["lane"]): l for p in state["projects"] for l in p["lanes"]}
 
 d = lanes_by_name[("watcher", "watcher")]
@@ -357,6 +361,35 @@ check("riffmap counts: 1 in progress, Stuck cards not counted as in progress, 1 
       riffmap_counts == {"ready": 0, "in_progress": 1, "backlog": 1}, riffmap_counts)
 second_counts = next(p for p in state["projects"] if p["name"] == "second")["counts"]
 check("second counts: 1 ready", second_counts == {"ready": 1, "in_progress": 0, "backlog": 0}, second_counts)
+check("card #98: the account's GraphQL budget rides in the header, from ratelimit_fn",
+      state["header"]["github_remaining"] == 4312
+      and state["header"]["github_reset"] == "2026-10-09T20:00:00Z"
+      and state["header"]["github_limit"] == 5000, state["header"])
+
+print("6c. card #98: no ratelimit_fn, or nothing cached yet — None, never a crash or a "
+      "guess")
+state_norl = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                ask_fn=stub_ask, now=NOW, box_name="test-box")
+check("no ratelimit_fn given: every github_* field is None",
+      state_norl["header"]["github_remaining"] is None
+      and state_norl["header"]["github_reset"] is None
+      and state_norl["header"]["github_limit"] is None, state_norl["header"])
+state_emptyrl = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                   ask_fn=stub_ask, now=NOW, box_name="test-box",
+                                   ratelimit_fn=lambda: {})
+check("ratelimit_fn returning {} (nothing cached on the box yet): the same, no crash",
+      state_emptyrl["header"]["github_remaining"] is None, state_emptyrl["header"])
+
+
+def failing_ratelimit():
+    raise RuntimeError("board.py: no writable cache directory")
+
+
+state_failrl = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                  ask_fn=stub_ask, now=NOW, box_name="test-box",
+                                  ratelimit_fn=failing_ratelimit)
+check("ratelimit_fn raising: the page still renders, just with no budget line",
+      state_failrl["header"]["github_remaining"] is None, state_failrl["header"])
 
 print("6b. the Needs Steve strip (card #96): every Stuck card on the board, independent "
       "of which lane last touched it, with the round pictures it has been asked")
@@ -1143,6 +1176,72 @@ finally:
     srv4.shutdown(); srv4.server_close()
 check("the ship desk carries its own Peek button, beside its link and not inside it",
       'data-peek-ship="${esc(project)}"' in floor.INDEX_HTML)
+
+print("25. card #98: Cache idle-skip — the background loop stops paying for a rebuild "
+      "once nobody has asked in idle_after_sec, and the next get() pays exactly one "
+      "synchronous read to catch back up")
+build_calls = []
+
+
+def counting_build():
+    build_calls.append(1)
+    return {"n": len(build_calls)}
+
+
+fake_now = [1000.0]
+real_time = floor.time.time
+floor.time.time = lambda: fake_now[0]
+try:
+    c = floor.Cache(counting_build, refresh_sec=10, idle_after_sec=30)
+    check("constructing the cache does exactly one build", len(build_calls) == 1, build_calls)
+
+    fake_now[0] += 5  # a request 5s in — still well inside the idle window
+    c.get()
+    fake_now[0] += 20  # 25s since that request, still under idle_after_sec (30)
+    c._maybe_background_rebuild()
+    check("not idle yet: the background loop still rebuilds on its own clock",
+          len(build_calls) == 2, build_calls)
+
+    fake_now[0] += 40  # now 40s since the last get() — past idle_after_sec
+    c._maybe_background_rebuild()
+    check("idle past idle_after_sec: the background loop skips the rebuild, no GraphQL "
+          "spent on a floor nobody is watching", len(build_calls) == 2, build_calls)
+
+    # Someone opens the page again. The cached state (built at the last background
+    # rebuild) is now older than refresh_sec, so this get() pays one synchronous read —
+    # "the first request after a quiet spell pays one read" — rather than serving
+    # whatever the idle background loop left behind indefinitely.
+    got = c.get()
+    check("the first request after the quiet spell triggers exactly one rebuild",
+          len(build_calls) == 3, build_calls)
+    check("...and returns the freshly rebuilt state, not the stale one", got == {"n": 3}, got)
+
+    fake_now[0] += 1  # well inside refresh_sec of that rebuild
+    c.get()
+    check("a second get() right after does not rebuild again", len(build_calls) == 3, build_calls)
+finally:
+    floor.time.time = real_time
+
+print("26. card #98: idle_after_sec=None (every cache but the board one) never skips — "
+      "the old unconditional-background-refresh behavior, unchanged")
+build_calls2 = []
+
+
+def counting_build2():
+    build_calls2.append(1)
+    return {}
+
+
+fake_now2 = [2000.0]
+floor.time.time = lambda: fake_now2[0]
+try:
+    c2 = floor.Cache(counting_build2, refresh_sec=10)
+    fake_now2[0] += 10000  # however long nobody has asked, idle_after_sec=None never skips
+    c2._maybe_background_rebuild()
+    check("idle_after_sec=None: the background loop still rebuilds, however long it has "
+          "been since the last request", len(build_calls2) == 2, build_calls2)
+finally:
+    floor.time.time = real_time
 
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(WD_ROOT, ignore_errors=True)

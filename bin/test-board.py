@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Offline tests for bin/board.py's Needs-Steve comment reading: `needs_steve_ask` and
-`needs_steve_images` (card #91 — the mockups a floor-page desk shows inline). No network:
-`subprocess.run` is replaced with a stub that returns canned `gh issue view --json
-comments` output.
+"""Offline tests for bin/board.py's Needs-Steve comment reading (`needs_steve_ask` and
+`needs_steve_images`, card #91 — the mockups a floor-page desk shows inline) and its board
+cache (card #98, cases 13+). No network: `subprocess.run` is replaced with a stub that
+returns canned `gh issue view --json comments` output, and `board.gh` (the GraphQL
+wrapper, never touched by the comment-reading cases above) is replaced with a stub that
+counts calls and returns canned `items()`/`project()` shapes.
 
     python3 bin/test-board.py      # exit 0 = all cases hold
 """
 import json
 import os
 import sys
+import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -212,5 +216,193 @@ check("letter B, read off \"-b-\" in the URL, not the bullet's own words",
       imgs20 == [{"url": "https://example.com/shots/idea-b-desktop.png", "label": "Screenshot",
                   "letter": "B", "recommended": False}], imgs20)
 
+print("13. the board cache (card #98): a file per board, so two reads inside the TTL "
+      "share one real gh() call")
+# These cases stub `subprocess.run`, not `board.gh` itself, so the real `gh()` runs for
+# real on every call — cache reads/writes, the rateLimit side effect (case 18) and the
+# `-f`/`-F` argument shape all included — and only the process boundary is faked.
+
+CACHE_DIR = tempfile.mkdtemp(prefix="watcher-cache-test-")
+os.environ["WATCHER_CACHE_DIR"] = CACHE_DIR
+os.environ["BOARD_CACHE_SEC"] = "45"
+board._cache_dir_cached = None
+board._cache_dir_warned = False
+
+GRAPHQL_CALLS = []
+PROJECT_STATUS_OPTIONS = [{"id": "O1", "name": "In progress"},
+                           {"id": "O2", "name": "Stuck - Needs help"}]
+PROJECT_STAGE_OPTIONS = [{"id": "O3", "name": "Claimed"}]
+
+
+def _graphql_kv(cmd):
+    """`cmd` is `["gh", "api", "graphql", "-f", "query=...", "-f", "owner=...", ...]` —
+    board.py's own `gh()` building it. Reconstructs the keyword arguments it was called
+    with, `query` included, the same way `gh`'s own caller passed them."""
+    kv = {}
+    i = 3
+    while i < len(cmd):
+        k, _, v = cmd[i + 1].partition("=")
+        kv[k] = v
+        i += 2
+    return kv
+
+
+def graphql_stub_run(cmd, **kwargs):
+    if cmd[:3] != ["gh", "api", "graphql"]:
+        return stub_run(cmd, **kwargs)
+    kv = _graphql_kv(cmd)
+    GRAPHQL_CALLS.append(kv["query"])
+    if "fields(first:40)" in kv["query"]:
+        payload = {"user": {"projectV2": {"id": "PVT_1", "title": "t", "fields": {"nodes": [
+            {"name": "Status", "id": "F_STATUS", "options": PROJECT_STATUS_OPTIONS},
+            {"name": "Stage", "id": "F_STAGE", "options": PROJECT_STAGE_OPTIONS},
+        ]}}}}
+    else:
+        n = int(kv.get("number", "0"))
+        payload = {"rateLimit": {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000},
+                   "user": {"projectV2": {"items": {
+                       "pageInfo": {"hasNextPage": False, "endCursor": None},
+                       "nodes": [{"id": "ITEM_1",
+                                  "fieldValues": {"nodes": [{"name": "In progress",
+                                                              "field": {"name": "Status"}}]},
+                                  "content": {"number": n, "title": "t", "url": "https://x",
+                                              "state": "OPEN",
+                                              "labels": {"nodes": [{"name": "in-flight"}]}}}]}}}}
+    return FakeResult(json.dumps({"data": payload}))
+
+
+board.subprocess.run = graphql_stub_run
+board.OWNER, board.NUMBER = "roloc", 98
+
+GRAPHQL_CALLS.clear()
+first = board.items()
+second = board.items()
+check("two items() calls inside the TTL make exactly one real gh() call",
+      len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+check("both calls return the same data", first == second)
+
+GRAPHQL_CALLS.clear()
+board.items(fresh=True)
+check("items(fresh=True) always makes a live call, cache or not", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+
+print("14. project(): cached the same way, and a field/option miss invalidates it and "
+      "retries once live instead of waiting out the 10-minute TTL")
+GRAPHQL_CALLS.clear()
+board.project()
+board.project()
+check("two project() calls inside the TTL make exactly one real gh() call",
+      len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+
+board.OWNER, board.NUMBER = "roloc", 99  # a fresh cache namespace for the miss-retry case
+renamed_column_calls = []
+
+
+def renamed_column_stub_run(cmd, **kwargs):
+    if cmd[:3] != ["gh", "api", "graphql"]:
+        return stub_run(cmd, **kwargs)
+    kv = _graphql_kv(cmd)
+    renamed_column_calls.append(1)
+    # The first project() fetch has no Stuck column yet; the second (the live retry a miss
+    # triggers) does — standing in for Steve renaming a column mid-TTL.
+    options = [{"id": "O1", "name": "In progress"}]
+    if len(renamed_column_calls) > 1:
+        options.append({"id": "O2", "name": "Stuck - Needs help"})
+    payload = {"user": {"projectV2": {"id": "PVT_99", "title": "t", "fields": {"nodes": [
+        {"name": "Status", "id": "F_STATUS", "options": options},
+        {"name": "Stage", "id": "F_STAGE", "options": PROJECT_STAGE_OPTIONS},
+    ]}}}}
+    return FakeResult(json.dumps({"data": payload}))
+
+
+board.subprocess.run = renamed_column_stub_run
+result = board.resolve_status("Stuck - Needs help")
+check("resolve_status finds the option only visible after the live retry",
+      result == "Stuck - Needs help", result)
+check("exactly two project() fetches: the stale cache, then one live retry",
+      len(renamed_column_calls) == 2, renamed_column_calls)
+board.subprocess.run = graphql_stub_run
+
+print("15. mutations invalidate the items() cache before they run (card #98): move, "
+      "stage and unclaim all make the very next items() call live again")
+board.OWNER, board.NUMBER = "roloc", 100
+COMMENTS[100] = []  # cmd_unclaim's `gh issue edit` (stub_run) needs a successful exit
+
+GRAPHQL_CALLS.clear()
+board.items()  # warm the cache
+check("warmed: one call so far", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+board.cmd_stage("100", "Claimed")
+check("cmd_stage made at least one more real call (the cache it invalidated had to be "
+      "refilled by set_option's own lookup)", len(GRAPHQL_CALLS) > 1, GRAPHQL_CALLS)
+GRAPHQL_CALLS.clear()
+board.items()
+check("items() right after cmd_stage is still warm (set_option's own lookup refilled it, "
+      "it wasn't just invalidated and left empty)", len(GRAPHQL_CALLS) == 0, GRAPHQL_CALLS)
+
+board.cmd_unclaim("100")
+GRAPHQL_CALLS.clear()
+board.items()
+check("items() right after cmd_unclaim is a live call: unclaim has no items() lookup of "
+      "its own to refill the cache, only the invalidation", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+
+print("16. BOARD_CACHE_SEC=0 disables the cache entirely — reads and writes both — "
+      "which is what the offline suites set")
+board.OWNER, board.NUMBER = "roloc", 101
+os.environ["BOARD_CACHE_SEC"] = "0"
+GRAPHQL_CALLS.clear()
+board.items()
+board.items()
+check("two calls with caching disabled make two real gh() calls",
+      len(GRAPHQL_CALLS) == 2, GRAPHQL_CALLS)
+check("and nothing was written to disk for this board",
+      not os.path.exists(board._cache_path("items-roloc-101.json") or ""))
+os.environ["BOARD_CACHE_SEC"] = "45"
+
+print("17. items() TTL: a cache file older than BOARD_CACHE_SEC forces a live re-fetch")
+board.OWNER, board.NUMBER = "roloc", 102
+os.environ["BOARD_CACHE_SEC"] = "1"
+board._cache_dir_cached = None
+GRAPHQL_CALLS.clear()
+board.items()
+path = board._cache_path(board._items_cache_name())
+old = time.time() - 5
+os.utime(path, (old, old))
+board.items()
+check("a cache file older than the TTL is treated as a miss, not served stale",
+      len(GRAPHQL_CALLS) == 2, GRAPHQL_CALLS)
+os.environ["BOARD_CACHE_SEC"] = "45"
+
+print("18. ratelimit: cmd_ratelimit reads the last cached value, never a call of its own")
+board.OWNER, board.NUMBER = "roloc", 103
+board._cache_dir_cached = None
+GRAPHQL_CALLS.clear()
+board.items()  # a real query that happens to carry rateLimit
+cached_rl = board._cache_read_any_age(board.RATELIMIT_CACHE_NAME)
+check("the rate limit from that call is on file",
+      cached_rl == {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000}, cached_rl)
+calls_before = len(GRAPHQL_CALLS)
+board._cache_read_any_age(board.RATELIMIT_CACHE_NAME)
+check("reading it again makes no gh() call at all", len(GRAPHQL_CALLS) == calls_before)
+
+print("19. with no writable cache directory, every call falls back to live and nothing "
+      "written anywhere raises")
+board.OWNER, board.NUMBER = "roloc", 104
+# A plain file, not a missing directory: `os.makedirs` refuses to create a directory
+# through a path component that is a regular file for ANY user, root included — unlike a
+# merely-absent path under `/`, which a root-run test (some CI containers) could actually
+# create, silently turning this into a no-op.
+blocker = tempfile.NamedTemporaryFile(delete=False)
+blocker.close()
+os.environ["WATCHER_CACHE_DIR"] = os.path.join(blocker.name, "sub")
+board._cache_dir_cached = None
+board._cache_dir_warned = False
+GRAPHQL_CALLS.clear()
+a104 = board.items()
+b104 = board.items()
+check("no writable cache dir: every items() call is live",
+      len(GRAPHQL_CALLS) == 2, GRAPHQL_CALLS)
+check("...and the data is still correct", a104 == b104)
+os.remove(blocker.name)
+
+board.subprocess.run = stub_run  # restore for anything appended after this suite
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES ABOVE'}")
 sys.exit(fails)

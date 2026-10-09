@@ -59,6 +59,43 @@ Labels and fields the bots read:
   sweep" below for the stale-label safety net.
 - **Priority** field `P0`, `P1`, `P2` — `board list` sorts P0 first, then by issue number.
 
+## The board cache
+
+GitHub's GraphQL budget is 5,000 points an hour per account, about 83 a minute, and reads
+of the board are not free: a full page of a project's items costs about 2 points, and a
+board of a few hundred cards takes several pages. Every lane polls its board every 60
+seconds (`POLL_INTERVAL`), and one poll is several of those reads — the In progress column,
+the Waiting stage, Ready if the lane pulls from it, the In review sweep. With several lanes
+on a few shared boards, plus the floor page's own poll, that is many processes asking the
+same question inside the same minute: measured on October 9, 2026 with every lane idle (no
+tick running, only the spawners' own polling), the account burned about 91 points a minute
+— over the hourly budget before any tick does real work (card #98).
+
+`board.py`'s `items()` and `project()` (the board's cards, and its fields/options) answer
+from a short-lived file instead of a fresh query when one is warm enough: one file per
+board, under `WATCHER_CACHE_DIR` (default `/var/cache/watcher`, the one directory every
+lane and the floor service can both reach — falling back to `WATCHER_STATE_ROOT` or
+`~/.local/state/watcher` if that is not writable). `items()`'s TTL is `BOARD_CACHE_SEC`
+(default 45 seconds, a little under the lanes' own poll interval); `project()`'s is a fixed
+10 minutes, since a board's fields only change when Steve edits it, and a miss on a field
+or option name invalidates that cache and retries once live rather than waiting out the
+TTL. `BOARD_CACHE_SEC=0` turns the whole thing off — reads and writes both — which is what
+every offline suite sets, so a test never touches a real directory. `move`, `stage`,
+`unclaim` and `sweep-stages` invalidate the items cache before they touch the board, so a
+lane that promotes a card and polls again right away sees the new column, never a cache it
+just paid to warm.
+
+The account's remaining budget and reset time ride along for free on whichever query last
+asked for it (`items()`'s own GraphQL query includes `rateLimit{ remaining resetAt limit
+}`, itself free to ask for): `board.py ratelimit` prints the last cached value and never
+makes a call of its own. The floor page's header shows it, read the same way, so the next
+time a tick waits out the hourly reset Steve can see why from his phone instead of
+guessing.
+
+A tick's own wait on CI (`gh pr checks --watch`, `commands/watch.md` §3) spends the same
+budget a different way: left at its default 10-second poll, a 15-minute CI run is 90
+queries. `--interval 60` is the fix there — the same wait, a tenth of the points.
+
 ## Life of a card
 
 1. **The card reaches In progress** — Steve moves it there, or drags it to the Waiting

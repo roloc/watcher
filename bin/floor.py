@@ -104,6 +104,9 @@ ALLOWED_FIELDS = {
     # the Needs Steve strip (card #96): every Stuck card on the board, whichever lane last
     # touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
+    # the account's GraphQL budget (card #98), read from board.py's own cache — never a
+    # call of its own
+    "github_remaining", "github_reset", "github_limit",
 }
 
 
@@ -870,7 +873,7 @@ def _fmt_quota(cost):
 
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
                  images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
-                 deploy_fn=None, deploy_repo=None):
+                 deploy_fn=None, deploy_repo=None, ratelimit_fn=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -959,9 +962,19 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
 
     recent.sort(key=lambda r: r["when"], reverse=True)
 
+    rl = {}
+    if ratelimit_fn:
+        try:
+            rl = ratelimit_fn() or {}
+        except Exception as e:
+            print(f"floor: ratelimit unreadable: {e}", file=sys.stderr, flush=True)
+
     return {
         "header": {"box": box_name, "time": now.isoformat(),
-                   "needs_steve_total": needs_steve_total},
+                   "needs_steve_total": needs_steve_total,
+                   "github_remaining": rl.get("remaining"),
+                   "github_reset": rl.get("resetAt"),
+                   "github_limit": rl.get("limit")},
         "projects": out_projects,
         "recent": recent[:RECENT_TOTAL],
     }
@@ -1031,6 +1044,26 @@ def board_rounds(issue, project_repo, board_py=None, timeout=20):
         return json.loads(r.stdout)
     except json.JSONDecodeError:
         return []
+
+
+def board_ratelimit(board_py=None, timeout=10):
+    """The account's GraphQL budget, remaining/reset/limit — `board.py ratelimit`, which
+    only ever reads the last real query's own rateLimit field back out of board.py's cache
+    (card #98): never a GraphQL call of its own, so the floor page's header can show it on
+    every poll for free. `{}` if nothing has been cached yet or the lookup itself failed —
+    the header then shows nothing, never a crash or a stale guess."""
+    board_py = board_py or os.path.join(HERE, "board.py")
+    try:
+        r = subprocess.run([sys.executable, board_py, "ratelimit"],
+                            capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if r.returncode != 0:
+        return {}
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {}
 
 
 # --- the HTTP server -----------------------------------------------------------------------
@@ -1356,6 +1389,7 @@ INDEX_HTML = """<!doctype html>
 <header>
   <h1 id="box">The floor</h1>
   <div class="muted" id="clock"></div>
+  <div class="muted" id="github-budget"></div>
   <button class="view-toggle" id="studio-btn" type="button">Studio</button>
 </header>
 <div class="alert" id="load-error" style="display:none">Can't reach the floor's own data right now — retrying&hellip;</div>
@@ -1700,6 +1734,19 @@ function render(state) {
     "The floor — " + state.header.box +
     (state.header.needs_steve_total > 0 ? ` — ${state.header.needs_steve_total} need Steve` : "");
   document.getElementById("clock").textContent = new Date(state.header.time).toLocaleString();
+
+  // The account's GraphQL budget (card #98), read from board.py's own cache — nothing
+  // here costs a call of its own. Blank until the first real board read has happened
+  // anywhere on the box; never a stale guess.
+  const ghEl = document.getElementById("github-budget");
+  if (state.header.github_remaining != null) {
+    const resetTxt = state.header.github_reset
+      ? new Date(state.header.github_reset).toLocaleTimeString() : "?";
+    const limitTxt = state.header.github_limit != null ? state.header.github_limit.toLocaleString() : "?";
+    ghEl.textContent = `GitHub: ${state.header.github_remaining.toLocaleString()} / ${limitTxt} · resets ${resetTxt}`;
+  } else {
+    ghEl.textContent = "";
+  }
 
   const projects = document.getElementById("projects");
   projects.innerHTML = state.projects.map(p => `
@@ -2277,27 +2324,56 @@ if (new URLSearchParams(location.search).get("demo")) {
 
 
 class Cache:
-    def __init__(self, build, refresh_sec):
+    """`idle_after_sec`, when set, is card #98's "stop reading boards nobody is looking
+    at": the background `loop()` skips its own rebuild once this long has passed since the
+    last `get()` — a quiet floor costs nothing, not even the account's GraphQL budget
+    (`fetch_board`, inside `build`). `get()` itself still rebuilds synchronously, bypassing
+    `refresh_sec`, the moment the cached state is older than `refresh_sec` AND idle skipped
+    it — "the first request after a quiet spell pays one read," never a stale page shown
+    forever because nobody asked in time. `None` (the default — every OTHER cache this
+    file builds, `lane_cache` included) keeps the old unconditional-background-refresh
+    behavior exactly, since only `fetch_board` costs an API call worth saving."""
+
+    def __init__(self, build, refresh_sec, idle_after_sec=None):
         self.build = build
         self.refresh_sec = refresh_sec
+        self.idle_after_sec = idle_after_sec
         self.lock = threading.Lock()
         self.state = build()
+        now = time.time()
+        self.built_at = now
+        self.last_request = now
 
     def get(self):
         with self.lock:
+            self.last_request = time.time()
+            if self.idle_after_sec is not None and time.time() - self.built_at > self.refresh_sec:
+                self._rebuild_locked()
             return self.state
+
+    def _rebuild_locked(self):
+        try:
+            new_state = self.build()
+        except Exception as e:
+            sys.stderr.write(f"floor.py: refresh failed: {e}\n")
+            return
+        self.state = new_state
+        self.built_at = time.time()
+
+    def _maybe_background_rebuild(self):
+        """One background-loop tick's worth of decision, pulled out of `loop()` so a test
+        can drive it directly without threads or real sleeps."""
+        with self.lock:
+            if (self.idle_after_sec is not None
+                    and time.time() - self.last_request > self.idle_after_sec):
+                return  # nobody has looked in a while; skip the read
+            self._rebuild_locked()
 
     def loop(self, stop_event):
         while not stop_event.is_set():
             if stop_event.wait(self.refresh_sec):
                 return
-            try:
-                new_state = self.build()
-            except Exception as e:
-                sys.stderr.write(f"floor.py: refresh failed: {e}\n")
-                continue
-            with self.lock:
-                self.state = new_state
+            self._maybe_background_rebuild()
 
 
 def make_handler(cache, tail_lookup=None, ship_lookup=None):
@@ -2413,14 +2489,20 @@ def main(argv):
                             unit_active_fn=systemctl_is_active, ask_fn=board_ask,
                             images_fn=board_images, rounds_fn=board_rounds,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
-                            deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo))
+                            deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
+                            ratelimit_fn=board_ratelimit)
 
     def build_lanes():
         # Peek's own lookup, kept separate from `build()`'s state so a lane's worktree
         # layout is never one of the fields `/api/state.json` serves (ALLOWED_FIELDS).
         return {l["lane"]: l for l in discover_lanes(projects_dir, state_root)}
 
-    cache = Cache(build, refresh_sec)
+    # idle_after_sec: once nobody has loaded the page for this long, the background loop
+    # stops spending `fetch_board`'s GraphQL reads on a floor nobody is watching (card
+    # #98) — `lane_cache` reads only the local filesystem, nothing GraphQL, so it keeps
+    # refreshing on a plain timer.
+    idle_after_sec = max(refresh_sec * 5, 300)
+    cache = Cache(build, refresh_sec, idle_after_sec=idle_after_sec)
     lane_cache = Cache(build_lanes, refresh_sec)
     stop_event = threading.Event()
     t = threading.Thread(target=cache.loop, args=(stop_event,), daemon=True)

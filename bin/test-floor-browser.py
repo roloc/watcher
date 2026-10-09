@@ -208,7 +208,9 @@ class LiveCache:
                                  unit_active_fn=lambda u: True,
                                  ask_fn=lambda i, r: ASKS.get(i, ""),
                                  rounds_fn=lambda i, r: ROUNDS.get(i, []),
-                                 box_name="test-box")
+                                 box_name="test-box",
+                                 ratelimit_fn=lambda: {"remaining": 4312, "resetAt":
+                                                        "2026-10-09T20:00:00Z", "limit": 5000})
 
 
 def tail_lookup(lane, card, file, pos):
@@ -331,6 +333,11 @@ try:
               and b.eval("getComputedStyle(document.getElementById('script-error')).display") == "none")
         check("every link on the drawn page opens in a new tab (card #62)",
               b.eval("[...document.querySelectorAll('a')].every(a => a.target === '_blank')"))
+        check("card #98: the account's GraphQL budget is drawn in the header, from the "
+              "fixture's ratelimit_fn — remaining, limit, and a reset time",
+              b.eval("document.getElementById('github-budget').textContent")
+              == "GitHub: 4,312 / 5,000 · resets " + b.eval(
+                  "new Date('2026-10-09T20:00:00Z').toLocaleTimeString()"))
         shot(b, "floor-desktop.png")
 
         print("2b. the Needs Steve strip (card #96): a mockup to approve right on the "
