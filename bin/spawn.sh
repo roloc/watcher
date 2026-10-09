@@ -90,7 +90,18 @@
 #   bin/spawn.sh --once       # one poll iteration, then exit (tests)
 set -euo pipefail
 
-WATCHER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Card #106: this script's own directory (bin/, as named on the command line — the systemd
+# unit's ExecStart says /opt/watcher/bin/spawn.sh, a path through the box's pointer) is kept
+# BOTH ways: $WATCHER_POINTER_BIN unresolved, re-read every poll to notice the pointer move
+# (follow_pointer, below); $WATCHER_HERE resolved ONCE, right now, with the symlink followed
+# (`cd -P`) — so WATCHER_HOME, and every tick this one long-running process ever launches,
+# stay pinned to the exact release folder this process started in, for its whole life. A
+# deploy that flips the pointer under a running lane changes nothing this process reads
+# until it re-launches itself from the new pointer target, between ticks, never during one.
+WATCHER_ARGV=("$@")
+WATCHER_POINTER_BIN="$(dirname "${BASH_SOURCE[0]}")"
+case "$WATCHER_POINTER_BIN" in /*) ;; *) WATCHER_POINTER_BIN="$PWD/$WATCHER_POINTER_BIN" ;; esac
+WATCHER_HERE="$(cd -P "$WATCHER_POINTER_BIN" && pwd)"
 export WATCHER_HOME="${WATCHER_HOME:-$(dirname "$WATCHER_HERE")}"
 if [ -n "${WATCHER_PROJECT:-}" ]; then
   # shellcheck disable=SC1090
@@ -221,6 +232,7 @@ WORKTREE_BASE="$(dirname "$WATCHER_ROOT")/$(basename "$WATCHER_ROOT")-worktrees"
 PIDFILE="$WATCHER_STATE/spawn.pid"
 PAUSEFILE="$WATCHER_STATE/PAUSE"
 CURRENTFILE="$WATCHER_STATE/current"
+RELEASEFILE="$WATCHER_STATE/release"
 DOCTOR_OK=""  # set by run_doctor the first time tick_once gets past a PAUSE (see run_doctor)
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
@@ -1604,8 +1616,57 @@ Reply A, B or C on this card, or say which way you lean, then move it.
   rm -f "$WATCHER_STATE/awaiting-rebuild/$n.since" "$WATCHER_STATE/awaiting-rebuild/$n.noted"
 }
 
+# --- following the pointer (card #106) --------------------------------------------------
+# pointer_moved — true when $WATCHER_POINTER_BIN (this script's own path AS NAMED on the
+# command line, unresolved — the systemd unit's ExecStart, which never changes) now
+# resolves somewhere other than $WATCHER_HERE, the real folder this process pinned itself
+# to at launch (above). deploy/autodeploy.sh flips the pointer onto a new release's folder
+# without ever touching this process; this is how a long-running lane notices, on its own
+# clock, with no watcher of its own needed. A pointer that does not resolve at all right now
+# (mid-flip, or the box not using one) reads as "not moved" — never follow into nothing.
+pointer_moved() {
+  local now
+  now="$(cd -P "$WATCHER_POINTER_BIN" 2>/dev/null && pwd)" || return 1
+  [ -n "$now" ] && [ "$now" != "$WATCHER_HERE" ]
+}
+
+# follow_pointer — re-execs this same process (same pid, same systemd unit) into the
+# release the pointer now names, carrying the daemon's own original argv. Every call into
+# tick_once is already between ticks — launch_tick blocks inside the PREVIOUS tick_once
+# call until the tick is done — so being here at all already means idle; $CURRENTFILE is
+# checked anyway as the one record everything else in this file already trusts for "a tick
+# is running" (reconcile_stale_current, above). Never while paused is not a thing this
+# checks on purpose: following the pointer makes no external call of any kind, so a paused
+# lane keeps its docs and scripts current too, ready the moment it is unpaused.
+follow_pointer() {
+  [ -s "$CURRENTFILE" ] && return 0
+  pointer_moved || return 0
+  local new="$WATCHER_POINTER_BIN/spawn.sh"
+  [ -x "$new" ] || return 0
+  log "the pointer moved to $(cd -P "$WATCHER_POINTER_BIN" && pwd); re-launching from there"
+  # Unset, never carried into the new process: WATCHER_HOME is already exported into THIS
+  # process's own environment (right at the top of the file), and `export FOO="${FOO:-x}"`
+  # in the re-exec'd copy would see it already set and keep the OLD value forever — exactly
+  # the trap the LANE_CHANNEL=canary shim's own `unset WATCHER_HOME` (above) already avoids,
+  # for the same reason: `exec` hands the whole environment to the new process, not just argv.
+  unset WATCHER_HOME
+  exec "$new" "${WATCHER_ARGV[@]}"
+}
+
+# record_release — $RELEASEFILE names the release folder (its bare directory name — a
+# commit's short sha, under a deployed release layout) this process is pinned to, so
+# deploy/autodeploy.sh's own sweep (sweep_releases) never removes a release this lane's
+# current tick, if any, is still running from. Written once, at process start — WATCHER_HOME
+# cannot change under a running process (above), so it never needs rewriting mid-run.
+record_release() {
+  mkdir -p "$WATCHER_STATE"
+  basename "$WATCHER_HOME" > "$RELEASEFILE" 2>/dev/null || true
+}
+
 # --- one poll iteration --------------------------------------------------------------------
 tick_once() {
+  follow_pointer
+
   # Every poll, before anything else — see reconcile_stale_current's own comment for why
   # this can no longer be a one-shot call made only at process start.
   reconcile_stale_current
@@ -1686,6 +1747,7 @@ run_daemon() {
   check_singleton
   trap 'rm -f "$PIDFILE"' EXIT
   mkdir -p "$WATCHER_STATE/attempts" "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok" "$WATCHER_STATE/waiting" "$WATCHER_LOGS"
+  record_release
   # No standalone reconcile_stale_current call here: tick_once runs it at the top of every
   # iteration (including this loop's first), so a separate call before the loop would only
   # duplicate the very first poll's reconciliation.
@@ -1718,6 +1780,7 @@ main() {
   if [ "$ONCE" = 1 ]; then
     check_singleton
     trap 'rm -f "$PIDFILE"' EXIT
+    record_release
     # No standalone reconcile_stale_current call here either — tick_once's own top-of-poll
     # call covers this single iteration too.
     local rc=0

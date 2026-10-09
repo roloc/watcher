@@ -571,9 +571,6 @@ def fake_git(live, target):
 def dstate():
     return floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(L, T))
 def reset():
-    for f_ in ("draining", "ready"):
-        try: os.remove(os.path.join(DS, f_))
-        except OSError: pass
     for d_ in ("held", "evals"):
         for f_ in os.listdir(os.path.join(DS, d_)): os.remove(os.path.join(DS, d_, f_))
 reset()
@@ -582,14 +579,9 @@ check("the box on main's newest commit is live",
 check("behind with nothing recorded yet is checking", dstate()["state"] == "checking")
 open(os.path.join(DS, "evals", T), "w").write("fail 1")
 check("one suite failure is testing (the retry)", dstate()["state"] == "testing")
-open(os.path.join(DS, "ready"), "w").write(f"{L} 1790000000")
-check("ready and behind is waiting for idle lanes", dstate()["state"] == "waiting")
-open(os.path.join(DS, "draining"), "w").write(f"{T} {L} ")
-check("a drain in progress is swapping", dstate()["state"] == "swapping")
+# Card #106: there is no "waiting for idle lanes"/"swapping" state any more — a release is
+# cloned, installed and the pointer flipped inside one run, never split across a pause.
 open(os.path.join(DS, "held", T), "w").write("58")
-check("...even when that commit was held and is shipping through deploy-anyway",
-      dstate()["state"] == "swapping")
-os.remove(os.path.join(DS, "draining"))
 check("a held commit that is now live is live, not held (review finding)",
       floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(T, T))["state"] == "live")
 h = dstate()
@@ -604,6 +596,15 @@ check("a deployer read that blows up leaves the page up, with no deploy block",
       all("deploy" not in p["ship"] for p in state17c["projects"]))
 check("a checkout that is not a repo shows no deployer", floor.deploy_status("/x", DS, "r/w", git=lambda d, *a: "") is None)
 
+# Card #106: a lane's own $WATCHER_STATE/release (bin/spawn.sh writes it at process start)
+# is read for the Ship desk's per-lane view, box-wide — "riffmap" is on the live release,
+# "riffmap-design" is still on the one before it, "watcher" has never polled since one was
+# adopted at all (no file).
+os.makedirs(os.path.join(STATE, "riffmap"), exist_ok=True)
+os.makedirs(os.path.join(STATE, "riffmap-design"), exist_ok=True)
+open(os.path.join(STATE, "riffmap", "release"), "w").write(L[:12])
+open(os.path.join(STATE, "riffmap-design", "release"), "w").write(T[:12])
+
 state17 = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
                             ask_fn=stub_ask, now=NOW, box_name="test-box",
                             ci_fetcher=lambda repo: {"sha": S, "runs": [("verify", "completed", "success")]},
@@ -614,6 +615,13 @@ check("the deployer shows on the project whose repo it ships, only", "deploy" in
       and not any("deploy" in p["ship"] for p in others))
 check("a held deploy counts toward 'need Steve'",
       state17["header"]["needs_steve_total"] == state15["header"]["needs_steve_total"] + 1)
+lane_releases = {l["lane"]: l["release"] for l in rm17["ship"]["lanes"]}
+check("the ship desk names every lane on the box, not just this project's own",
+      {"watcher", "riffmap", "riffmap-design", "riffmap-triage", "second", "third"} <= set(lane_releases),
+      lane_releases)
+check("a lane already on the live release names it", lane_releases["riffmap"] == L[:12])
+check("a lane still on an older one names that instead", lane_releases["riffmap-design"] == T[:12])
+check("a lane that has never recorded one is None, not a crash", lane_releases["watcher"] is None)
 def keys(o):
     if isinstance(o, dict):
         for k, v in o.items():

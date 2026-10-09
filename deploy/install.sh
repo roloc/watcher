@@ -2,30 +2,38 @@
 # Run as root on the box, idempotent. Assumes the base tools are present (git, gh, node,
 # python3, a JDK if the project needs one, and `npm i -g @anthropic-ai/claude-code`).
 #
-#   /opt/watcher                  this repo (git clone or pull)
+#   /opt/watcher                  this repo (git clone or pull) — or, once deploy/autodeploy.sh
+#                                 has shipped at least one commit (card #106), a symlink onto
+#                                 one of its own release folders; see WATCHER_DIR below
 #   /etc/watcher/env              CLAUDE_CODE_OAUTH_TOKEN=…  (root:watcher 640; written by hand)
 #   /home/watcher/.claude/        commands/ and agents/ symlinked from the repo, so every
 #                                 project on the box gets /watch and the reviewer
 #   /home/watcher/projects/<p>    each project's main checkout (cloned by `install.sh <p>`)
 set -euo pipefail
 REPO_URL="${WATCHER_REPO:-https://github.com/roloc/watcher.git}"
+# Card #106: deploy/autodeploy.sh's own release-folder swap runs this from a FRESH clone it
+# just made, never from /opt/watcher itself — WATCHER_DIR is how it says so (every
+# self-reference below reads $WATCHER_DIR, never the literal path). An ordinary by-hand run
+# (no override) still means /opt/watcher, exactly as always.
+WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
 id watcher >/dev/null 2>&1 || useradd -m -s /bin/bash watcher
 
-if [ -d /opt/watcher/.git ] && [ "${INSTALL_NO_PULL:-0}" = 1 ]; then
-  # deploy/autodeploy.sh has already moved the checkout to the exact commit CI and the
-  # replay suite passed; a pull here could take it past that commit to one nothing checked.
+if [ -d "$WATCHER_DIR/.git" ] && [ "${INSTALL_NO_PULL:-0}" = 1 ]; then
+  # deploy/autodeploy.sh has already cloned this exact commit CI and the replay suite
+  # passed into $WATCHER_DIR; a pull here could take it past that commit to one nothing
+  # checked.
   :
-elif [ -d /opt/watcher/.git ]; then
+elif [ -d "$WATCHER_DIR/.git" ]; then
   # As the watcher user: it holds the gh login, and the checkout is its own.
-  su - watcher -c "git -C /opt/watcher pull -q --ff-only" || echo "warning: /opt/watcher pull failed (watcher user not logged in to gh yet?) — using what is there" >&2
-elif [ ! -d /opt/watcher ]; then
-  git clone -q "$REPO_URL" /opt/watcher || { echo "clone failed — rsync the repo to /opt/watcher instead" >&2; exit 1; }
+  su - watcher -c "git -C '$WATCHER_DIR' pull -q --ff-only" || echo "warning: $WATCHER_DIR pull failed (watcher user not logged in to gh yet?) — using what is there" >&2
+elif [ ! -d "$WATCHER_DIR" ]; then
+  git clone -q "$REPO_URL" "$WATCHER_DIR" || { echo "clone failed — rsync the repo to $WATCHER_DIR instead" >&2; exit 1; }
 fi
-chown -R watcher:watcher /opt/watcher
-chmod +x /opt/watcher/bin/*.sh /opt/watcher/bin/shim/* /opt/watcher/deploy/*.sh
+chown -R watcher:watcher "$WATCHER_DIR"
+chmod +x "$WATCHER_DIR"/bin/*.sh "$WATCHER_DIR"/bin/shim/* "$WATCHER_DIR"/deploy/*.sh
 # The chmod above must never read as a local change to git: the deployer refuses to update
 # a checkout with changes of its own (deploy/autodeploy.sh sets this too).
-su - watcher -c "git -C /opt/watcher config core.fileMode false" 2>/dev/null || true
+su - watcher -c "git -C '$WATCHER_DIR' config core.fileMode false" 2>/dev/null || true
 
 install -d -m 750 -o root -g watcher /etc/watcher
 [ -f /etc/watcher/env ] || { echo "CLAUDE_CODE_OAUTH_TOKEN=" > /etc/watcher/env; chown root:watcher /etc/watcher/env; chmod 640 /etc/watcher/env; }
@@ -34,8 +42,8 @@ install -d -m 750 -o root -g watcher /etc/watcher
 grep -q '^DISCORD_WEBHOOK_URL=' /etc/watcher/env || echo "DISCORD_WEBHOOK_URL=" >> /etc/watcher/env
 
 install -d -o watcher -g watcher /home/watcher/.claude /home/watcher/projects
-ln -sfn /opt/watcher/commands /home/watcher/.claude/commands
-ln -sfn /opt/watcher/agents   /home/watcher/.claude/agents
+ln -sfn "$WATCHER_DIR/commands" /home/watcher/.claude/commands
+ln -sfn "$WATCHER_DIR/agents"   /home/watcher/.claude/agents
 chown -h watcher:watcher /home/watcher/.claude/commands /home/watcher/.claude/agents
 
 # bin/board.py's cache (card #98): one directory every lane AND the floor service can both
@@ -51,7 +59,7 @@ install -d -o watcher -g watcher /var/cache/watcher
 # box. Created here, once; every later move onto a new commit is deploy/autodeploy.sh's
 # own job (the canary stage), exactly as /opt/watcher itself is never pulled here again
 # after its first clone (INSTALL_NO_PULL, above).
-if grep -qsx 'LANE_CHANNEL=canary' /opt/watcher/projects/*.env 2>/dev/null; then
+if grep -qsx 'LANE_CHANNEL=canary' "$WATCHER_DIR"/projects/*.env 2>/dev/null; then
   # As root, same as /opt/watcher's own first clone above: the watcher user may not have a
   # working gh/git login yet at first boot, and a public HTTPS clone needs none.
   [ -d /opt/watcher-canary ] || git clone -q "$REPO_URL" /opt/watcher-canary \
@@ -67,29 +75,33 @@ if grep -qsx 'LANE_CHANNEL=canary' /opt/watcher/projects/*.env 2>/dev/null; then
   fi
 fi
 
+# Card #106: `board` prefers the WATCHER_HOME a tick's own lane was launched with, so a
+# card worked under one release keeps reading that release's own board.py for its whole
+# run, and only falls back to the live pointer for anything run outside a tick (the
+# deployer itself, the floor page, a person on the box).
 cat > /usr/local/bin/board <<'B'
 #!/usr/bin/env bash
-exec python3 /opt/watcher/bin/board.py "$@"
+exec python3 "${WATCHER_HOME:-/opt/watcher}/bin/board.py" "$@"
 B
 chmod 755 /usr/local/bin/board
 
-install -m 644 /opt/watcher/deploy/watcher@.service /etc/systemd/system/watcher@.service
-# The deployer (deploy/autodeploy.sh): a timer that ships main by itself when the lanes are
-# idle. Enabled here, so a box set up from scratch deploys itself from its first boot.
-install -m 644 /opt/watcher/deploy/watcher-deploy.service /etc/systemd/system/watcher-deploy.service
-install -m 644 /opt/watcher/deploy/watcher-deploy.timer /etc/systemd/system/watcher-deploy.timer
+install -m 644 "$WATCHER_DIR/deploy/watcher@.service" /etc/systemd/system/watcher@.service
+# The deployer (deploy/autodeploy.sh): a timer that ships main by itself, as soon as it can.
+# Enabled here, so a box set up from scratch deploys itself from its first boot.
+install -m 644 "$WATCHER_DIR/deploy/watcher-deploy.service" /etc/systemd/system/watcher-deploy.service
+install -m 644 "$WATCHER_DIR/deploy/watcher-deploy.timer" /etc/systemd/system/watcher-deploy.timer
 # The detector (bin/detect.sh, card #36): the unit is installed for every box, but an
 # instance only starts for a project that carries its own projects/<name>.detect.env —
 # merging that file is what turns detection on, below, the same as a lane's own .env.
-install -m 644 /opt/watcher/deploy/watcher-detect@.service /etc/systemd/system/watcher-detect@.service
-install -m 644 /opt/watcher/deploy/watcher-detect@.timer /etc/systemd/system/watcher-detect@.timer
+install -m 644 "$WATCHER_DIR/deploy/watcher-detect@.service" /etc/systemd/system/watcher-detect@.service
+install -m 644 "$WATCHER_DIR/deploy/watcher-detect@.timer" /etc/systemd/system/watcher-detect@.timer
 systemctl daemon-reload
-# Only the first time: rollout.sh stops the timer while a person drives, and a re-install
-# from inside it must not start it again behind their back.
+# Only the first time: a hand-stopped timer (the box's own emergency fallback) stays off,
+# and a re-install from inside one must not start it again behind their back.
 systemctl is-enabled --quiet watcher-deploy.timer 2>/dev/null \
   || systemctl enable --now watcher-deploy.timer >/dev/null 2>&1 \
   || echo "warning: could not enable watcher-deploy.timer" >&2
-for f in /opt/watcher/projects/*.detect.env; do
+for f in "$WATCHER_DIR"/projects/*.detect.env; do
   [ -f "$f" ] || continue
   p="$(basename "$f" .detect.env)"
   systemctl is-enabled --quiet "watcher-detect@$p.timer" 2>/dev/null \
@@ -101,7 +113,7 @@ done
 # in flight, so — unlike a `watcher@` lane — it is simply restarted here on every install,
 # never drained or paused. `enable --now` covers the first install; a later one just picks
 # up new code via the restart.
-install -m 644 /opt/watcher/deploy/watcher-floor.service /etc/systemd/system/watcher-floor.service
+install -m 644 "$WATCHER_DIR/deploy/watcher-floor.service" /etc/systemd/system/watcher-floor.service
 systemctl daemon-reload
 systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
   && systemctl restart watcher-floor.service \
@@ -109,7 +121,7 @@ systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
 
 NOT_STARTED=()
 for p in "$@"; do
-  f="/opt/watcher/projects/$p.env"
+  f="$WATCHER_DIR/projects/$p.env"
   [ -f "$f" ] || { echo "no project file $f" >&2; exit 1; }
   # Clear what we read from the file before sourcing the next one: several projects share
   # this one shell, and a value left over from the previous project would silently stand in
@@ -134,7 +146,7 @@ for p in "$@"; do
   # are what say not to start the service yet.
   DOCTOR_OK=1
   if [ -n "${BOARD_OWNER:-}" ] && [ -n "${BOARD_NUMBER:-}" ]; then
-    su - watcher -c "PROJECT_REPO='$repo' PROJECT_ROOT='$PROJECT_ROOT' BOARD_OWNER='$BOARD_OWNER' BOARD_NUMBER='$BOARD_NUMBER' /opt/watcher/bin/doctor.sh" \
+    su - watcher -c "PROJECT_REPO='$repo' PROJECT_ROOT='$PROJECT_ROOT' BOARD_OWNER='$BOARD_OWNER' BOARD_NUMBER='$BOARD_NUMBER' '$WATCHER_DIR/bin/doctor.sh'" \
       || { DOCTOR_OK=0; echo "doctor found a problem with $p (above) — fix it, then re-run install.sh $p before starting watcher@$p" >&2; }
   fi
   if [ "$DOCTOR_OK" = 1 ] && ! systemctl is-enabled --quiet "watcher@$p" 2>/dev/null; then
@@ -151,7 +163,7 @@ su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su 
 # A browser for bin/browse.py: how a tick on any project looks at a page (the reviewer
 # too). Asked of browse.py itself, as the user the ticks run as, so this looks where a
 # tick's own call will look.
-su - watcher -c "python3 /opt/watcher/bin/browse.py find" >/dev/null 2>&1 || MISSING+=("  Browser:    apt install chromium   (ticks look at pages with bin/browse.py, which needs a
+su - watcher -c "python3 '$WATCHER_DIR/bin/browse.py' find" >/dev/null 2>&1 || MISSING+=("  Browser:    apt install chromium   (ticks look at pages with bin/browse.py, which needs a
               Chrome or Chromium; without one a tick cannot check a page it changed)")
 if [ $# -eq 0 ]; then
   MISSING+=("  Project:    deploy/add-project.sh <name> <owner/repo>, then install.sh <project> clones it; drop its .env.local / private inputs in place.")

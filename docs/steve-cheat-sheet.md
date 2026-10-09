@@ -167,8 +167,8 @@ user mention (`<@your-id>`) or `@here`.
 - **The watcher works its own cards too,** on the
   [Watcher board](https://github.com/users/roloc/projects/2). Same columns, same rules.
 - **One card at a time** there, separate from riffmap's two.
-- **What it merges goes live by itself** once the checks pass and the bots are idle
-  (next section).
+- **What it merges goes live by itself** once the checks pass — within about five minutes,
+  whatever any bot is doing at the time (next section).
 - **You never merge anything,** here or on RiffMap. The bots merge their own work once the
   build check passes and the reviewer finds nothing blocking. Changes to their own safety
   checks get the strictest review, and nothing goes live until its tests pass again.
@@ -176,10 +176,14 @@ user mention (`<@your-id>`) or `@here`.
 ## New watcher versions deploy themselves
 
 - **You never deploy.** The box checks for a new version every five minutes.
-- It ships one only when **the build check passed**, **the bots' tests passed**, and
-  **no bot is in the middle of a card**. It never interrupts one.
+- It ships one only when **the build check passed** and **the bots' tests passed**. It
+  never pauses a bot or waits for one to finish a card — a version lands in its own folder,
+  and each bot picks it up on its own, between cards, so nothing it is doing is ever
+  interrupted.
 - **If a version fails its checks,** a card lands in **Stuck** saying which one. Move it to
   **In progress** to have the watcher fix it, or add the **deploy-anyway** label to ship it.
+- **The floor page's Ship desk says which version each bot is running** — so if one still
+  shows an older one, it just has not finished its current card yet.
 - **To turn deploys off,** on the box: `systemctl stop watcher-deploy.timer` (`start` turns
   them back on).
 

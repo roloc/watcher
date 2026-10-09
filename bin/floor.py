@@ -101,6 +101,8 @@ ALLOWED_FIELDS = {
     "recent", "project", "when", "quota",
     # the ship station (after the lanes): CI on main, and the box's own deployer
     "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
+    # card #106: which release each lane on the box is pinned to, box-wide
+    "release",
     # the Needs Steve strip (card #96): every Stuck card on the board, whichever lane last
     # touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
@@ -349,34 +351,40 @@ def _read(path):
 
 def deploy_status(repo_dir, deploy_state, repo, git=_git):
     """What deploy/autodeploy.sh is doing, from the files it keeps (read-only):
-    live | checking | testing | waiting | swapping | held."""
+    live | checking | testing | held. Card #106: a deploy never pauses or waits for a lane
+    any more — it clones the target, installs it, and flips the pointer inside one run — so
+    there is no separate "waiting for idle lanes"/"swapping" state left to show; `live` and
+    `target` already say the rest, and `lane_release`/the page's per-lane lines (below) say
+    which lanes have already followed the pointer there."""
     live = git(repo_dir, "rev-parse", "HEAD")
     target = git(repo_dir, "rev-parse", "origin/main")
     if not live:
         return None
     out = {"live": live[:7], "target": (target or live)[:7]}
     held = _read(os.path.join(deploy_state, "held", target)) if target else None
-    draining = (_read(os.path.join(deploy_state, "draining")) or "").split()
-    ready = (_read(os.path.join(deploy_state, "ready")) or "").split()
     evals = _read(os.path.join(deploy_state, "evals", target)) if target else None
-    # Swapping and live come before held: a commit shipped with deploy-anyway keeps its own
-    # held/<sha> file (the deployer only clears the OTHER held cards), and the page must not
-    # call a live commit Blocked, or count it as needing Steve.
-    if draining:
-        out["state"], out["target"] = "swapping", draining[0][:7]
-    elif not target or live == target:
+    # Live comes before held: a commit shipped with deploy-anyway keeps its own held/<sha>
+    # file (the deployer only clears the OTHER held cards), and the page must not call a
+    # live commit Blocked, or count it as needing Steve.
+    if not target or live == target:
         out["state"] = "live"
     elif held is not None:
         out["state"] = "held"
         if held.isdigit():
             out["card"] = {"number": int(held), "url": f"https://github.com/{repo}/issues/{held}"}
-    elif ready and ready[0] == live:
-        out["state"] = "waiting"
     elif evals and evals.startswith("fail"):
         out["state"] = "testing"
     else:
         out["state"] = "checking"
     return out
+
+
+def lane_release(lane):
+    """The release folder (its bare directory name, a commit's short sha) this lane's own
+    process last said it was pinned to — bin/spawn.sh's own $WATCHER_STATE/release, written
+    once at process start (see its comment there). None when the lane has never run under
+    a release layout (a box, or a project, not using one) or has not polled since."""
+    return _read(os.path.join(lane["state_dir"], "release"))
 
 
 # --- one lane's desk ---------------------------------------------------------------------
@@ -741,8 +749,7 @@ def _worst(marks):
 
 _DEPLOY_WORDS = {
     "live": "live on the box: {live}", "checking": "checking {target}: CI and tests",
-    "testing": "retesting {target}", "waiting": "{target} passed; waiting for idle lanes",
-    "swapping": "swapping in {target}", "held": "held: {target}",
+    "testing": "retesting {target}", "held": "held: {target}",
 }
 
 
@@ -952,6 +959,14 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                 ship["deploy"] = dep
                 if dep["state"] == "held":
                     needs_steve_total += 1
+                # Card #106: every lane on the box runs this same deploy's code, whichever
+                # project it works — so the one Ship desk that shows the deployer's own
+                # state (the watcher's) is where "which release each lane is on" belongs
+                # too, box-wide, never only this project's own lanes.
+                ship["lanes"] = [
+                    {"project": proj["name"], "lane": l["lane"], "release": lane_release(l)}
+                    for proj in projects for l in proj["lanes"]
+                ]
 
         entry = {"name": p["name"], "board_url": p["board_url"],
                   "counts": project_counts(items), "lanes": lane_out, "ship": ship,
@@ -1565,6 +1580,24 @@ function dispatcherSVG(pill) {
 // deployer too. Not a lane — nothing here works a card.
 const SHIP_PILL = {ok: ["working", "All green"], busy: ["paused", "Shipping"],
                    blocked: ["needs_steve", "Blocked"], unknown: ["idle", "Unknown"]};
+// laneReleaseLines (card #106) — one line per project naming how many of its lanes have
+// already followed the pointer to the live release, and which have not (still finishing a
+// tick on an older one — never disturbed, just not there yet). `live` is the deployer's
+// own 7-char sha; a lane's own release name is 12 — compared on the 7 both share, which is
+// exactly as precise as every other short-sha the page already shows.
+function laneReleaseLines(dep, lanes) {
+  if (!dep || !lanes || !lanes.length) return [];
+  const byProject = {};
+  lanes.forEach(l => { (byProject[l.project] = byProject[l.project] || []).push(l); });
+  return Object.keys(byProject).sort().map(name => {
+    const group = byProject[name];
+    const behind = group.filter(l => !l.release || l.release.slice(0, 7) !== dep.live).map(l => l.lane);
+    const onIt = group.length - behind.length;
+    return behind.length
+      ? `  ${esc(name)}: ${onIt} of ${group.length} lane(s) on it (${behind.map(esc).join(", ")} still finishing on an older one)`
+      : `  ${esc(name)}: all ${group.length} lane(s) on it`;
+  });
+}
 function shipState(ship) {
   const ci = (ship && ship.ci) || {state: "unknown"};
   const dep = ship && ship.deploy;
@@ -1572,16 +1605,15 @@ function shipState(ship) {
   const ciLine = {passing: "all checks passed", running: "checks running",
                   failing: "failing: " + (ci.failing || []).join(", "), none: "no checks"}[ci.state];
   lines.push(ci.state === "unknown" ? "CI unreachable" : `main ${esc(ci.sha)}: ${esc(ciLine)}`);
-  if (dep) lines.push({live: `live on the box: ${esc(dep.live)}`,
-                       checking: `checking ${esc(dep.target)}: CI and tests`,
-                       testing: `retesting ${esc(dep.target)}`,
-                       waiting: `${esc(dep.target)} passed; waiting for idle lanes`,
-                       swapping: `swapping in ${esc(dep.target)}`,
-                       held: `held: ${esc(dep.target)}` + (dep.card ? ` (#${dep.card.number})` : "")}[dep.state] || "");
+  if (dep) {
+    lines.push({live: `live on the box: ${esc(dep.live)}`,
+                checking: `checking ${esc(dep.target)}: CI and tests`,
+                testing: `retesting ${esc(dep.target)}`,
+                held: `held: ${esc(dep.target)}` + (dep.card ? ` (#${dep.card.number})` : "")}[dep.state] || "");
+    lines.push(...laneReleaseLines(dep, ship.lanes));
+  }
   let pill = "ok", mode = "done";
   if ((dep && dep.state === "held") || ci.state === "failing") { pill = "blocked"; mode = "blocked"; }
-  else if (dep && dep.state === "waiting") { pill = "busy"; mode = "waiting"; }
-  else if (dep && dep.state === "swapping") { pill = "busy"; mode = "pushing"; }
   else if ((dep && dep.state !== "live") || ci.state === "running") { pill = "busy"; mode = "checking"; }
   else if (ci.state === "unknown" && !dep) { pill = "unknown"; mode = "idle"; }
   const link = (dep && dep.card && dep.card.url) || ci.url || "";

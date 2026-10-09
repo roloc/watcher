@@ -174,6 +174,13 @@ open(os.path.join(STATE, "beta", "PAUSE"), "w").close()
 tick_log("beta", 3, "20260927T090000Z")
 transcript(f"{ROOT}/beta-worktrees", 3, [say("Parked: the build needs a decision.")])
 
+# Card #106: each lane's own $WATCHER_STATE/release — alpha and alpha-triage already
+# followed the pointer to the live release; alpha-design is still finishing a tick on the
+# one before it.
+open(os.path.join(STATE, "alpha", "release"), "w").write("aaaaaaaaaaaa")
+open(os.path.join(STATE, "alpha-design", "release"), "w").write("bbbbbbbbbbbb")
+open(os.path.join(STATE, "alpha-triage", "release"), "w").write("aaaaaaaaaaaa")
+
 # A tiny real PNG, inline — no network, same one bin/floor.py's own demo fixture uses.
 TINY_PNG = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQ"
             "VR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC")
@@ -211,7 +218,11 @@ class LiveCache:
                                  rounds_fn=lambda i, r: ROUNDS.get(i, []),
                                  box_name="test-box",
                                  ratelimit_fn=lambda: {"remaining": 4312, "resetAt":
-                                                        "2026-10-09T20:00:00Z", "limit": 5000})
+                                                        "2026-10-09T20:00:00Z", "limit": 5000},
+                                 # Card #106: alpha is "the board this box deploys" — the
+                                 # Ship desk's per-lane view belongs here, box-wide.
+                                 deploy_repo="roloc/alpha",
+                                 deploy_fn=lambda: {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa"})
 
 
 def tail_lookup(lane, card, file, pos):
@@ -418,6 +429,17 @@ try:
               b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
         check("no uncaught exception after the keyboard and swipe round trip", b.errors == [], b.errors)
         shot(b, "floor-needs-strip.png")
+
+        print("2c. card #106: the Ship desk names which release each lane on the box is on")
+        ship_text = b.eval("document.querySelector('.desk.ship').textContent")
+        check("the project that deploys names its own lanes: 2 of 3 on the live release",
+              "alpha: 2 of 3 lane(s) on it" in ship_text, ship_text)
+        check("...and names the one still finishing on an older release",
+              "alpha-design still finishing on an older one" in ship_text, ship_text)
+        check("a lane box-wide, in a different project, shows up here too — one deploy, every lane",
+              "beta: 0 of 1 lane(s) on it (beta still finishing on an older one)" in ship_text, ship_text)
+        check("no uncaught exception with the per-lane release line drawn", b.errors == [], b.errors)
+        shot(b, "ship-desk-releases.png", full_page=False)
 
         print("3. Peek is on every lane's desk, whatever the lane is doing (card #63)")
         for lane in LANES:
