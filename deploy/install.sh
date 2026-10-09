@@ -38,6 +38,13 @@ ln -sfn /opt/watcher/commands /home/watcher/.claude/commands
 ln -sfn /opt/watcher/agents   /home/watcher/.claude/agents
 chown -h watcher:watcher /home/watcher/.claude/commands /home/watcher/.claude/agents
 
+# bin/board.py's cache (card #98): one directory every lane AND the floor service can both
+# write to, so a board read inside one poll's TTL is shared instead of re-fetched per
+# process. Without this, board.py's own fallback (WATCHER_STATE_ROOT, or
+# ~/.local/state/watcher) still works — it is just not the one every project on the box is
+# guaranteed to agree on by default.
+install -d -o watcher -g watcher /var/cache/watcher
+
 # The canary checkout (card #46): a lane whose project file sets LANE_CHANNEL=canary runs
 # from a second, independent clone — bin/spawn.sh's own shim re-execs into it — so a bad
 # prompt reaches only the board that opted in before it reaches every other lane on the

@@ -2598,7 +2598,8 @@ class Cache:
         self.build = build
         self.refresh_sec = refresh_sec
         self.idle_after_sec = idle_after_sec
-        self.lock = threading.Lock()
+        self.lock = threading.Lock()         # guards state/built_at/last_request only
+        self.build_lock = threading.Lock()   # ensures only one `build()` runs at a time
         self.state = build()
         now = time.time()
         self.built_at = now
@@ -2607,27 +2608,43 @@ class Cache:
     def get(self):
         with self.lock:
             self.last_request = time.time()
-            if self.idle_after_sec is not None and time.time() - self.built_at > self.refresh_sec:
-                self._rebuild_locked()
+            stale = self.idle_after_sec is not None and time.time() - self.built_at > self.refresh_sec
+        if stale:
+            self._rebuild()
+        with self.lock:
             return self.state
 
-    def _rebuild_locked(self):
-        try:
-            new_state = self.build()
-        except Exception as e:
-            sys.stderr.write(f"floor.py: refresh failed: {e}\n")
-            return
-        self.state = new_state
-        self.built_at = time.time()
+    def _rebuild(self):
+        """Builds at most once at a time: `self.lock` is never held across `self.build()`
+        (review round 1 — a slow `fetch_board` used to hold up every concurrent
+        `/api/state.json` response behind it), and `build_lock` keeps two callers racing
+        the same stale state (`get()`'s synchronous catch-up and the background `loop()`,
+        or two requests arriving in the same instant) from both paying for a read: the
+        second one in re-checks staleness after the first already refreshed, and finds
+        nothing left to do."""
+        with self.build_lock:
+            with self.lock:
+                still_stale = time.time() - self.built_at > self.refresh_sec
+            if not still_stale:
+                return
+            try:
+                new_state = self.build()
+            except Exception as e:
+                sys.stderr.write(f"floor.py: refresh failed: {e}\n")
+                return
+            with self.lock:
+                self.state = new_state
+                self.built_at = time.time()
 
     def _maybe_background_rebuild(self):
         """One background-loop tick's worth of decision, pulled out of `loop()` so a test
         can drive it directly without threads or real sleeps."""
         with self.lock:
-            if (self.idle_after_sec is not None
-                    and time.time() - self.last_request > self.idle_after_sec):
-                return  # nobody has looked in a while; skip the read
-            self._rebuild_locked()
+            idle = (self.idle_after_sec is not None
+                    and time.time() - self.last_request > self.idle_after_sec)
+        if idle:
+            return  # nobody has looked in a while; skip the read
+        self._rebuild()
 
     def loop(self, stop_event):
         while not stop_event.is_set():

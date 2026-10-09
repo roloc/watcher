@@ -79,11 +79,17 @@ lane and the floor service can both reach — falling back to `WATCHER_STATE_ROO
 (default 45 seconds, a little under the lanes' own poll interval); `project()`'s is a fixed
 10 minutes, since a board's fields only change when Steve edits it, and a miss on a field
 or option name invalidates that cache and retries once live rather than waiting out the
-TTL. `BOARD_CACHE_SEC=0` turns the whole thing off — reads and writes both — which is what
-every offline suite sets, so a test never touches a real directory. `move`, `stage`,
-`unclaim` and `sweep-stages` invalidate the items cache before they touch the board, so a
-lane that promotes a card and polls again right away sees the new column, never a cache it
-just paid to warm.
+TTL. `BOARD_CACHE_SEC=0` turns the `items()`/`project()` cache off — reads and writes both
+— which is what every offline suite sets, so a test never touches a real directory. `show`
+always reads live, cache or not: it is what the spawner's own do-not-fail-open guards
+(`handle_exit`, `reconcile_stale_current`) decide a card's `in-flight` state from, and it
+is called once per claim and once per exit — never the hot polling path — so paying for a
+live read there costs nothing and a cached answer there is never the risk. `move`, `stage`,
+`unclaim` and `sweep-stages` invalidate the items cache only once their own mutation has
+landed, never before it — invalidating ahead of a mutation that has not landed yet leaves a
+window where a concurrent reader (another lane's poll, the floor page) can re-warm the
+cache with the stale, pre-mutation snapshot, which then serves for the rest of the TTL with
+nothing left to invalidate it again.
 
 The account's remaining budget and reset time ride along for free on whichever query last
 asked for it (`items()`'s own GraphQL query includes `rateLimit{ remaining resetAt limit

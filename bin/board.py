@@ -23,9 +23,15 @@ cache, one per board, so every lane and the floor page polling the same board in
 same window share one real read instead of each paying for their own. `WATCHER_CACHE_DIR`
 names the directory (default: `/var/cache/watcher`, falling back to `WATCHER_STATE_ROOT` or
 `~/.local/state/watcher`); `BOARD_CACHE_SEC` is the TTL in seconds (default 45; 0 disables
-the cache entirely — reads and writes both — which is what the offline suites set).
-`move`, `stage`, `unclaim` and `sweep-stages` invalidate it before they touch the board, so
-a lane that promotes a card and polls again right away sees the new column. `project()`
+the `items()`/`project()` cache entirely — reads and writes both — which is what the
+offline suites set. `show` always reads live, cache or not — it is what the spawner's own
+do-not-fail-open guards decide a card's `in-flight` state from, so it never serves a
+snapshot that could predate a `move`/`stage`/`unclaim` elsewhere. `move`, `stage`,
+`unclaim` and `sweep-stages` invalidate the cache only once their own mutation has
+landed, never before — invalidating ahead of a mutation that has not landed yet on
+GitHub's side leaves a window where a concurrent reader can re-warm the cache with the
+stale, pre-mutation snapshot, which then serves for the rest of the TTL with nothing left
+to invalidate it a second time. `project()`
 (the board's fields and options) is cached the same way, for 10 minutes, and a miss on a
 field or option name invalidates it and retries once live — a column Steve just renamed is
 seen on that retry, not after the cache ages out on its own.
@@ -613,11 +619,14 @@ def cmd_move(issue, status, *rest):
         rest = rest[2:]
     if rest:
         sys.exit(f"board.py: move: unexpected arguments {rest!r}")
-    # Invalidate before the mutation, not after: a lane that moves a card and polls again
-    # right away must see the new column, never the pre-move cache it just paid to warm
-    # (card #98).
-    _cache_invalidate(_items_cache_name())
     name, it = set_option(issue, STATUS_FIELD, status)
+    # Invalidate AFTER the mutation lands, never before (card #98, reviewer round 1): a
+    # reader that races the window between an early invalidate and the mutation actually
+    # landing on GitHub's side can re-warm the cache with the pre-move snapshot, which then
+    # serves stale for the rest of BOARD_CACHE_SEC — nothing invalidates it a second time.
+    # Invalidating only once the mutation is confirmed closes that window; the very next
+    # `items()` call, here or in any other process, pays one live read and sees the move.
+    _cache_invalidate(_items_cache_name())
     print(f"#{issue} → {name}")
     # Stuck is the only column that reaches Discord. Every other move is on the floor page.
     if name == STUCK_STATUS:
@@ -659,8 +668,10 @@ def cmd_sweep_stages():
     for good and sat in Done reading "Parked" (watcher#35, #36, #40, #43 and #44,
     September 28, 2026). The spawner calls this every few minutes. Quiet — no Discord
     post. One `items()` read; nothing else is fetched unless a card needs clearing."""
-    _cache_invalidate(_items_cache_name())  # card #98: a sweep must see the live board
-    stale = [i for i in items() if i["state"] == "CLOSED" and i.get("stage")]
+    # fresh=True: a sweep must see the live board, not a cache up to BOARD_CACHE_SEC old —
+    # this runs at most every STAGE_SWEEP_SEC (spawn.sh), so paying for a live read every
+    # time costs nothing (card #98).
+    stale = [i for i in items(fresh=True) if i["state"] == "CLOSED" and i.get("stage")]
     if not stale:
         return 0
     proj, fields = project()
@@ -670,6 +681,10 @@ def cmd_sweep_stages():
     for it in stale[:SWEEP_MAX]:
         gh(CLEAR_FIELD, p=proj["id"], i=it["item"], f=f["id"])
         print(f"#{it['number']} stage {it['stage']} → (none)")
+    # After the mutations, not before (card #98, reviewer round 1 — same reasoning as
+    # cmd_move/cmd_stage/cmd_unclaim): closes the window where a concurrent reader could
+    # re-warm the cache with a snapshot this sweep is about to make stale.
+    _cache_invalidate(_items_cache_name())
     return 0
 
 
@@ -679,12 +694,14 @@ def cmd_stage(issue, stage):
     where it is. A board view grouped by Stage shows the columns Steve asked for, and the
     floor page shows it on the lane's desk. Quiet — no Discord post. `-` empties it
     (clear_stage)."""
-    _cache_invalidate(_items_cache_name())  # card #98: same as cmd_move
     if stage == "-":
-        return clear_stage(issue)
-    name, it = set_option(issue, STAGE_FIELD, stage)
-    print(f"#{issue} stage → {name}")
-    return 0
+        rc = clear_stage(issue)
+    else:
+        name, it = set_option(issue, STAGE_FIELD, stage)
+        print(f"#{issue} stage → {name}")
+        rc = 0
+    _cache_invalidate(_items_cache_name())  # card #98: same ordering as cmd_move, and why
+    return rc
 
 
 def cmd_notify(issue, kind, detail=""):
@@ -716,19 +733,30 @@ def issue_num(v):
 def cmd_unclaim(issue):
     """Drop a leaked `in-flight` label. A tick that dies mid-claim strands its card."""
     n = issue_num(issue)
-    # The label lives inside the cached items() entry's own `labels` list; without this a
-    # card unclaimed here could still read in-flight for the rest of the TTL (card #98).
-    _cache_invalidate(_items_cache_name())
     r = subprocess.run(["gh", "issue", "edit", str(n), "--remove-label", "in-flight"],
                        capture_output=True, text=True)
     if r.returncode:
         sys.exit(f"board.py: could not unclaim #{n}: {r.stderr.strip()[:200]}")
+    # After the label is actually gone, not before (card #98, reviewer round 1): the label
+    # lives inside the cached items() entry's own `labels` list, and invalidating ahead of
+    # the real removal leaves a window where a concurrent reader re-warms the cache with
+    # the still-in-flight snapshot — which then outlives this call for the rest of the TTL.
+    _cache_invalidate(_items_cache_name())
     print(f"#{n} unclaimed")
     return 0
 
 
 def cmd_show(issue):
-    it = next((i for i in items() if i["number"] == issue_num(issue)), None)
+    # Always fresh (card #98, reviewer round 1): the spawner's two callers of this — the
+    # do-not-fail-open guard in handle_exit and reconcile_stale_current — decide whether a
+    # card is still genuinely in-flight from this one read, and a cached answer here can be
+    # stale for up to BOARD_CACHE_SEC after a mutation lands elsewhere (another lane, a
+    # tick's own `move`/`unclaim` a moment before this exact call): a false "still
+    # in-flight" reading posts a "the run ended without finishing" comment and a Discord
+    # alert on a card that actually shipped. `show` is called once per tick claim and once
+    # per tick exit — never the hot polling path `list`/`queue`/`dump` are — so paying for a
+    # live call here costs nothing and removes the risk entirely.
+    it = next((i for i in items(fresh=True) if i["number"] == issue_num(issue)), None)
     if not it:
         sys.exit(f"board.py: issue #{issue} is not on the board")
     print(json.dumps(it, indent=2))

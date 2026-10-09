@@ -322,27 +322,63 @@ check("exactly two project() fetches: the stale cache, then one live retry",
       len(renamed_column_calls) == 2, renamed_column_calls)
 board.subprocess.run = graphql_stub_run
 
-print("15. mutations invalidate the items() cache before they run (card #98): move, "
-      "stage and unclaim all make the very next items() call live again")
+print("15. mutations invalidate the items() cache once their own mutation lands, never "
+      "before (card #98, reviewer round 1): move, stage and unclaim all make the very "
+      "next items() call live again, and set_option's own lookup during the mutation "
+      "still uses the cache that was warm when the call started, never a forced refetch")
 board.OWNER, board.NUMBER = "roloc", 100
 COMMENTS[100] = []  # cmd_unclaim's `gh issue edit` (stub_run) needs a successful exit
 
+board.items()  # warm the items cache
+board.project()  # warm the project cache too, so cmd_stage's own project() lookup is also a
+                 # hit — isolating what this case is actually about: set_option's ITEMS
+                 # lookup, not a cold project() fetch that would happen either way
 GRAPHQL_CALLS.clear()
-board.items()  # warm the cache
-check("warmed: one call so far", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
 board.cmd_stage("100", "Claimed")
-check("cmd_stage made at least one more real call (the cache it invalidated had to be "
-      "refilled by set_option's own lookup)", len(GRAPHQL_CALLS) > 1, GRAPHQL_CALLS)
+check("cmd_stage: set_option's own items() AND project() lookups both reused the cache "
+      "that was warm when the call started (invalidating AHEAD of the mutation would be "
+      "the bug this guards — a concurrent reader could then re-warm the cache with a "
+      "pre-mutation snapshot that outlives the TTL) — only the mutation call itself was "
+      "real", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
 GRAPHQL_CALLS.clear()
 board.items()
-check("items() right after cmd_stage is still warm (set_option's own lookup refilled it, "
-      "it wasn't just invalidated and left empty)", len(GRAPHQL_CALLS) == 0, GRAPHQL_CALLS)
+check("items() right after cmd_stage is a live call: the cache was invalidated only once "
+      "the mutation had already landed", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
 
+board.items()  # warm it again before the next mutation
+GRAPHQL_CALLS.clear()
 board.cmd_unclaim("100")
+board.items()
+check("items() right after cmd_unclaim is a live call too, for the same reason",
+      len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+
+print("15b. card #98, reviewer round 1 — the race this guards against, reproduced: a "
+      "concurrent reader landing INSIDE the mutation's own network call re-warms the "
+      "cache with a pre-mutation snapshot, and the fix must still leave the cache "
+      "invalidated once the mutation returns, not stale for the rest of the TTL")
+board.OWNER, board.NUMBER = "roloc", 106
+COMMENTS[106] = []
+
+
+def racing_stub_run(cmd, **kwargs):
+    if cmd[:3] == ["gh", "issue", "edit"]:
+        # Stands in for another lane's poll landing exactly inside this `gh issue edit`
+        # call: it reads (and re-caches) the board before this mutation has had a chance
+        # to invalidate anything.
+        board.items()
+    return graphql_stub_run(cmd, **kwargs)
+
+
+board.items()  # warm it
+board.subprocess.run = racing_stub_run
+board.cmd_unclaim("106")
+board.subprocess.run = graphql_stub_run
 GRAPHQL_CALLS.clear()
 board.items()
-check("items() right after cmd_unclaim is a live call: unclaim has no items() lookup of "
-      "its own to refill the cache, only the invalidation", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+check("even with a reader racing inside the mutation's own call, the cache is live again "
+      "right after — invalidating ONLY after the mutation (never before) means this "
+      "function's own invalidate is always the LAST write, so the race's re-warm can "
+      "never be the one left standing", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
 
 print("16. BOARD_CACHE_SEC=0 disables the cache entirely — reads and writes both — "
       "which is what the offline suites set")
