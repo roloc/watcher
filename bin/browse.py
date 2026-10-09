@@ -322,6 +322,21 @@ class Browser:
             raise BrowseError(f"browse.py: nothing to click at {selector!r} (missing, or not drawn)")
         self.click_at(box["x"], box["y"])
 
+    def hover(self, selector):
+        """The pointer moved onto the element — a real mouse move to where it is drawn, so
+        whatever the page shows on hover shows the way it would under a hand."""
+        box = self.eval(f"""(() => {{
+            const el = document.querySelector({json.dumps(selector)});
+            if (!el) return null;
+            el.scrollIntoView({{block: "center", inline: "center"}});
+            const r = el.getBoundingClientRect();
+            return {{x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height}};
+        }})()""")
+        if not box or not box["w"] or not box["h"]:
+            raise BrowseError(f"browse.py: nothing to hover at {selector!r} (missing, or not drawn)")
+        self._send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": box["x"], "y": box["y"]})
+        self.pump(0.05)
+
     def click_at(self, x, y):
         """A click at a point on the screen, whatever happens to be drawn there."""
         for kind in ("mousePressed", "mouseReleased"):

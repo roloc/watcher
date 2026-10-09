@@ -83,7 +83,7 @@ def classify_ended_in(raw):
 
 class Tick:
     __slots__ = ("issue", "ts", "mtime", "subtype", "cost", "turns", "duration_ms",
-                 "outcome", "ended_in", "needs_steve")
+                 "outcome", "ended_in", "needs_steve", "tokens")
 
     def __init__(self, issue, ts, mtime):
         self.issue = issue
@@ -96,6 +96,7 @@ class Tick:
         self.outcome = None
         self.ended_in = None
         self.needs_steve = None
+        self.tokens = None   # every token the tick moved: input, output, cache writes and reads
 
     @property
     def died(self):
@@ -143,6 +144,9 @@ def load_log(path):
     t.cost = d.get("total_cost_usd")
     t.turns = d.get("num_turns")
     t.duration_ms = d.get("duration_ms")
+    usage = d.get("usage")
+    if isinstance(usage, dict):
+        t.tokens = sum(v for v in usage.values() if isinstance(v, (int, float)))
     if t.subtype == "success":
         result = d.get("result") or ""
         m = OUTCOME_RE.search(result)

@@ -1243,6 +1243,110 @@ try:
 finally:
     floor.time.time = real_time
 
+print("26. the server room (October 9, 2026): the box, the lab's boxes, the tokens the lanes moved")
+bs = floor.box_stats()
+check("box_stats reads what it can and never raises; cpus is always there",
+      isinstance(bs, dict) and bs["cpus"] and set(bs) == {"cpus", "load1", "mem_total", "mem_used", "disk_total", "disk_used", "uptime"}, bs)
+check("every number it returns is a number (a Mac has no /proc, so some are None)",
+      all(v is None or isinstance(v, (int, float)) for v in bs.values()), bs)
+pve = floor.proxmox_summary([
+    {"type": "node", "node": "proxmox", "status": "online", "cpu": 0.0096, "maxcpu": 8, "mem": 1, "maxmem": 2,
+     "diskwrite": 999, "netin": 999},
+    {"type": "lxc", "name": "agents", "vmid": 107, "status": "running", "cpu": 0.0083, "maxcpu": 4, "mem": 3, "maxmem": 4},
+    {"type": "qemu", "name": "VM 100", "vmid": 100, "status": "running", "cpu": 0.0007, "maxcpu": 4, "mem": 5, "maxmem": 6},
+    {"type": "storage", "storage": "local-lvm", "disk": 1}, {"type": "sdn", "sdn": "localnetwork"}])
+check("proxmox_summary keeps nodes and guests, the node first then by vmid, and drops storage and sdn",
+      [(g["type"], g["name"]) for g in pve] == [("node", "proxmox"), ("qemu", "VM 100"), ("lxc", "agents")], pve)
+check("...and only the fields the page shows: no disk or network bytes",
+      all(set(g) == {"name", "vmid", "type", "status", "cpu", "maxcpu", "mem", "maxmem"} for g in pve), pve)
+check("fetch_proxmox is opt-in: with no PROXMOX_URL it is [] and never opens a socket",
+      floor.fetch_proxmox(url="", token="") == [])
+os.makedirs(os.path.join(STATE, "watcher", "logs"), exist_ok=True)
+with open(os.path.join(STATE, "watcher", "logs", "card-41-20260101T000000Z.json"), "w") as f:
+    json.dump({"subtype": "success", "total_cost_usd": 2.5, "num_turns": 30, "duration_ms": 1000,
+               "usage": {"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 1500, "service_tier": "x"},
+               "result": "- Card: #41 x\n- Outcome: merged\n- Ended in: Done\n"}, f)
+with open(os.path.join(STATE, "watcher", "logs", "card-42-20260101T000000Z.json"), "w") as f:
+    json.dump({"subtype": "success", "total_cost_usd": 0.5, "num_turns": 3, "duration_ms": 1000,
+               "usage": {"input_tokens": 100, "output_tokens": 100},
+               "result": "- Card: #42 x\n- Outcome: parked\n- Ended in: Stuck - Needs help\n"}, f)
+old_log = os.path.join(STATE, "watcher", "logs", "card-40-20200101T000000Z.json")
+with open(old_log, "w") as f:
+    json.dump({"subtype": "success", "total_cost_usd": 9, "num_turns": 9, "duration_ms": 1000,
+               "usage": {"input_tokens": 5000, "output_tokens": 5000},
+               "result": "- Card: #40 x\n- Outcome: merged\n- Ended in: Done\n"}, f)
+os.utime(old_log, (0, 946684800))  # written in 2000: outside every window
+boards26 = {("roloc", 2): [{"number": 41, "state": "CLOSED", "status": "Done", "title": "The thing shipped",
+                            "labels": [], "url": "https://github.com/roloc/watcher/issues/41"}]}
+state26 = floor.build_state(PROJECTS, STATE, lambda o, n: boards26.get((o, n), []), box_name="test-box",
+                            box_stats_fn=lambda: {"cpus": 2, "load1": 0.5, "mem_total": 10, "mem_used": 5,
+                                                  "disk_total": 20, "disk_used": 10, "uptime": 3600},
+                            proxmox_fn=lambda: pve)
+srv26 = state26["server"]
+check("the state carries the box's numbers as given, and the lab's boxes",
+      srv26["box"]["load1"] == 0.5 and srv26["proxmox"] == pve, srv26)
+tok = srv26["tokens"]
+check("tokens: every token the last day's ticks moved, per board and per hour — a tick from "
+      "2000 counts for nothing, and a non-number in usage is skipped",
+      tok["hours"] == 24 and tok["total"] == 3200 and tok["per_hour"] == 133
+      and tok["per_project"] == [{"name": "watcher", "tokens": 3200}], tok)
+wins26 = state26["wins"]
+check("wins: the card that ended in Done this week, with its title from the board — not the one "
+      "that parked, not the one from 2000",
+      wins26["days"] == 7 and [w["card"]["number"] for w in wins26["items"]] == [41]
+      and wins26["items"][0]["title"] == "The thing shipped" and wins26["items"][0]["project"] == "watcher", wins26)
+check("a proxmox read that fails leaves the room without the lab, with one journal line, never a crash",
+      floor.build_state(PROJECTS, STATE, lambda o, n: [], box_name="b",
+                        proxmox_fn=lambda: (_ for _ in ()).throw(RuntimeError("down")))["server"]["proxmox"] == [])
+check("no proxmox_fn, no box_stats_fn: the room is empty but present",
+      floor.build_state(PROJECTS, STATE, lambda o, n: [], box_name="b")["server"]["box"] == {})
+check("the new fields are all allowed ones", set(keys(state26)) <= floor.ALLOWED_FIELDS,
+      set(keys(state26)) - floor.ALLOWED_FIELDS)
+for n in (40, 41, 42):
+    for f in glob.glob(os.path.join(STATE, "watcher", "logs", f"card-{n}-*.json")):
+        os.remove(f)
+
+print("27. the bulletin board's Peek: /api/card.json, a card read off GitHub, cached a minute")
+calls27 = []
+def fake_card(number, repo):
+    calls27.append((number, repo))
+    return {"title": f"Card {number}", "body": "b", "state": "OPEN", "url": "u", "labels": [], "comments": [],
+            "created": "", "closed": ""} if number == 7 else None
+clock27 = [1000.0]
+look27 = floor.make_card_lookup(lambda: {"alpha": "roloc/alpha"}, fetcher=fake_card, cache_sec=60, clock=lambda: clock27[0])
+c = look27("alpha", 7)
+check("a card comes back with its project and number added", c["title"] == "Card 7" and c["project"] == "alpha" and c["number"] == 7, c)
+look27("alpha", 7)
+check("the second read within a minute is the cache, not gh", calls27 == [(7, "roloc/alpha")], calls27)
+clock27[0] += 61
+look27("alpha", 7)
+check("after a minute it reads again", len(calls27) == 2, calls27)
+check("an unknown project is None without a gh call", look27("nope", 7) is None and len(calls27) == 2)
+check("a card gh cannot read is None", look27("alpha", 9) is None)
+srv27 = ThreadingHTTPServer(("127.0.0.1", 0), floor.make_handler(FixedCache(), None, None, look27))
+port27 = srv27.server_address[1]
+threading.Thread(target=srv27.serve_forever, daemon=True).start()
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port27}/api/card.json?project=alpha&number=7", timeout=5) as r:
+        check("/api/card.json serves the card", json.loads(r.read())["title"] == "Card 7")
+    with urllib.request.urlopen(f"http://127.0.0.1:{port27}/api/card.json?project=alpha&number=9", timeout=5) as r:
+        check("a card it cannot read is a 200 that says so (a 404 would read as the page breaking)",
+              json.loads(r.read()) == {"unreadable": True})
+    with urllib.request.urlopen(f"http://127.0.0.1:{port27}/api/card.json?project=alpha&number=x", timeout=5) as r:
+        check("a number that is not one is the same answer, not a traceback", json.loads(r.read()) == {"unreadable": True})
+finally:
+    srv27.shutdown()
+    srv27.server_close()
+srv27b = ThreadingHTTPServer(("127.0.0.1", 0), floor.make_handler(FixedCache()))
+port27b = srv27b.server_address[1]
+threading.Thread(target=srv27b.serve_forever, daemon=True).start()
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port27b}/api/card.json?project=alpha&number=7", timeout=5) as r:
+        check("with no card lookup wired, the endpoint says unreadable rather than 404", json.loads(r.read()) == {"unreadable": True})
+finally:
+    srv27b.shutdown()
+    srv27b.server_close()
+
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(WD_ROOT, ignore_errors=True)
 shutil.rmtree(TS_ROOT, ignore_errors=True)

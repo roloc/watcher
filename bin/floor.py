@@ -107,7 +107,17 @@ ALLOWED_FIELDS = {
     # the account's GraphQL budget (card #98), read from board.py's own cache — never a
     # call of its own
     "github_remaining", "github_reset", "github_limit",
+    # the server room (October 9, 2026): the box itself, the tokens the lanes moved, and —
+    # when the floor is given a Proxmox token — the lab's other boxes
+    "server", "cpus", "load1", "mem_total", "mem_used", "disk_total", "disk_used", "uptime",
+    "tokens", "hours", "total", "per_hour", "per_project",
+    "proxmox", "vmid", "type", "status", "cpu", "maxcpu", "mem", "maxmem",
+    # the wins board: every card a lane took to Done this week, with its title from the board
+    "wins", "title", "days", "items",
 }
+
+WINS_DAYS = 7       # the wins board's window
+TOKENS_HOURS = 24   # the server room's tokens-per-hour window
 
 
 # --- reading projects/*.env, the way spawn.sh does --------------------------------------
@@ -871,9 +881,136 @@ def _fmt_quota(cost):
 
 # --- assembling the page's data -----------------------------------------------------------
 
+# --- the server room: this box, the lab's other boxes, and the tokens the lanes move ----
+
+def box_stats():
+    """What this box is doing right now, from the kernel's own files: load, memory, disk,
+    uptime. Any piece that cannot be read (a Mac has no /proc) is None — the server room
+    shows a dash for it, never a crash."""
+    out = {"cpus": os.cpu_count(), "load1": None, "mem_total": None, "mem_used": None,
+           "disk_total": None, "disk_used": None, "uptime": None}
+    try:
+        out["load1"] = round(os.getloadavg()[0], 2)
+    except (OSError, AttributeError):
+        pass
+    try:
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, _, v = line.partition(":")
+                info[k.strip()] = int(v.split()[0]) * 1024
+        out["mem_total"] = info.get("MemTotal")
+        if "MemTotal" in info and "MemAvailable" in info:
+            out["mem_used"] = info["MemTotal"] - info["MemAvailable"]
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        st = os.statvfs("/")
+        out["disk_total"] = st.f_frsize * st.f_blocks
+        out["disk_used"] = st.f_frsize * (st.f_blocks - st.f_bavail)
+    except OSError:
+        pass
+    try:
+        with open("/proc/uptime") as f:
+            out["uptime"] = int(float(f.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        pass
+    return out
+
+
+def proxmox_summary(data):
+    """Proxmox's `/cluster/resources` rows, cut down to what the server room shows: every
+    node and guest, with its CPU share and memory. Nothing else of the API's row (disk
+    I/O, network bytes, template flags) reaches the page."""
+    out = []
+    for d in data or []:
+        if d.get("type") not in ("node", "lxc", "qemu"):
+            continue
+        out.append({"name": d.get("name") or d.get("node") or "", "vmid": d.get("vmid"),
+                    "type": d["type"], "status": d.get("status") or "",
+                    "cpu": round(float(d.get("cpu") or 0), 4), "maxcpu": d.get("maxcpu"),
+                    "mem": d.get("mem"), "maxmem": d.get("maxmem")})
+    out.sort(key=lambda g: (0 if g["type"] == "node" else 1, g["vmid"] or 0))
+    return out
+
+
+def fetch_proxmox(url=None, token=None, verify=None, timeout=10):
+    """The lab's other boxes, from Proxmox's own API. Opt-in: `PROXMOX_URL`
+    (https://host:8006) and `PROXMOX_TOKEN` (user@realm!tokenid=secret) in the service's
+    environment — the box's /etc/watcher/env, never git; `PROXMOX_VERIFY=0` accepts the
+    lab's self-signed certificate. [] when unconfigured. Raises when configured and
+    unreachable; `build_state` logs that and shows the room without the other boxes."""
+    url = url if url is not None else os.environ.get("PROXMOX_URL", "")
+    token = token if token is not None else os.environ.get("PROXMOX_TOKEN", "")
+    if not url or not token:
+        return []
+    import ssl
+    import urllib.request
+    if verify is None:
+        verify = os.environ.get("PROXMOX_VERIFY", "1") != "0"
+    ctx = None
+    if not verify:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(url.rstrip("/") + "/api2/json/cluster/resources",
+                                 headers={"Authorization": "PVEAPIToken=" + token})
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        data = json.loads(r.read()).get("data") or []
+    return proxmox_summary(data)
+
+
+def fetch_card(number, project_repo, timeout=20):
+    """The card itself, for the bulletin board's Peek (October 9, 2026): title, body,
+    state, labels and its last three comments, from `gh issue view`. None when gh
+    cannot — the popup then says the card could not be read, never a crash."""
+    try:
+        r = subprocess.run(["gh", "issue", "view", str(number), "--repo", project_repo, "--json",
+                            "title,body,state,url,labels,comments,createdAt,closedAt"],
+                           capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        d = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
+    comments = [{"author": (c.get("author") or {}).get("login") or "", "when": c.get("createdAt") or "",
+                 "body": (c.get("body") or "")[:4000]} for c in (d.get("comments") or [])[-3:]]
+    return {"title": d.get("title") or "", "body": (d.get("body") or "")[:12000],
+            "state": d.get("state") or "", "url": d.get("url") or "",
+            "labels": [l.get("name") or "" for l in d.get("labels") or []],
+            "comments": comments, "created": d.get("createdAt") or "", "closed": d.get("closedAt") or ""}
+
+
+def make_card_lookup(repos_fn, fetcher=fetch_card, cache_sec=60, clock=time.time):
+    """`(project name, card number) -> dict | None` for `/api/card.json`, cached a minute
+    per card so a Peek opened twice costs one `gh` call. `repos_fn` maps a project's name
+    to its repo (the state's own `name`, the way the page knows a card)."""
+    cache = {}
+
+    def lookup(project, number):
+        repo = (repos_fn() or {}).get(project)
+        if not repo or not number:
+            return None
+        key = (repo, number)
+        hit = cache.get(key)
+        if hit and clock() - hit[0] < cache_sec:
+            return hit[1]
+        card = fetcher(number, repo)
+        if card is None:
+            return None
+        card = dict(card, project=project, number=number)
+        cache[key] = (clock(), card)
+        return card
+    return lookup
+
+
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
                  images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
-                 deploy_fn=None, deploy_repo=None, ratelimit_fn=None):
+                 deploy_fn=None, deploy_repo=None, ratelimit_fn=None, box_stats_fn=None,
+                 proxmox_fn=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -882,6 +1019,10 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
     out_projects = []
     needs_steve_total = 0
     recent = []
+    wins = {}            # (project, card) -> the newest tick that took it to Done this week
+    tokens_by_project = {}
+    token_since = now.timestamp() - TOKENS_HOURS * 3600
+    wins_since = now.timestamp() - WINS_DAYS * 86400
 
     for p in projects:
         try:
@@ -913,6 +1054,18 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                     "card": {"number": t.issue, "url": url},
                     "when": t.mtime.isoformat(), "quota": _fmt_quota(t.cost),
                 })
+            for t in ticks:
+                ended = t.mtime.timestamp()
+                if t.tokens and ended >= token_since:
+                    tokens_by_project[p["name"]] = tokens_by_project.get(p["name"], 0) + int(t.tokens)
+                if t.ended_in == "Done" and ended >= wins_since:
+                    key = (p["name"], t.issue)
+                    if key not in wins or wins[key]["when"] < t.mtime.isoformat():
+                        it = items_by_number.get(t.issue) or {}
+                        wins[key] = {"project": p["name"], "lane": lane["lane"],
+                                     "card": {"number": t.issue,
+                                              "url": it.get("url") or f"https://github.com/{lane['project_repo']}/issues/{t.issue}"},
+                                     "title": it.get("title") or "", "when": t.mtime.isoformat()}
 
         # Every card Stuck on this board, whichever lane last touched it — a lane's own
         # desk only shows the one card that lane itself last worked (`lane_desk`, above),
@@ -969,6 +1122,21 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
         except Exception as e:
             print(f"floor: ratelimit unreadable: {e}", file=sys.stderr, flush=True)
 
+    # The server room. The box itself always; the lab's other boxes only when the floor
+    # was given a Proxmox token, and a failed read leaves them out with one journal line.
+    proxmox = []
+    if proxmox_fn:
+        try:
+            proxmox = proxmox_fn() or []
+        except Exception as e:
+            print(f"floor: proxmox unreachable: {e}", file=sys.stderr, flush=True)
+    total_tokens = sum(tokens_by_project.values())
+    server = {"box": (box_stats_fn or (lambda: {}))(),
+              "tokens": {"hours": TOKENS_HOURS, "total": total_tokens,
+                         "per_hour": round(total_tokens / TOKENS_HOURS),
+                         "per_project": [{"name": n, "tokens": v} for n, v in sorted(tokens_by_project.items())]},
+              "proxmox": proxmox}
+
     return {
         "header": {"box": box_name, "time": now.isoformat(),
                    "needs_steve_total": needs_steve_total,
@@ -977,6 +1145,8 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                    "github_limit": rl.get("limit")},
         "projects": out_projects,
         "recent": recent[:RECENT_TOTAL],
+        "wins": {"days": WINS_DAYS, "items": sorted(wins.values(), key=lambda w: w["when"], reverse=True)},
+        "server": server,
     }
 
 
@@ -1249,7 +1419,7 @@ INDEX_HTML = """<!doctype html>
   #peek-panel .peek-head strong { font-size: 14px; }
   #peek-sub { font-size: 13px; color: var(--dim); }
   #peek-sub.live { color: var(--working); font-weight: 600; }
-  #peek-close {
+  #peek-close, .peek-close-btn {
     background: none; border: none; color: var(--dim); font-size: 20px; line-height: 1;
     cursor: pointer; padding: 0 4px;
   }
@@ -1258,9 +1428,11 @@ INDEX_HTML = """<!doctype html>
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
-  /* ---- The studio: an office the lanes walk around in (card #88; an office with rooms
-     since October 9, 2026). The floor page above is untouched; this is a second view of
-     the same data, toggled by one button. ---- */
+  /* ---- The studio: an office the lanes walk around in (card #88; rooms since October 9,
+     2026, a floor plan with hallways, a server room and the boards in Steve's office the
+     same day). The floor page above is untouched; this is a second view of the same data,
+     toggled by one button. It is drawn for a desk's browser: at least 960px wide, and a
+     phone pans it. ---- */
   .view-toggle {
     font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px;
     border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
@@ -1269,58 +1441,90 @@ INDEX_HTML = """<!doctype html>
   #studio { display: none; }
   #studio.open { display: block; }
   #studio-head { display: flex; justify-content: center; margin-bottom: 10px; }
+  :root {
+    --wall: color-mix(in srgb, var(--dim) 55%, var(--panel));
+    --wood-a: #8a5a2b; --wood-b: #7a4e24; --rug: #5b3a6e;
+    --tile-a: color-mix(in srgb, var(--dim) 10%, var(--panel)); --tile-line: color-mix(in srgb, var(--dim) 28%, transparent);
+    --sky: #9ecbff; --sky-dark: #5d8fc4;
+  }
   #room {
-    position: relative; width: 100%; max-width: 960px; margin: 0 auto;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
-    /* Carpet. The height is the script's: as tall as its rooms need, never a fixed shape. */
-    background-image: radial-gradient(color-mix(in srgb, var(--dim) 16%, transparent) 1px, transparent 1px);
-    background-size: 14px 14px;
+    position: relative; width: 100%; min-width: 960px; margin: 0 auto; box-sizing: border-box;
+    background: var(--tile-a); border: 1px solid var(--line); border-radius: 14px;
+    /* The hallways' tiles: everything not a room is floor you can walk. The height is the
+       script's, as tall as its rooms need. */
+    background-image: linear-gradient(var(--tile-line) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--tile-line) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
-  /* Rooms. Every board has one (a desk per lane, its counts on the whiteboard), and the
-     building has two of its own: the break room, where an idle lane wanders and a lane
-     asleep after a failure naps on the couch, and Steve's office, where a lane goes to wave
-     when it needs him. Each has a door onto the hallway, and the hallway has the bulletin
-     board. The first studio was rows, one per board, and read as the floor page drawn
-     smaller (October 9, 2026: "this should look like an office with workers wandering
-     around"). */
+  /* Rooms: walls with a little depth, and a floor each — carpet for a team, planks in the
+     break room, a rug in Steve's office, raised tiles in the server room. */
   .office-room {
-    position: absolute; box-sizing: border-box; border: 2px solid var(--line);
-    border-radius: 6px; background: var(--panel);
+    position: absolute; box-sizing: border-box; border: 3px solid var(--wall); border-radius: 4px;
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ink) 8%, transparent), 0 2px 6px rgba(0, 0, 0, .25);
   }
-  .office-room.team { background: color-mix(in srgb, var(--working) 5%, var(--panel)); }
-  .office-room.break { background: color-mix(in srgb, var(--paused) 8%, var(--panel)); }
-  .office-room.boss { background: color-mix(in srgb, var(--needs) 5%, var(--panel)); }
+  .office-room.team {
+    background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--working) 9%, var(--panel)) 0 6px,
+                                          color-mix(in srgb, var(--working) 13%, var(--panel)) 6px 12px);
+  }
+  .office-room.break {
+    background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--wood-a) 55%, var(--panel)) 0 26px,
+                                          color-mix(in srgb, var(--wood-b) 70%, var(--panel)) 26px 28px);
+  }
+  .office-room.boss {
+    background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--wood-b) 70%, var(--panel)) 0 26px,
+                                          color-mix(in srgb, #4e2f14 80%, var(--panel)) 26px 28px);
+  }
+  .office-room.boss .rug {
+    position: absolute; left: 10%; right: 10%; top: 60px; bottom: 10px; border-radius: 6px;
+    background: color-mix(in srgb, var(--rug) 55%, var(--panel)); border: 3px double color-mix(in srgb, #d4b06a 70%, transparent);
+    pointer-events: none;
+  }
+  .office-room.server {
+    background: color-mix(in srgb, #1b3a5c 70%, var(--panel));
+    background-image: linear-gradient(rgba(255, 255, 255, .06) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255, 255, 255, .06) 1px, transparent 1px);
+    background-size: 16px 16px; cursor: help;
+  }
+  .office-room.server:hover { box-shadow: inset 0 0 0 2px color-mix(in srgb, #58a6ff 60%, transparent), 0 2px 10px rgba(88, 166, 255, .4); }
   .room-name {
-    position: absolute; top: 3px; left: 8px; font-size: 11px; font-weight: 700;
-    color: var(--ink); text-decoration: none; white-space: nowrap;
+    position: absolute; top: 3px; left: 8px; font-size: 11px; font-weight: 700; z-index: 2;
+    color: var(--ink); text-decoration: none; white-space: nowrap; padding: 1px 6px; border-radius: 3px;
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
   }
   a.room-name:hover { text-decoration: underline; }
   .room-door {
-    /* A gap in the wall on the hallway side: a mat the color of the hall. */
-    position: absolute; width: 24px; height: 8px; border-radius: 2px;
-    background: color-mix(in srgb, var(--dim) 40%, var(--panel));
+    /* A gap in the wall onto the hallway, with its mat. */
+    position: absolute; width: 28px; height: 9px; border-radius: 2px; z-index: 2;
+    background: color-mix(in srgb, var(--wood-a) 60%, var(--panel)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25);
   }
   .prop { position: absolute; pointer-events: none; }
   .prop svg { display: block; }
+  .prop.clickable { pointer-events: auto; cursor: pointer; }
+  .prop.clickable:hover svg { filter: brightness(1.15); }
   @keyframes steam { 0% { opacity: 0; transform: translateY(0); } 50% { opacity: .8; }
                      100% { opacity: 0; transform: translateY(-5px); } }
   .prop .steam { animation: steam 2s infinite; }
+  @keyframes led { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  .prop .led { animation: led 1.4s infinite; }
+  .prop .led.l2 { animation-duration: 2.1s; animation-delay: .4s; }
+  .prop .led.l3 { animation-duration: .9s; animation-delay: .2s; }
+  .prop .led.l4 { animation-duration: 1.7s; animation-delay: .9s; }
   .whiteboard {
-    position: absolute; top: 4px; right: 6px; font-size: 9px; color: var(--dim); font-weight: 600;
+    position: absolute; top: 4px; right: 6px; font-size: 9px; color: var(--dim); font-weight: 600; z-index: 2;
     background: var(--panel); border: 1.5px solid var(--line); border-radius: 2px; padding: 2px 5px;
     white-space: nowrap; max-width: calc(100% - 90px); overflow: hidden; text-overflow: ellipsis;
   }
   .couch {
-    position: absolute; height: 22px; border-radius: 8px 8px 4px 4px;
-    background: color-mix(in srgb, var(--sleep) 30%, var(--panel)); border: 1.5px solid var(--line);
+    position: absolute; height: 24px; border-radius: 8px 8px 4px 4px;
+    background: color-mix(in srgb, var(--sleep) 40%, var(--panel)); border: 2px solid color-mix(in srgb, var(--sleep) 60%, var(--line));
   }
   .couch::before {
     content: ""; position: absolute; left: 8%; right: 8%; top: 6px; height: 0;
-    border-top: 1.5px dashed color-mix(in srgb, var(--line) 70%, transparent);
+    border-top: 1.5px dashed color-mix(in srgb, var(--panel) 60%, transparent);
   }
   .hall-label {
     position: absolute; font-size: 9px; color: var(--dim); font-weight: 700;
-    text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+    text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; opacity: .8;
   }
   #beacon {
     /* The light over Steve's door, inside #room's own box (which clips: `overflow:
@@ -1331,83 +1535,38 @@ INDEX_HTML = """<!doctype html>
   .beacon-green { background: var(--working); box-shadow: 0 0 6px var(--working); }
   .beacon-amber { background: var(--paused); box-shadow: 0 0 6px var(--paused); }
   .beacon-red { background: var(--needs); box-shadow: 0 0 8px var(--needs); animation: blink 1.2s infinite; }
-  .desk-furniture {
-    position: absolute; width: 44px; height: 18px; transform: translate(-50%, -155%);
-    border: 1px solid var(--line); border-radius: 3px;
-    background: color-mix(in srgb, var(--dim) 10%, transparent);
-  }
-  .dispatch-counter {
-    position: absolute; width: 44px; height: 14px; transform: translate(-50%, -200%);
-    border: 1px solid var(--line); border-radius: 3px;
-    background: color-mix(in srgb, var(--dim) 14%, transparent);
-  }
-  .desk-monitor {
-    position: absolute; width: 16px; height: 11px; transform: translate(50%, -345%);
-    border-radius: 2px; background: var(--line); overflow: hidden;
-  }
-  .desk-monitor .scanline {
-    position: absolute; left: 2px; right: 2px; top: 1px; height: 1.5px;
-    background: var(--working); opacity: 0;
-  }
-  @keyframes scan { 0% { top: 1px; } 100% { top: 8px; } }
-  /* An idle screen is dark (card: "an idle screen is dark") — the line only exists, and
-     only moves, while the desk is lit. */
-  .desk-monitor.lit .scanline { opacity: .6; animation: scan 1.1s linear infinite; }
+  /* Desks: a top, a monitor whose screen scans while the desk is lit, a keyboard, a mug,
+     and the chair in front, where its lane stands. */
+  .desk-set { position: absolute; transform: translate(-50%, -100%); pointer-events: none; }
+  .desk-set svg { display: block; }
+  @keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(7px); } }
+  .desk-set .scanline { opacity: 0; }
+  .desk-set.lit .scanline { opacity: .7; animation: scan 1.1s linear infinite; }
   /* An empty desk still says whose it is, so a room with everyone out still reads. */
   .desk-tag {
     position: absolute; transform: translate(-50%, 2px); font-size: 9px; font-weight: 600;
-    color: var(--dim); opacity: .75; white-space: nowrap; line-height: 1.2;
+    color: var(--dim); opacity: .8; white-space: nowrap; line-height: 1.2;
+    background: color-mix(in srgb, var(--panel) 70%, transparent); padding: 0 3px; border-radius: 2px;
   }
-  /* The bulletin board in the hallway: cork, a pin in every card, every card whole. It
-     scrolls sideways on a narrow screen rather than clipping a card in half. */
-  .pin-wall {
-    position: absolute; box-sizing: border-box; display: flex; gap: 8px; align-items: center;
-    overflow-x: auto; overflow-y: hidden; padding: 4px 8px; scrollbar-width: none;
-    background: color-mix(in srgb, var(--paused) 14%, var(--panel)); border-radius: 4px;
-    border: 2px solid color-mix(in srgb, var(--paused) 35%, var(--line));
-  }
-  .pin-wall::-webkit-scrollbar { display: none; }
-  /* More cards than fit: the strip scrolls sideways, and its right edge fades to say so,
-     instead of showing a card cut in half. */
-  .pin-wall.scrolls { mask-image: linear-gradient(to right, #000 88%, transparent); -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); }
-  .pin-card {
-    position: relative; flex: 0 0 auto; font-size: 10px; line-height: 1.3; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 2px; padding: 4px 6px; text-decoration: none;
-    color: inherit; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); display: block; white-space: nowrap;
-    transform: rotate(-1.2deg);
-  }
-  .pin-card:nth-child(even) { transform: rotate(1.4deg); }
-  .pin-card::before {
-    content: ""; position: absolute; top: -3px; left: 50%; width: 6px; height: 6px;
-    border-radius: 50%; background: var(--needs); transform: translateX(-50%);
-    box-shadow: 0 1px 1px rgba(0, 0, 0, .3);
-  }
-  .pin-card:nth-child(3n)::before { background: #58a6ff; }
-  .pin-card:nth-child(3n+1)::before { background: var(--working); }
-  .pin-card b { font-weight: 600; }
   #room-rooms, #room-desks, #room-characters, #room-stuck { position: absolute; inset: 0; pointer-events: none; }
-  #room-rooms .room-name { pointer-events: auto; }
+  #room-rooms .room-name, #room-rooms .office-room.server { pointer-events: auto; }
   .character {
-    /* As wide as its own plate (not a fixed 30px that the plate overflowed to the right),
-       so translate(-50%) centers the figure and the words together over the spot. Never
-       wider than a standing spot, so two neighbours never touch. */
+    /* As wide as its own plate, so translate(-50%) centers the figure and the words together
+       over the spot; never wider than a standing spot, so two neighbours never touch. The
+       walk is a Web Animation the script drives along the hallways, not a CSS transition. */
     position: absolute; width: max-content; max-width: 70px; transform: translate(-50%, -100%);
-    transition: left 1s ease, top 1s ease; cursor: pointer; text-align: center;
-    pointer-events: auto;
+    cursor: pointer; text-align: center; pointer-events: auto;
   }
   @keyframes character-wave { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
   .character-wave { animation: character-wave .6s ease-in-out infinite; }
-  /* Walking: a bob for as long as the position transition runs. */
-  @keyframes walk-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes walk-bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-2px) rotate(2deg); } }
   .character.walking svg { animation: walk-bob .32s ease-in-out infinite; }
+  .character.walking .plate { opacity: .6; }
   @media (prefers-reduced-motion: reduce) {
-    .character { transition: none; }
-    .character-wave, .character.walking svg, .prop .steam { animation: none; }
+    .character-wave, .character.walking svg, .prop .steam, .prop .led { animation: none; }
   }
   .character svg { width: 30px; height: 34px; display: block; margin: 0 auto; }
   .character.ship svg { width: 40px; }
-  /* Held up over a waving character's head — the same mockup the floor's own desk shows
-     (card #91), shrunk to fit the room. */
   .character-mockup { margin-bottom: 2px; }
   .character-mockup .mockup-thumb {
     display: block; margin: 0 auto; max-width: 46px; max-height: 34px; border-radius: 3px;
@@ -1415,6 +1574,7 @@ INDEX_HTML = """<!doctype html>
   .character .plate {
     font-size: 9px; color: var(--ink); font-weight: 600; white-space: nowrap; margin-top: 2px;
     line-height: 1.2; overflow: hidden; text-overflow: ellipsis;
+    background: color-mix(in srgb, var(--panel) 75%, transparent); border-radius: 2px; padding: 0 2px;
   }
   .character .plate .where { color: var(--dim); font-weight: 500; }
   .bubble {
@@ -1427,6 +1587,58 @@ INDEX_HTML = """<!doctype html>
     content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%);
     border: 5px solid transparent; border-top-color: var(--panel);
   }
+  /* The server room's readout, shown while the pointer is over the room (or after a tap). */
+  #server-tip {
+    position: absolute; z-index: 6; display: none; width: 340px; box-sizing: border-box;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, .3); pointer-events: none;
+  }
+  #server-tip.open { display: block; }
+  #server-tip h4 { margin: 0 0 4px; font-size: 12px; color: var(--ink); }
+  #server-tip h4 + h4, #server-tip .tip-row + h4 { margin-top: 10px; }
+  .tip-row { display: flex; align-items: center; gap: 6px; color: var(--dim); line-height: 1.5; }
+  .tip-row .k { flex: 0 0 96px; color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tip-row .v { white-space: nowrap; }
+  .tip-row.stopped { opacity: .5; }
+  .meter { flex: 0 0 60px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--dim) 20%, transparent); overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--working); }
+  .meter.hot i { background: var(--needs); }
+  .meter.warm i { background: var(--paused); }
+  /* The boards' popups: the bulletin board (every card being worked and recently worked,
+     Peek on any for the card itself) and the wins board. The same panel as Peek, so a
+     reader already knows how it closes. */
+  #office-modal {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: none; z-index: 20;
+    align-items: center; justify-content: center; padding: 16px;
+  }
+  #office-modal.open { display: flex; }
+  #office-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    width: min(760px, 100%); max-height: 84vh; display: flex; flex-direction: column;
+  }
+  #office-panel .peek-head { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #office-panel .peek-head strong { font-size: 14px; }
+  #office-body { overflow-y: auto; padding: 12px 14px; font-size: 13px; }
+  #office-body h3 { margin: 10px 0 6px; font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  #office-body h3:first-child { margin-top: 0; }
+  .board-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .board-row:last-child { border-bottom: none; }
+  .board-row .num { font-weight: 700; min-width: 48px; }
+  .board-row .num a { color: inherit; text-decoration: none; }
+  .board-row .num a:hover { text-decoration: underline; }
+  .board-row .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board-row .meta { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  .board-row .pill { margin-left: 0; }
+  .empty-note { color: var(--dim); font-style: italic; }
+  .card-view .labels { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .card-view .label { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--dim); }
+  .card-body {
+    white-space: pre-wrap; word-break: break-word; margin: 0; font: 13px/1.5 inherit;
+    font-family: inherit; background: color-mix(in srgb, var(--dim) 6%, transparent); padding: 10px 12px; border-radius: 6px;
+  }
+  .card-comment { margin-top: 10px; border-left: 3px solid var(--line); padding-left: 10px; }
+  .card-comment .who { font-size: 12px; color: var(--dim); margin-bottom: 2px; }
+  .win-count { font-weight: 700; color: var(--working); }
 </style>
 </head>
 <body>
@@ -1461,11 +1673,21 @@ window.addEventListener("unhandledrejection", function () {
   <div id="studio-head"><button class="view-toggle" id="floor-btn" type="button">Floor</button></div>
   <div id="room">
     <div id="room-rooms"></div>
-    <div class="pin-wall" id="pin-wall"></div>
     <div id="beacon" class="beacon-green"></div>
     <div id="room-desks"></div>
     <div id="room-stuck"></div>
     <div id="room-characters"></div>
+    <div id="server-tip"></div>
+  </div>
+</div>
+<div id="office-modal">
+  <div id="office-panel">
+    <div class="peek-head">
+      <div><strong id="office-title"></strong> <span id="office-sub" class="muted"></span></div>
+      <div><button id="office-back" class="view-toggle" type="button">&larr; Back</button>
+        <button id="office-close" class="peek-close-btn" aria-label="Close">&times;</button></div>
+    </div>
+    <div id="office-body"></div>
   </div>
 </div>
 <div id="peek-overlay">
@@ -1923,19 +2145,21 @@ document.addEventListener("click", (e) => {
 });
 
 // ---- The studio: an office the lanes walk around in (card #88) -----------------------
-// A second view of the same data `render()` already has: no new endpoint, no new field.
-// Toggled by one button; `render()` above is untouched, `refresh()` just hands it the
-// same state it was already given.
+// A second view of the same data `render()` already has. Toggled by one button; `render()`
+// above is untouched, `refresh()` just hands it the same state it was already given.
 //
-// Rooms, not rows. Every board has a room of its own: a desk per lane, a counter for its
-// triage lane, a shelf for its ship station, and its counts on the whiteboard. A lane that
-// is working or paused is at its desk. An idle lane leaves for the break room and mills
-// about there — every so often one gets up and walks to another spot. A lane asleep after
-// a failure naps on the break room couch. A lane that needs Steve walks to his office and
-// waves in front of his desk, mockup held up, and the light over his door turns red. The
-// hallway between has the bulletin board: the last cards worked. (The first studio was
-// rows, one per board, and read as the floor page drawn smaller — October 9, 2026: "this
-// should look like an office with workers wandering around".)
+// A floor plan (October 9, 2026: "make this look like a real office"). Top row: the break
+// room and Steve's office, a hallway between them. Across the middle, the main hallway.
+// Bottom row: a room per board, hallways between them, and the server room at the end.
+// A lane that is working or paused is at its desk, and an empty desk is tagged with
+// whose it is. An idle lane walks out of its room, down the hallway and into the break
+// room, where it mills about — every so often one gets up and walks to another spot. A
+// lane asleep after a failure naps on the couch there. A lane that needs Steve walks to
+// his office and waves in front of his desk with its picture held up; the light over his
+// door turns red. His in-tray holds every Stuck card. On his wall, two boards to click:
+// the bulletin board (every card being worked and recently worked, with a Peek into the
+// card itself) and the wins board (what shipped this week). Hover the server room for the
+// box's load, the tokens the lanes moved, and the lab's other boxes.
 
 function showStudio() {
   document.getElementById("floor-view").style.display = "none";
@@ -1943,10 +2167,10 @@ function showStudio() {
   document.getElementById("studio-btn").style.display = "none";
   // Drawn hidden, the room had no width to lay itself out by; draw it again now it has one.
   if (lastState) renderStudio(lastState);
-  markWallScroll();
 }
 function showFloor() {
   closeBubble();
+  closeServerTip();
   document.getElementById("studio").classList.remove("open");
   document.getElementById("floor-view").style.display = "";
   document.getElementById("studio-btn").style.display = "";
@@ -1984,7 +2208,7 @@ function characterSVG(pill, look) {
     : `<rect x="3" y="15" width="3" height="7" rx="1" style="fill:${c}"/>`;
   // Paused: both hands up, still. Needs Steve: it is waving — one arm animated (wrapped in
   // its own <g>, so the CSS animation's `transform` adds to the SVG attribute's rotation
-  // instead of replacing it), the card's "walks to the podium and waves".
+  // instead of replacing it).
   const armRRaised = `<rect x="21" y="7" width="3" height="8" rx="1" style="fill:${c}" transform="rotate(35 22.5 15)"/>`;
   const armR = !armsUp ? `<rect x="20" y="15" width="3" height="7" rx="1" style="fill:${c}"/>`
     : pill === "needs_steve"
@@ -2023,45 +2247,111 @@ const PROPS = {
     <rect x="2" y="13" width="12" height="18" rx="2" fill="var(--dim)"/><rect x="5" y="19" width="2" height="4" fill="#58a6ff"/></svg>`,
   plant: `<svg width="20" height="30" viewBox="0 0 20 30"><path d="M10 18 c-6 -2 -8 -8 -6 -12 c4 2 6 6 6 12 c0 -6 2 -10 6 -12 c2 4 0 10 -6 12z" fill="#3fb950"/>
     <rect x="5" y="18" width="10" height="10" rx="2" fill="#b5651d"/></svg>`,
-  window: `<svg width="34" height="24" viewBox="0 0 34 24"><rect x="1" y="1" width="32" height="22" rx="2" fill="#9ecbff" opacity=".55" stroke="var(--line)" stroke-width="2"/>
-    <path d="M17 1 v22 M1 12 h32" stroke="var(--line)" stroke-width="2"/><circle cx="26" cy="7" r="3" fill="#ffd33d" opacity=".9"/></svg>`,
+  tallplant: `<svg width="26" height="44" viewBox="0 0 26 44">
+    <path d="M13 30 c-9 -3 -12 -12 -9 -20 c6 3 9 10 9 20z" fill="#2ea043"/>
+    <path d="M13 30 c9 -3 12 -12 9 -20 c-6 3 -9 10 -9 20z" fill="#3fb950"/>
+    <path d="M13 30 c-2 -10 -1 -18 0 -24 c1 6 2 14 0 24z" fill="#56d364"/>
+    <rect x="6" y="30" width="14" height="12" rx="2" fill="#a86f3a"/><rect x="5" y="29" width="16" height="3" rx="1" fill="#b5651d"/></svg>`,
+  window: `<svg width="48" height="32" viewBox="0 0 48 32"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="var(--sky)"/><stop offset="1" stop-color="var(--sky-dark)"/></linearGradient></defs>
+    <rect x="1" y="1" width="46" height="30" rx="2" fill="url(#sky)" stroke="#f3f4f6" stroke-width="2"/>
+    <path d="M24 1 v30 M1 16 h46" stroke="#f3f4f6" stroke-width="2"/>
+    <circle cx="36" cy="9" r="4" fill="#ffd33d"/><ellipse cx="12" cy="12" rx="6" ry="2.5" fill="#fff" opacity=".8"/></svg>`,
   picture: `<svg width="18" height="14" viewBox="0 0 18 14"><rect x="1" y="1" width="16" height="12" fill="#f0c8a0" stroke="#8a5a2b" stroke-width="2"/>
     <path d="M3 11 l4 -5 l3 3 l2 -2 l3 4z" fill="#3fb950"/></svg>`,
+  table: `<svg width="44" height="34" viewBox="0 0 44 34"><ellipse cx="22" cy="14" rx="20" ry="9" fill="#a86f3a" stroke="#7a4e24" stroke-width="2"/>
+    <rect x="12" y="10" width="20" height="9" rx="1" fill="#e8c27a" stroke="#b5651d" stroke-width="1"/>
+    <circle cx="18" cy="14" r="1.6" fill="#ff7b72"/><circle cx="24" cy="13" r="1.6" fill="#ff7b72"/><circle cx="27" cy="16" r="1.4" fill="#ff7b72"/>
+    <rect x="6" y="24" width="10" height="7" rx="2" fill="var(--dim)"/><rect x="28" y="24" width="10" height="7" rx="2" fill="var(--dim)"/></svg>`,
   // Steve's desk: the chair behind it, a monitor, a mug, and the nameplate.
-  bossdesk: `<svg width="100" height="34" viewBox="0 0 100 34"><rect x="36" y="0" width="28" height="12" rx="4" fill="var(--dim)"/>
-    <rect x="0" y="12" width="100" height="18" rx="3" fill="#8a5a2b"/><rect x="0" y="12" width="100" height="4" rx="2" fill="#a86f3a"/>
-    <rect x="8" y="17" width="13" height="9" rx="1" fill="var(--line)"/><rect x="26" y="21" width="6" height="5" rx="1" fill="#f3f4f6"/>
-    <rect x="68" y="18" width="26" height="9" rx="1" fill="#f3f4f6"/>
-    <text x="81" y="25" text-anchor="middle" font-size="6.5" font-weight="700" fill="#1b1f24" font-family="sans-serif">STEVE</text></svg>`,
+  bossdesk: `<svg width="120" height="40" viewBox="0 0 120 40"><rect x="44" y="0" width="32" height="14" rx="5" fill="var(--dim)"/>
+    <rect x="0" y="12" width="120" height="24" rx="3" fill="#8a5a2b"/><rect x="0" y="12" width="120" height="5" rx="2" fill="#a86f3a"/>
+    <rect x="10" y="18" width="16" height="11" rx="1" fill="var(--line)"/><rect x="12" y="20" width="12" height="7" fill="#58a6ff" opacity=".55"/>
+    <rect x="34" y="24" width="7" height="6" rx="1" fill="#f3f4f6"/>
+    <rect x="80" y="21" width="32" height="10" rx="1" fill="#f3f4f6"/>
+    <text x="96" y="28.5" text-anchor="middle" font-size="7" font-weight="700" fill="#1b1f24" font-family="sans-serif">STEVE</text></svg>`,
+  // The server room: a rack of blinking machines.
+  rack: `<svg width="34" height="84" viewBox="0 0 34 84"><rect x="1" y="1" width="32" height="82" rx="2" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+    ${[0, 1, 2, 3, 4, 5].map(i => `<rect x="4" y="${5 + i * 13}" width="26" height="10" rx="1" fill="#21262d"/>
+      <circle class="led l${(i % 4) + 1}" cx="8" cy="${10 + i * 13}" r="1.6" fill="#3fb950"/>
+      <circle class="led l${((i + 2) % 4) + 1}" cx="13" cy="${10 + i * 13}" r="1.6" fill="#58a6ff"/>
+      <rect x="18" y="${8 + i * 13}" width="10" height="4" rx="1" fill="#30363d"/>`).join("")}</svg>`,
+  aircon: `<svg width="30" height="40" viewBox="0 0 30 40"><rect x="1" y="1" width="28" height="38" rx="3" fill="#c9d1d9" stroke="#8b949e" stroke-width="2"/>
+    <path d="M6 10 h18 M6 15 h18 M6 20 h18" stroke="#8b949e" stroke-width="2"/><circle class="led l2" cx="22" cy="31" r="2" fill="#58a6ff"/></svg>`,
 };
-function prop(name, x, y) {
-  return `<div class="prop" style="left:${x}px;top:${y}px">${PROPS[name]}</div>`;
+function prop(name, x, y, extra) {
+  return `<div class="prop${extra ? " " + extra : ""}" style="left:${x}px;top:${y}px">${PROPS[name]}</div>`;
+}
+// A wall clock set to the floor's own time.
+function clockSVG(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  const h = (d.getHours() % 12) * 30 + d.getMinutes() / 2, m = d.getMinutes() * 6;
+  return `<svg width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="12" fill="#f3f4f6" stroke="var(--dim)" stroke-width="2"/>
+    <path d="M13 13 v-6" stroke="#1b1f24" stroke-width="2" transform="rotate(${h} 13 13)"/>
+    <path d="M13 13 v-9" stroke="#1b1f24" stroke-width="1.2" transform="rotate(${m} 13 13)"/><circle cx="13" cy="13" r="1.2" fill="#1b1f24"/></svg>`;
+}
+// A desk: top, legs, monitor (scanning while lit), keyboard, mug, and the chair in front.
+function deskSVG(lit) {
+  return `<svg width="60" height="54" viewBox="0 0 60 54">
+    <rect x="21" y="2" width="18" height="13" rx="1.5" fill="#30363d"/>
+    <rect x="23" y="4" width="14" height="9" fill="${lit ? "var(--working)" : "#161b22"}" opacity="${lit ? ".55" : "1"}"/>
+    <rect class="scanline" x="24" y="5" width="12" height="1.2" fill="#fff"/>
+    <rect x="28" y="15" width="4" height="3" fill="#30363d"/>
+    <rect x="2" y="18" width="56" height="12" rx="2" fill="var(--wood-a)"/><rect x="2" y="18" width="56" height="3" rx="1" fill="#a86f3a"/>
+    <rect x="18" y="22" width="18" height="4" rx="1" fill="#c9d1d9"/><rect x="44" y="21" width="6" height="6" rx="1" fill="#f3f4f6"/>
+    <rect x="5" y="30" width="3" height="10" fill="#5b3a1a"/><rect x="52" y="30" width="3" height="10" fill="#5b3a1a"/>
+    <rect x="20" y="40" width="20" height="12" rx="4" fill="var(--dim)"/><rect x="24" y="36" width="12" height="6" rx="2" fill="color-mix(in srgb, var(--dim) 70%, #000)"/></svg>`;
+}
+// The triage counter by the door: a counter, an inbox tray, a bell.
+function counterSVG() {
+  return `<svg width="60" height="54" viewBox="0 0 60 54">
+    <rect x="4" y="26" width="52" height="16" rx="2" fill="#a86f3a"/><rect x="4" y="26" width="52" height="4" rx="1" fill="#c9915a"/>
+    <rect x="10" y="18" width="18" height="8" rx="1" fill="#c9d1d9"/><rect x="12" y="14" width="14" height="4" fill="#f3f4f6"/>
+    <path d="M44 24 a5 5 0 0 1 10 0 z" fill="#ffd33d"/><rect x="42" y="24" width="14" height="2" fill="#d29922"/>
+    <rect x="20" y="42" width="20" height="10" rx="4" fill="var(--dim)"/></svg>`;
+}
+// The two boards on Steve's wall, each clickable: the bulletin board with its pinned
+// notes, and the wins board with this week's count on it.
+function bulletinSVG(n) {
+  const pins = [[8, 8], [26, 6], [44, 10], [12, 24], [32, 22], [48, 26]].slice(0, Math.max(1, Math.min(6, n || 1)));
+  return `<svg width="64" height="46" viewBox="0 0 64 46"><rect x="1" y="1" width="62" height="44" rx="2" fill="#c9a06c" stroke="#7a4e24" stroke-width="2"/>
+    ${pins.map(([x, y], i) => `<rect x="${x}" y="${y}" width="12" height="9" fill="${["#fff8c4", "#d6f5d6", "#ffe0e0", "#e0ecff"][i % 4]}" transform="rotate(${(i % 2 ? 4 : -3)} ${x + 6} ${y + 4})"/>
+      <circle cx="${x + 6}" cy="${y + 1.5}" r="1.5" fill="${["#ff7b72", "#58a6ff", "#3fb950"][i % 3]}"/>`).join("")}
+    <text x="32" y="42" text-anchor="middle" font-size="6" font-weight="700" fill="#4e2f14" font-family="sans-serif">BULLETIN</text></svg>`;
+}
+function winsSVG(n) {
+  return `<svg width="62" height="46" viewBox="0 0 62 46"><rect x="1" y="1" width="60" height="44" rx="2" fill="#1f2a3a" stroke="#d4b06a" stroke-width="2"/>
+    <path d="M24 10 h14 v8 a7 7 0 0 1 -14 0 z" fill="#ffd33d"/><path d="M22 11 h2 v6 a4 4 0 0 1 -2 -6 M40 11 h-2 v6 a4 4 0 0 0 2 -6" fill="#ffd33d"/>
+    <rect x="29" y="25" width="4" height="4" fill="#d29922"/><rect x="25" y="29" width="12" height="3" rx="1" fill="#d29922"/>
+    <text x="31" y="41" text-anchor="middle" font-size="6.5" font-weight="700" fill="#ffd33d" font-family="sans-serif">WINS · ${n}</text></svg>`;
 }
 
-// Where things stand. The whole office is laid out in pixels from the room's own width, so
-// a figure never shares a spot with another and a room is as tall as the people in it: a
-// break room with six idle lanes grows a second row rather than standing them on each
-// other (the first studio sent every idle lane to five fixed spots, and on a box with six
-// idle lanes the sixth stood on the first). Across is a percentage, down is pixels, and a
-// character's move between the two is one CSS transition — a walk.
+// Where things stand. The office is laid out in pixels from its own width, so a figure
+// never shares a spot with another and a room is as tall as the people in it: a break room
+// with six idle lanes grows a second row rather than standing them on each other.
 const CHAR_W = 72;                 // one standing spot: a figure and its plate never exceed it (.character max-width)
-const EDGE = 10, GAP = 8, HALL_H = 64, ROOM_PAD = 6;
+const EDGE = 12, ROOM_PAD = 6;
+const CORR_H = 60;                 // the main hallway, and the one between team rows
+const VHALL = 48;                  // between the break room and Steve's office
+const THALL = 28;                  // between team rooms, and before the server room
+const SERVER_W = 220;
+const WALK_SPEED = 180;            // px per second
 // padTop is the first row's feet, measured from the room's top: room name, props on the
 // back wall and the figure's own height (34px; plus a held-up mockup in Steve's office;
 // plus a desk and monitor in a team room) all fit above it. rowH is feet to feet.
 // padBottom is the plate under the last row's feet.
-const BREAK = {padTop: 86, rowH: 64, padBottom: 28};
-const BOSS = {padTop: 138, rowH: 100, padBottom: 28};
-const BOSS_EMPTY_H = 72;           // nobody waiting: just his desk
+const BREAK = {padTop: 104, rowH: 68, padBottom: 30};
+const BOSS = {padTop: 200, rowH: 100, padBottom: 30};
+const BOSS_EMPTY_H = 130;          // nobody waiting: the wall, the desk
 const TRAY_CHIP_H = 34, TRAY_PIC_H = 146;   // the in-tray: chips alone, or chips and a compact carousel
-const TEAM = {padTop: 80, rowH: 68, padBottom: 20};
+const TEAM = {padTop: 108, rowH: 76, padBottom: 24};
 const BREAK_EXTRA = 2;             // free spots in the break room, so a wanderer has somewhere to go
 
 function roomWidthPx() {
   // Hidden (every 30s poll draws the studio while the floor is showing), the room has no
   // width; use the one it will have, and `showStudio` draws again with the real one.
   const el = document.getElementById("room");
-  return el.clientWidth || Math.min(960, Math.max(280, window.innerWidth - 34));
+  return el.clientWidth || Math.max(960, window.innerWidth - 34);
 }
 function perRowIn(w) { return Math.max(1, Math.floor((w - 2 * ROOM_PAD) / CHAR_W)); }
 function rowsFor(n, w) { return Math.max(1, Math.ceil(n / perRowIn(w))); }
@@ -2125,6 +2415,10 @@ function wander() {
 }
 window.__studioWander = wander;
 
+// The rooms by name, with their doors, for routing a walk (filled by computeStudio).
+let roomsByName = {};
+let connectX = 0;
+
 function computeStudio(state) {
   const W = roomWidthPx(), inner = W - 2 * EDGE;
   const projects = state.projects || [];
@@ -2135,70 +2429,80 @@ function computeStudio(state) {
   const needs = lanes.filter(l => l.pill === "needs_steve");
   const rooms = [];
 
-  // The top band: the break room and Steve's office, side by side and as tall as the
-  // fuller — or, on a phone, the break room over the office, each its own height.
-  const narrow = inner < 420;
-  const breakW = narrow ? inner : Math.round(inner * 0.58) - GAP / 2;
-  const bossW = narrow ? inner : inner - breakW - GAP;
+  // The top row: the break room and Steve's office, a hallway between, as tall as the fuller.
+  const breakW = Math.round((inner - VHALL) * 0.52), bossW = inner - VHALL - breakW;
   const nBreak = breakers.length + sleepers.length + BREAK_EXTRA;
   const breakH = roomHeight(nBreak, breakW, BREAK);
   // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
-  // row of chips, or the chips and the compact carousel when a card has a picture.
+  // row of chips, or the chips and the compact carousel when a card has a picture; one
+  // more line per row the chips wrap onto.
   const stuck = projects.flatMap(p => p.stuck || []);
-  // Chips wrap on a narrow tray: one more line of height per extra row of them.
   const chipRows = Math.max(1, Math.ceil((stuck.length * 46 + projects.filter(p => (p.stuck || []).length).length * 40 + 48)
                                           / Math.max(80, bossW - 2 * ROOM_PAD - 16)));
   const trayH = !stuck.length ? 0
     : (stuck.some(s => stuckSlides(s).length) ? TRAY_PIC_H : TRAY_CHIP_H) + (chipRows - 1) * 18;
   const bossSpec = {...BOSS, padTop: BOSS.padTop + trayH};
   const bossH = needs.length ? roomHeight(needs.length, bossW, bossSpec) : BOSS_EMPTY_H + trayH + (trayH ? 14 : 0);
-  const bandH = Math.max(breakH, bossH);
-  const breakRoom = {kind: "break", name: "Break room", x: EDGE, y: EDGE, w: breakW,
-                     h: narrow ? breakH : bandH, door: narrow ? "left" : "bottom"};
-  const boss = {kind: "boss", name: "Steve's office", w: bossW, door: "bottom",
-                x: narrow ? EDGE : EDGE + breakW + GAP, y: narrow ? EDGE + breakH + GAP : EDGE,
-                h: narrow ? bossH : bandH, spec: bossSpec,
-                tray: trayH ? {x: ROOM_PAD + 2, y: BOSS_EMPTY_H - 8, w: bossW - 2 * ROOM_PAD - 4, h: trayH} : null};
+  const topH = Math.max(breakH, bossH, 170);
+  const corrY = EDGE + topH + CORR_H / 2;    // the main hallway's center line
+  const breakRoom = {kind: "break", name: "Break room", x: EDGE, y: EDGE, w: breakW, h: topH, side: "bottom", corrY};
+  const boss = {kind: "boss", name: "Steve's office", x: EDGE + breakW + VHALL, y: EDGE, w: bossW, h: topH,
+                side: "bottom", corrY, spec: bossSpec,
+                tray: trayH ? {x: ROOM_PAD + 2, y: BOSS_EMPTY_H - 12, w: bossW - 2 * ROOM_PAD - 4, h: trayH} : null};
   rooms.push(breakRoom, boss);
-  const hall = {x: EDGE, y: boss.y + boss.h + GAP, w: inner, h: HALL_H};
 
-  // The team rooms: up to three across, one per board, each as tall as its own desks.
-  const cols = Math.max(1, Math.min(3, Math.floor(inner / 300), projects.length || 1));
-  const teamW = (inner - (cols - 1) * GAP) / cols;
-  let y = hall.y + HALL_H + GAP, rowH = 0;
+  // The bottom row: a room per board, hallways between, the server room at the end.
+  // More boards than fit across wrap to a second row, with a hallway between the rows
+  // and the one before the server room joining them to the main hallway.
+  const teamsW = inner - SERVER_W - THALL;
+  const cols = Math.max(1, Math.min(projects.length || 1, Math.floor((teamsW + THALL) / (270 + THALL))));
+  const teamW = (teamsW - (cols - 1) * THALL) / cols;
+  let y = EDGE + topH + CORR_H, rowH = 0;
   const teams = projects.map((p, i) => {
     const col = i % cols;
-    if (col === 0 && i > 0) { y += rowH + GAP; rowH = 0; }
+    if (col === 0 && i > 0) { y += rowH + CORR_H; rowH = 0; }
     const n = (p.lanes || []).length + 1;      // the ship shelf is the last station
     const h = roomHeight(n, teamW, TEAM);
     rowH = Math.max(rowH, h);
     const r = {kind: "team", name: p.name, board_url: p.board_url, counts: p.counts || {},
-               x: EDGE + col * (teamW + GAP), y, w: teamW, h, project: p};
+               x: EDGE + col * (teamW + THALL), y, w: teamW, h, project: p, side: "top", corrY: y - CORR_H / 2};
     rooms.push(r);
     return r;
   });
-  const total = (teams.length ? y + rowH : hall.y + HALL_H) + EDGE;
+  const bottomEnd = teams.length ? y + rowH : EDGE + topH + CORR_H + 150;
+  const server = {kind: "server", name: "Server room", x: EDGE + inner - SERVER_W, y: EDGE + topH + CORR_H,
+                  w: SERVER_W, h: bottomEnd - (EDGE + topH + CORR_H), side: "top", corrY};
+  rooms.push(server);
+  connectX = server.x - THALL / 2;
+  const total = bottomEnd + EDGE;
+
+  roomsByName = {};
+  for (const r of rooms) {
+    const doorX = r.x + r.w / 2;
+    r.door = {x: doorX, inside: {x: doorX, y: r.side === "bottom" ? r.y + r.h - 16 : r.y + 44},
+              outside: {x: doorX, y: r.corrY}};
+    roomsByName[r.name] = r;
+  }
 
   // Spots. A lane's home is its desk; where it stands now depends on its pill.
   const ships = [];
-  const pct = x => x / W * 100;
   for (const r of teams) {
     const ordered = [...(r.project.lanes || [])].sort(
       (a, b) => (a.kind === "Triage" ? 0 : 1) - (b.kind === "Triage" ? 0 : 1));
     const {spots} = gridSpots(r, ordered.length + 1, TEAM);
     ordered.forEach((l, i) => {
       const me = lanes.find(x => x.lane === l.lane);
-      me.home = {x: pct(spots[i].x), y: spots[i].y};
+      me.home = {x: spots[i].x, y: spots[i].y};
       me.pos = me.home; me.away = false; me.room = r.name;
     });
     const s = spots[ordered.length];
-    ships.push({name: r.name, ship: r.project.ship, pos: {x: pct(s.x), y: s.y}});
+    ships.push({name: r.name, ship: r.project.ship, pos: {x: s.x, y: s.y}, room: r.name});
   }
   const bg = gridSpots(breakRoom, nBreak, BREAK);
   const {seatOf, couch} = seatBreakRoom(breakers, sleepers, bg.spots, bg.perRow, bg.rows);
   for (const l of [...breakers, ...sleepers]) {
     const s = bg.spots[seatOf[l.lane]];
-    l.pos = {x: pct(s.x), y: s.y}; l.away = true; l.room = breakRoom.name;
+    l.pos = {x: s.x, y: s.y}; l.away = true; l.room = breakRoom.name;
   }
   if (couch.length) {
     const first = bg.spots[couch[0]], last = bg.spots[couch[couch.length - 1]];
@@ -2208,58 +2512,70 @@ function computeStudio(state) {
   const vg = gridSpots(boss, needs.length, boss.spec);
   needs.forEach((l, i) => {
     const s = vg.spots[i];
-    l.pos = {x: pct(s.x), y: s.y}; l.away = true; l.room = boss.name;
+    l.pos = {x: s.x, y: s.y}; l.away = true; l.room = boss.name;
   });
-  return {lanes, ships, rooms, hall, boss, total};
+  return {lanes, ships, rooms, boss, server, total};
 }
 
-function roomHTML(r) {
+function roomHTML(r, state) {
   const name = r.kind === "team"
     ? `<a class="room-name" href="${esc(r.board_url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`
     : `<span class="room-name">${esc(r.name)}</span>`;
   // The door is a gap in the wall on the hallway side.
-  const door = r.kind === "team"
-    ? `<div class="room-door" style="left:${Math.round(r.w / 2 - 12)}px;top:-2px"></div>`
-    : r.door === "left"
-      ? `<div class="room-door" style="left:-2px;top:${Math.round(r.h - 40)}px;width:8px;height:24px"></div>`
-      : `<div class="room-door" style="left:${Math.round(r.w / 2 - 12)}px;bottom:-2px"></div>`;
+  const door = r.side === "top"
+    ? `<div class="room-door" style="left:${Math.round(r.w / 2 - 14)}px;top:-3px"></div>`
+    : `<div class="room-door" style="left:${Math.round(r.w / 2 - 14)}px;bottom:-3px"></div>`;
   let props = "";
   if (r.kind === "break") {
-    props = prop("coffee", 84, 10) + prop("vending", 116, 6) + prop("cooler", 146, 8) + prop("plant", r.w - 30, 10)
-      + (r.w > 260 ? prop("window", r.w - 76, 8) : "")
+    props = prop("coffee", 92, 24) + prop("vending", 124, 20) + prop("cooler", 154, 22)
+      + `<div class="prop" style="left:184px;top:16px">${clockSVG(state.header && state.header.time)}</div>`
+      + (r.w > 520 ? prop("table", Math.round(r.w / 2 + 40), 20) : "")
+      + prop("window", r.w - 150, 16) + prop("window", r.w - 96, 16) + prop("tallplant", r.w - 40, 10)
+      + prop("plant", 8, r.h - 40)
       + (r.couch ? `<div class="couch" style="left:${r.couch.x}px;top:${r.couch.y}px;width:${r.couch.w}px"></div>` : "");
   } else if (r.kind === "boss") {
-    props = prop("bossdesk", Math.round(r.w / 2 - 50), 22) + prop("picture", r.w - 26, 6)
-      + (r.w > 220 ? prop("window", r.w - 70, 6) : "") + prop("plant", 8, 20);
+    const nRecent = ((state.recent || []).length) + (state.projects || []).reduce((a, p) => a + (p.lanes || []).filter(l => l.card).length, 0);
+    const nWins = ((state.wins || {}).items || []).length;
+    props = `<div class="rug"></div>` + prop("window", 14, 18) + prop("window", 68, 18)
+      + `<div class="prop clickable" data-board="bulletin" title="The bulletin board: every card being worked, and recently worked" style="left:${r.w - 150}px;top:16px">${bulletinSVG(nRecent)}</div>`
+      + `<div class="prop clickable" data-board="wins" title="The wins board: what shipped this week" style="left:${r.w - 80}px;top:16px">${winsSVG(nWins)}</div>`
+      + prop("bossdesk", Math.round(r.w / 2 - 60), 68) + prop("tallplant", 10, r.h - 56) + prop("plant", r.w - 30, r.h - 44);
+  } else if (r.kind === "server") {
+    const racks = Math.max(1, Math.min(4, Math.floor((r.w - 60) / 44)));
+    props = Array.from({length: racks}, (_, i) => prop("rack", 18 + i * 44, 34)).join("")
+      + prop("aircon", r.w - 42, r.h - 52)
+      + `<div class="hall-label" style="left:10px;top:${r.h - 20}px">hover for load, tokens, the lab</div>`;
   } else {
     const c = r.counts;
     props = `<div class="whiteboard" title="The board right now">Ready ${c.ready ?? "?"} · Doing ${c.in_progress ?? "?"} · Backlog ${c.backlog ?? "?"}</div>`
-      + prop("plant", 6, 20);
+      + prop("window", Math.round(r.w / 2 - 24), 18) + prop("plant", 8, r.h - 40) + prop("tallplant", r.w - 36, 14);
   }
   return `<div class="office-room ${r.kind}" data-room="${esc(r.name)}"
     style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px">${name}${props}${door}</div>`;
 }
 
-function renderRooms({rooms, hall, boss, total}) {
+function renderRooms(office, state) {
   const room = document.getElementById("room");
-  room.style.height = total + "px";
-  document.getElementById("room-rooms").innerHTML = rooms.map(roomHTML).join("")
-    + `<div class="hall-label" style="left:${hall.x + 4}px;top:${hall.y + 2}px">Bulletin board — the last cards worked</div>`;
-  const wall = document.getElementById("pin-wall");
-  wall.style.left = hall.x + "px"; wall.style.top = (hall.y + 14) + "px";
-  wall.style.width = hall.w + "px"; wall.style.height = (hall.h - 16) + "px";
+  room.style.height = office.total + "px";
+  const {boss, server} = office;
+  document.getElementById("room-rooms").innerHTML = office.rooms.map(r => roomHTML(r, state)).join("")
+    + `<div class="hall-label" style="left:${EDGE + 6}px;top:${boss.y + boss.h + 4}px">Main hallway</div>`;
   const beacon = document.getElementById("beacon");
   beacon.style.left = (boss.x + boss.w / 2) + "px";
   beacon.style.top = (boss.y + boss.h - 14) + "px";
+  // The readout hangs beside the server room, from the hallway down; it may run past
+  // the floor's bottom edge (the floor does not clip), never be cut off by it.
+  const tip = document.getElementById("server-tip");
+  tip.style.left = (server.x - 352) + "px";
+  tip.style.top = (server.y - CORR_H + 6) + "px";
 }
 
 function renderRoomDesks(lanes) {
   const furniture = lanes.map(l => (l.kind === "Triage"
-    ? `<div class="dispatch-counter" style="left:${l.home.x}%;top:${l.home.y}px"></div>`
-    : `<div class="desk-furniture" style="left:${l.home.x}%;top:${l.home.y}px"></div>
-       <div class="desk-monitor${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
-            style="left:${l.home.x}%;top:${l.home.y}px"><div class="scanline"></div></div>`)
-    + (l.away ? `<div class="desk-tag" data-lane="${esc(l.lane)}" style="left:${l.home.x}%;top:${l.home.y}px">${esc(l.kind)} · out</div>` : ""));
+    ? `<div class="desk-set" style="left:${l.home.x}px;top:${l.home.y + 10}px">${counterSVG()}</div>`
+    : `<div class="desk-set${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
+            style="left:${l.home.x}px;top:${l.home.y + 10}px">${deskSVG(l.pill === "working")}</div>`)
+    + (l.away ? `<div class="desk-tag" data-lane="${esc(l.lane)}" style="left:${l.home.x}px;top:${l.home.y}px">${esc(l.kind)} · out</div>` : ""));
   document.getElementById("room-desks").innerHTML = furniture.join("");
 }
 
@@ -2269,12 +2585,61 @@ function plateHTML(kind, project, away) {
   return `<div class="plate">${esc(kind)}${away ? `<br><span class="where">${esc(project)}</span>` : ""}</div>`;
 }
 
-// Characters keep the same DOM node across renders, so moving `left`/`top` is a CSS
-// transition — a walk — rather than a jump cut (`prefers-reduced-motion` drops it to a
-// jump cut on purpose). While the walk runs the figure bobs.
+// Walking. A character keeps the same DOM node across renders, and a change of spot is a
+// walk: within a room a straight line; between rooms out of the door, along the hallway
+// (and up the one by the server room when the rooms are on different hallways), and in at
+// the other door. A Web Animation along those waypoints, at a walking pace, with a bob
+// while it runs; `prefers-reduced-motion` makes it a jump cut.
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function routePath(from, fromRoom, to, toRoom) {
+  const A = roomsByName[fromRoom], B = roomsByName[toRoom];
+  if (!A || !B || fromRoom === toRoom) return [from, to];
+  const pts = [from, A.door.inside, A.door.outside];
+  if (A.corrY !== B.corrY) pts.push({x: connectX, y: A.corrY}, {x: connectX, y: B.corrY});
+  pts.push(B.door.outside, B.door.inside, to);
+  return pts;
+}
+function place(el, p) { el.style.left = p.x + "px"; el.style.top = p.y + "px"; }
+function moveCharacter(el, to, room) {
+  const prev = el._pos;
+  if (!prev || reducedMotion()) {
+    if (el._anim) el._anim.cancel();
+    place(el, to); el._pos = to; el._room = room;
+    return;
+  }
+  if (prev.x === to.x && prev.y === to.y && !el._anim) { el._room = room; return; }
+  // Mid-walk already: start from where it actually is, not where it was going.
+  const cs = getComputedStyle(el);
+  const from = el._anim ? {x: parseFloat(cs.left), y: parseFloat(cs.top)} : prev;
+  if (el._anim) el._anim.cancel();
+  const path = routePath(from, el._room, to, room);
+  const segs = [];
+  let total = 0;
+  for (let i = 1; i < path.length; i++) {
+    const d = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    segs.push(d); total += d;
+  }
+  if (total < 1) { place(el, to); el._pos = to; el._room = room; return; }
+  const frames = [{left: from.x + "px", top: from.y + "px", offset: 0}];
+  let acc = 0;
+  path.slice(1).forEach((p, i) => { acc += segs[i]; frames.push({left: p.x + "px", top: p.y + "px", offset: Math.min(1, acc / total)}); });
+  el.classList.add("walking");
+  const anim = el.animate(frames, {duration: Math.max(300, total / WALK_SPEED * 1000), easing: "linear", fill: "forwards"});
+  el._anim = anim; el._pos = to; el._room = room;
+  anim.onfinish = () => { place(el, to); if (el._anim === anim) el._anim = null; anim.cancel(); el.classList.remove("walking"); };
+  anim.oncancel = () => { if (el._anim === anim) el._anim = null; el.classList.remove("walking"); };
+}
+
+const charEls = {};
+function newCharacter(container, cls) {
+  const el = document.createElement("div");
+  el.className = cls;
+  container.appendChild(el);
+  return el;
+}
 // The mockup held up over a waving character's head — the carousel's own current slide
-// when this card has one (card #96: so flipping it in Steve's in-tray flips it here
-// too), the old single thumbnail otherwise (a demo fixture with no `rounds` of its own).
+// when this card has one (card #96: so flipping it in Steve's in-tray flips it here too),
+// the old single thumbnail otherwise (a demo fixture with no `rounds` of its own).
 function heldMockupHTML(l, stuckByCard) {
   const entry = l.card && stuckByCard && stuckByCard[l.card.number];
   if (entry) {
@@ -2286,17 +2651,6 @@ function heldMockupHTML(l, stuckByCard) {
     return "";
   }
   return mockupThumbsHTML((l.images || []).slice(0, 1), "character-mockup");
-}
-
-const charEls = {};
-function newCharacter(container, cls) {
-  const el = document.createElement("div");
-  el.className = cls;
-  el.addEventListener("transitionrun", () => el.classList.add("walking"));
-  el.addEventListener("transitionend", () => el.classList.remove("walking"));
-  el.addEventListener("transitioncancel", () => el.classList.remove("walking"));
-  container.appendChild(el);
-  return el;
 }
 function renderCharacters(lanes, stuckByCard) {
   const container = document.getElementById("room-characters");
@@ -2313,12 +2667,9 @@ function renderCharacters(lanes, stuckByCard) {
     el.dataset.pill = l.pill;
     el.dataset.project = l.project;
     el.dataset.room = l.room;
-    // Held up over the waving character, the same mockup the floor's own desk shows — the
-    // room Steve walks instead of the card he'd otherwise click through to (card #91).
     const held = l.pill === "needs_steve" ? heldMockupHTML(l, stuckByCard) : "";
     el.innerHTML = held + characterSVG(l.pill, laneLook(l.lane)) + plateHTML(l.kind, l.project, l.away);
-    el.style.left = l.pos.x + "%";
-    el.style.top = l.pos.y + "px";
+    moveCharacter(el, l.pos, l.room);
   }
   for (const name of Object.keys(charEls)) if (!seen.has(name)) { charEls[name].remove(); delete charEls[name]; }
 }
@@ -2337,26 +2688,9 @@ function renderShipDock(ships) {
     }
     const st = shipState(s.ship);
     el.innerHTML = shipSVG(st.mode, st.pill) + plateHTML("Ship", s.name, false);
-    el.style.left = s.pos.x + "%";
-    el.style.top = s.pos.y + "px";
+    moveCharacter(el, s.pos, s.room);
   }
   for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }
-}
-
-function renderPinWall(recent) {
-  // Newest first: `state.recent` already sorts newest-first, and the board runs left to
-  // right in that same order. Each card names the issue and the project it is on.
-  const wall = document.getElementById("pin-wall");
-  wall.innerHTML = (recent || []).slice(0, 8).map(r => `
-    <a class="pin-card" href="${esc(r.card.url)}" target="_blank" rel="noopener"><b>#${r.card.number}</b>
-      · ${esc(r.project)}<br>${relTime(r.when)}</a>`).join("");
-  markWallScroll();
-}
-// Whether the board overflows is only measurable while the studio is showing (a hidden
-// strip is 0 wide), so this runs again the moment it opens, not just on each redraw.
-function markWallScroll() {
-  const wall = document.getElementById("pin-wall");
-  wall.classList.toggle("scrolls", wall.scrollWidth > wall.clientWidth + 1);
 }
 
 // The in-tray on Steve's desk (card #96: "in each board's row, on the floor page and in
@@ -2397,26 +2731,176 @@ function renderBeacon(state) {
   document.getElementById("beacon").className = "beacon-" + color;
 }
 
+// The server room's readout: this box, the tokens the lanes moved in the last day, and
+// the lab's other boxes when the floor has a Proxmox token.
+function fmtBytes(n) {
+  if (n == null) return "—";
+  return (n / 1073741824).toFixed(1) + " GB";
+}
+function fmtTokens(n) {
+  if (n == null) return "—";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return Math.round(n / 1e3) + "k";
+  return String(n);
+}
+function fmtUptime(s) {
+  if (s == null) return "—";
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+  return d ? `${d}d ${h}h` : `${h}h`;
+}
+function meterHTML(frac) {
+  const f = Math.max(0, Math.min(1, frac || 0));
+  return `<span class="meter${f > .85 ? " hot" : f > .6 ? " warm" : ""}"><i style="width:${Math.round(f * 100)}%"></i></span>`;
+}
+function tipRow(k, v, frac, cls) {
+  return `<div class="tip-row${cls ? " " + cls : ""}"><span class="k">${esc(k)}</span>${frac == null ? "" : meterHTML(frac)}<span class="v">${v}</span></div>`;
+}
+function renderServerTip(state) {
+  const s = state.server || {};
+  const box = s.box || {}, tok = s.tokens || {}, pve = s.proxmox || [];
+  let html = `<h4>This box · ${esc(state.header.box)}</h4>`;
+  html += tipRow("Load", box.load1 == null ? "—" : `${box.load1} on ${box.cpus || "?"} cpus`, box.cpus ? box.load1 / box.cpus : null);
+  html += tipRow("Memory", `${fmtBytes(box.mem_used)} of ${fmtBytes(box.mem_total)}`, box.mem_total ? box.mem_used / box.mem_total : null);
+  html += tipRow("Disk", `${fmtBytes(box.disk_used)} of ${fmtBytes(box.disk_total)}`, box.disk_total ? box.disk_used / box.disk_total : null);
+  html += tipRow("Up", fmtUptime(box.uptime));
+  html += `<h4>Tokens, last ${tok.hours || 24}h</h4>`;
+  html += tipRow("All lanes", `${fmtTokens(tok.total)} · ~${fmtTokens(tok.per_hour)}/h`);
+  const maxTok = Math.max(1, ...(tok.per_project || []).map(p => p.tokens));
+  for (const p of tok.per_project || []) html += tipRow(p.name, fmtTokens(p.tokens), p.tokens / maxTok);
+  if (!(tok.per_project || []).length) html += `<div class="tip-row"><span class="v">Nothing moved yet today.</span></div>`;
+  html += `<h4>The lab · Proxmox</h4>`;
+  if (!pve.length) {
+    html += `<div class="tip-row"><span class="v">Not connected: PROXMOX_URL and PROXMOX_TOKEN in the box's /etc/watcher/env turn this on.</span></div>`;
+  } else {
+    for (const g of pve) {
+      const label = g.type === "node" ? `${g.name} (host)` : `${g.name} · ${g.type} ${g.vmid}`;
+      const stopped = g.status && g.status !== "running" && g.status !== "online";
+      const cpu = stopped ? "stopped" : `cpu ${Math.round((g.cpu || 0) * 100)}% · ${fmtBytes(g.mem)} of ${fmtBytes(g.maxmem)}`;
+      html += tipRow(label, cpu, stopped ? null : (g.maxmem ? g.mem / g.maxmem : null), stopped ? "stopped" : "");
+    }
+  }
+  document.getElementById("server-tip").innerHTML = html;
+}
+function openServerTip() { document.getElementById("server-tip").classList.add("open"); }
+function closeServerTip() { document.getElementById("server-tip").classList.remove("open"); }
+document.getElementById("room-rooms").addEventListener("mouseover", (e) => {
+  if (e.target.closest(".office-room.server")) openServerTip();
+});
+document.getElementById("room-rooms").addEventListener("mouseout", (e) => {
+  const to = e.relatedTarget;
+  if (e.target.closest(".office-room.server") && !(to && to.closest && to.closest(".office-room.server"))) closeServerTip();
+});
+document.getElementById("room-rooms").addEventListener("click", (e) => {
+  if (e.target.closest(".office-room.server")) {
+    document.getElementById("server-tip").classList.toggle("open");
+    e.stopPropagation();
+    return;
+  }
+  const board = e.target.closest("[data-board]");
+  if (board) { openBoard(board.dataset.board); e.stopPropagation(); }
+});
+
 function renderStudio(state) {
   lastState = state;
   const office = computeStudio(state);
-  renderRooms(office);
+  renderRooms(office, state);
   const stuckByCard = {};
   for (const p of state.projects || []) for (const s of p.stuck || []) stuckByCard[s.card.number] = s;
   renderRoomDesks(office.lanes);
   renderRoomStuck(state.projects, office.boss);
   renderCharacters(office.lanes, stuckByCard);
   renderShipDock(office.ships);
-  renderPinWall(state.recent);
   renderBeacon(state);
+  renderServerTip(state);
 }
-// The office is laid out from its own width, so a turned phone or a resized window lays
-// it out again.
+// The office is laid out from its own width, so a resized window lays it out again.
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (lastState) renderStudio(lastState); }, 150);
+  resizeTimer = setTimeout(() => { if (lastState && document.getElementById("studio").classList.contains("open")) renderStudio(lastState); }, 150);
 });
+
+// ---- The boards on Steve's wall --------------------------------------------------------
+// Click the bulletin board for every card being worked right now and every card recently
+// worked, each with a Peek that reads the card itself off GitHub (title, body, labels,
+// its last comments). Click the wins board for what shipped this week, by board.
+function openModal(title, sub, bodyHTML, showBack) {
+  document.getElementById("office-title").textContent = title;
+  document.getElementById("office-sub").textContent = sub || "";
+  document.getElementById("office-body").innerHTML = bodyHTML;
+  document.getElementById("office-back").style.display = showBack ? "" : "none";
+  document.getElementById("office-modal").classList.add("open");
+}
+function closeModal() { document.getElementById("office-modal").classList.remove("open"); }
+let modalBoard = null;
+function openBoard(which) {
+  modalBoard = which;
+  if (!lastState) return;
+  if (which === "wins") openModal("The wins board", `shipped in the last ${(lastState.wins || {}).days || 7} days`, winsHTML(lastState), false);
+  else openModal("The bulletin board", "every card being worked, and recently worked", bulletinHTML(lastState), false);
+}
+function peekBtn(project, number) {
+  return `<button class="peek-btn" type="button" data-card-project="${esc(project)}" data-card-number="${number}">Peek</button>`;
+}
+function cardNum(c) {
+  return `<span class="num"><a href="${esc(c.url)}" target="_blank" rel="noopener">#${c.number}</a></span>`;
+}
+function bulletinHTML(state) {
+  const now = [];
+  for (const p of state.projects || []) for (const l of p.lanes || []) {
+    if (!l.card) continue;
+    if (l.pill !== "working" && l.pill !== "needs_steve") continue;
+    const what = l.pill === "working" ? `${esc(l.stage || "—")} · ${l.minutes}m` : `needs Steve: ${esc(l.ask || "a decision")}`;
+    now.push(`<div class="board-row">${cardNum(l.card)}<span class="what">${esc(p.name)} · ${esc(l.kind)} · ${what}</span>
+      <span class="pill ${esc(l.pill)}">${PILL_LABEL[l.pill]}</span>${peekBtn(p.name, l.card.number)}</div>`);
+  }
+  const recent = (state.recent || []).map(r => `<div class="board-row">${cardNum(r.card)}
+      <span class="what">${esc(r.project)} · ${esc(r.lane)}</span><span class="meta">${relTime(r.when)} · ${esc(r.quota)}</span>${peekBtn(r.project, r.card.number)}</div>`);
+  return `<h3>Being worked right now</h3>${now.join("") || `<div class="empty-note">Nobody is on a card right now.</div>`}
+    <h3>Recently worked</h3>${recent.join("") || `<div class="empty-note">No ticks yet.</div>`}`;
+}
+function winsHTML(state) {
+  const items = ((state.wins || {}).items || []);
+  const byProject = {};
+  for (const p of state.projects || []) byProject[p.name] = [];
+  for (const w of items) (byProject[w.project] = byProject[w.project] || []).push(w);
+  const names = Object.keys(byProject).sort();
+  if (!names.length) return `<div class="empty-note">No boards on this floor.</div>`;
+  return `<div class="board-row"><span class="what"><span class="win-count">${items.length}</span> shipped this week across every board</span></div>`
+    + names.map(n => {
+      const ws = byProject[n];
+      return `<h3>${esc(n)} <span class="win-count">${ws.length}</span></h3>` + (ws.length
+        ? ws.map(w => `<div class="board-row">${cardNum(w.card)}<span class="what">${esc(w.title || "(no title on the board)")}</span>
+            <span class="meta">${esc(w.lane)} · ${relTime(w.when)}</span>${peekBtn(w.project, w.card.number)}</div>`).join("")
+        : `<div class="empty-note">Nothing shipped yet this week.</div>`);
+    }).join("");
+}
+async function openCard(project, number) {
+  openModal(`#${number}`, project, `<div class="empty-note">Reading the card…</div>`, true);
+  let card = null;
+  try {
+    const r = await fetch("/api/card.json?" + new URLSearchParams({project, number}).toString(), {cache: "no-store"});
+    if (r.ok) card = await r.json();
+  } catch (e) { card = null; }
+  if (!card || card.unreadable) {
+    document.getElementById("office-body").innerHTML = `<div class="empty-note">The card could not be read right now.</div>`;
+    return;
+  }
+  document.getElementById("office-title").textContent = `#${number} · ${card.title || ""}`;
+  const labels = (card.labels || []).map(l => `<span class="label">${esc(l)}</span>`).join("");
+  const comments = (card.comments || []).map(c => `<div class="card-comment"><div class="who">${esc(c.author)} · ${relTime(c.when)}</div><pre class="card-body">${esc(c.body)}</pre></div>`).join("");
+  document.getElementById("office-body").innerHTML = `<div class="card-view">
+    <div class="labels"><span class="label">${esc(card.state || "")}</span>${labels}
+      <a class="label" href="${esc(card.url)}" target="_blank" rel="noopener">open on GitHub ↗</a></div>
+    <pre class="card-body">${esc(card.body || "(no body)")}</pre>${comments}</div>`;
+}
+document.getElementById("office-body").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-card-number]");
+  if (btn) openCard(btn.dataset.cardProject, parseInt(btn.dataset.cardNumber, 10));
+});
+document.getElementById("office-back").addEventListener("click", () => openBoard(modalBoard));
+document.getElementById("office-close").addEventListener("click", closeModal);
+document.getElementById("office-modal").addEventListener("click", (e) => { if (e.target.id === "office-modal") closeModal(); });
 
 // Tap a character for a speech bubble with the last line of what it is doing (the same
 // line Peek shows); tap the bubble to open the full Peek. It polls only while open, same
@@ -2483,7 +2967,7 @@ document.getElementById("room-characters").addEventListener("click", (e) => {
 document.getElementById("room").addEventListener("click", (e) => {
   if (!e.target.closest(".character") && !e.target.closest(".bubble")) closeBubble();
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBubble(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeBubble(); closeModal(); closeServerTip(); } });
 
 // A canned fixture for ?demo=1 — every pill, every ship state, cycled on a timer, for
 // designing the room and for the screenshot script to catch every pose even on a quiet day.
@@ -2507,6 +2991,19 @@ function buildDemoStates() {
     ship: {ci: {state: ciState, sha: "abc1234", url: "#"}, ...(dep ? {deploy: dep} : {})},
   });
   const L = (lane, kind, pill, extra) => ({lane, kind, unit: `watcher@${lane}`, pill, link: "#", ...extra});
+  const server = {box: {cpus: 4, load1: 0.42, mem_total: 8589934592, mem_used: 2894311424, disk_total: 50407927808,
+                        disk_used: 33793540096, uptime: 2786044},
+                  tokens: {hours: 24, total: 1240000, per_hour: 51667,
+                           per_project: [{name: "alpha", tokens: 840000}, {name: "beta", tokens: 400000}]},
+                  proxmox: [{name: "proxmox", vmid: null, type: "node", status: "online", cpu: 0.0096, maxcpu: 8, mem: 14646714368, maxmem: 67314438144},
+                            {name: "ollama", vmid: 101, type: "lxc", status: "stopped", cpu: 0, maxcpu: 4, mem: 0, maxmem: 21474836480},
+                            {name: "lonestar-web", vmid: 104, type: "lxc", status: "running", cpu: 0.0006, maxcpu: 2, mem: 1641701376, maxmem: 8589934592},
+                            {name: "agents", vmid: 107, type: "lxc", status: "running", cpu: 0.0083, maxcpu: 4, mem: 2894311424, maxmem: 8589934592},
+                            {name: "ci", vmid: 108, type: "lxc", status: "running", cpu: 0.00002, maxcpu: 4, mem: 2403749888, maxmem: 8589934592}]};
+  const wins = {days: 7, items: [
+    {project: "alpha", lane: "alpha", card: {number: 8, url: "#"}, title: "The floor gets a studio", when: now},
+    {project: "alpha", lane: "alpha-design", card: {number: 6, url: "#"}, title: "A mockup to approve, right on the floor", when: new Date(Date.now() - 86400000 * 2).toISOString()},
+    {project: "beta", lane: "beta", card: {number: 1, url: "#"}, title: "Hello, world", when: new Date(Date.now() - 86400000 * 5).toISOString()}]};
   return [
     {header: {box: "demo", time: now, needs_steve_total: 0},
      projects: [proj("alpha", [L("alpha", "Build", "working", {card: {number: 10, url: "#"}, stage: "Building", minutes: 4}),
@@ -2514,7 +3011,8 @@ function buildDemoStates() {
                                L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
                 "passing"),
                 proj("beta", [L("beta", "Build", "idle", {reason: "Nothing to pick up right now."})], "passing")],
-     recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}]},
+     recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}],
+     server, wins},
     {header: {box: "demo", time: now, needs_steve_total: 2},
      projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B",
                                images: [DEMO_PNG]}),
@@ -2532,14 +3030,15 @@ function buildDemoStates() {
                            {when: "2026-09-20T00:00:00Z",
                             images: [{url: DEMO_PNG, label: "the only shot on file", letter: null, recommended: false}]}]}]),
                 proj("beta", [L("beta", "Build", "sleeping", {reason: "Card #2 did not finish; trying again shortly."})], "passing")],
-     recent: [{project: "alpha", lane: "alpha", card: {number: 11, url: "#"}, when: now, quota: "~$0.90 equivalent (subscription — not billed)"}]},
+     recent: [{project: "alpha", lane: "alpha", card: {number: 11, url: "#"}, when: now, quota: "~$0.90 equivalent (subscription — not billed)"}],
+     server, wins},
     {header: {box: "demo", time: now, needs_steve_total: 0},
      projects: [proj("alpha", [L("alpha", "Build", "sleeping", {reason: "Card #9 did not finish; trying again shortly."}),
                                L("alpha-design", "Design", "idle", {reason: "Nothing to pick up right now."}),
                                L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
                 "running"),
                 proj("beta", [L("beta", "Build", "working", {card: {number: 2, url: "#"}, stage: "Building", minutes: 12})], "running")],
-     recent: []},
+     recent: [], server, wins},
   ];
 }
 
@@ -2562,7 +3061,7 @@ window.__demoGoto = function (i) {
 
 if (new URLSearchParams(location.search).get("demo")) {
   demoTick();
-  setInterval(demoTick, 4000);
+  window.__demoTimer = setInterval(demoTick, 4000);  // the suite stops it to step by hand
 } else {
   refresh();
   setInterval(refresh, 30000);
@@ -2653,7 +3152,7 @@ class Cache:
             self._maybe_background_rebuild()
 
 
-def make_handler(cache, tail_lookup=None, ship_lookup=None):
+def make_handler(cache, tail_lookup=None, ship_lookup=None, card_lookup=None):
     """`tail_lookup`, when given, is `(lane, card, file, pos) -> dict | None` — the Peek
     endpoint's `/api/tail.json`, built on `tail_status` above. `None` (the default) keeps
     every existing caller — `bin/test-floor.py`'s `FixedCache` included — working exactly
@@ -2686,6 +3185,18 @@ def make_handler(cache, tail_lookup=None, ship_lookup=None):
                 names = parse_qs(parsed.query).get("project")
                 result = ship_lookup(names[0] if names else "") if ship_lookup else None
                 self._send_json(result)
+            elif path == "/api/card.json":
+                # The bulletin board's Peek: the card itself, by project name and number.
+                qs = parse_qs(parsed.query)
+                try:
+                    number = int((qs.get("number") or ["0"])[0])
+                except ValueError:
+                    number = 0
+                project = (qs.get("project") or [""])[0]
+                # A card gh cannot read is a 200 that says so, not a 404 the page's own
+                # error line would count as the page breaking.
+                card = card_lookup(project, number) if card_lookup and number else None
+                self._send_json(card if card is not None else {"unreadable": True})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -2767,7 +3278,8 @@ def main(argv):
                             images_fn=board_images, rounds_fn=board_rounds,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
-                            ratelimit_fn=board_ratelimit)
+                            ratelimit_fn=board_ratelimit, box_stats_fn=box_stats,
+                            proxmox_fn=fetch_proxmox)
 
     def build_lanes():
         # Peek's own lookup, kept separate from `build()`'s state so a lane's worktree
@@ -2799,7 +3311,10 @@ def main(argv):
         lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
         lambda: read_deploy_history(deploy_state))
 
-    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup, ship_lookup))
+    card_lookup = make_card_lookup(
+        lambda: {p["name"]: p["project_repo"] for p in group_by_project(lane_cache.get().values())})
+
+    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup, ship_lookup, card_lookup))
     print(f"floor.py: serving on {host}:{port}, refreshing every {refresh_sec}s")
     try:
         server.serve_forever()

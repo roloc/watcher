@@ -32,19 +32,27 @@ refresh. Close it with the ×, or tap outside
 it — nothing there can change a card either. If the page ever shows a red line saying its own code hit an error,
 that is the page telling you it is broken: file a card.
 
-**Studio**, top of the floor page, is the same thing as an office. Every board has a room
-with its name on the door (tap it for the board), a desk per bot, and the board's counts on
-the whiteboard. A bot at its desk is working; hands up at its desk is paused. An idle bot
-leaves for the **break room** — coffee machine, vending machine, couch — and wanders about
-there with a mug until a card comes; its empty desk says whose it is. A bot that fell asleep
-after a failure naps on the couch. Every card waiting on you sits in the **in-tray** on your desk in **your office**, with the
-same picture carousel as the floor's strip, whether or not a bot is standing there for it; a
-bot that needs you walks in and waves in front of the desk, holding up the carousel's current
-picture, and the light over your
-door turns red the moment anyone does (amber when something is paused, asleep or blocked;
-green when all is well). The **bulletin board** in the hallway is the last cards worked,
-newest first; it slides sideways on a phone. Tap a bot for what it just said; tap that for
-the full Peek. **Floor** takes you back. Still read-only, still just a look.
+**Studio**, top of the floor page, is the office — made for a computer's browser; a phone
+pans it. Across the top: the **break room** and **your office**, a hallway between them. The
+main hallway runs across the middle. Along the bottom: a room per board, hallways between,
+and the **server room** at the end. Every board's room has a desk per bot (its screen lit
+and scanning while it works), the counter by the door for triage, the ship station on a
+shelf, and the board's counts on the whiteboard. Hands up at a desk is paused. An idle bot
+walks out of its door, down the hallway and into the break room, and wanders about there with
+a mug until a card comes; its empty desk says whose it is. A bot that fell asleep after a
+failure naps on the couch. A bot that needs you walks to your office and waves in front of
+your desk, holding up the picture its card is waiting on, and the light over your door turns
+red the moment anyone does (amber when something is paused, asleep or blocked; green when all
+is well). Every card waiting on you is in the **in-tray** on your desk, with the same picture
+carousel as the floor's strip. Two boards hang on your wall, and both open when clicked: the
+**bulletin board** lists every card being worked right now and every card recently worked,
+and **Peek** on any of them shows the card itself — its text, labels and last comments — with
+a link to open it on GitHub; the **wins board** lists everything the teams shipped this week,
+by board, with the count on the board itself. Hover the **server room** for the box's load,
+memory and disk, the tokens the bots moved in the last day, and (once the box has a Proxmox
+token — ask for it) every box in the lab with its CPU and memory. Tap a bot for what it just
+said; tap that for the full Peek. **Floor** takes you back. Still read-only, still just a
+look.
 
 ## The columns
 
