@@ -94,6 +94,10 @@ write_log(5, ts(150), outcome="routed to designer", ended_in="In progress")
 # #6: declined — gates itself back to Backlog, not a park
 write_log(6, ts(140), outcome="declined (gated)", ended_in="Backlog")
 
+# #15: labeled awaiting-rebuild and left In progress on purpose (card #85) — in progress,
+# but not a failure, the same as #5's routing
+write_log(15, ts(135), outcome="awaiting rebuild", ended_in="In progress")
+
 # #7: died ticks, one per documented subtype
 write_log(7, ts(100), subtype="error_max_turns")
 write_log(8, ts(90), subtype="error_max_budget_usd")
@@ -125,7 +129,7 @@ ticks = metrics.load_lane(STATE)
 issues = metrics.group_by_issue(ticks)
 
 print("1. loading tolerates every shape and ignores non-log files")
-check("15 real ticks loaded (14 cards' worth, #2 has two)", len(ticks) == 15, str(len(ticks)))
+check("16 real ticks loaded (15 cards' worth, #2 has two)", len(ticks) == 16, str(len(ticks)))
 check("a stray .stderr is skipped (no card #12)", 12 not in issues)
 check("a card-*.json that fails the filename regex is skipped too (no card #99)", 99 not in issues)
 check("empty file (#10) still counts as a died tick, subtype unknown",
@@ -153,6 +157,7 @@ check("#4's two consecutive no-progress ticks count as one spawner park",
       spawner_parked == 1, str(spawner_parked))
 check("#5 (routed) is not a park", metrics.group_by_issue(ticks)[5][0].non_terminal is False)
 check("#6 (declined/Backlog) is not a park", metrics.group_by_issue(ticks)[6][0].non_terminal is False)
+check("#15 (awaiting-rebuild) is not a park", metrics.group_by_issue(ticks)[15][0].non_terminal is False)
 
 print("4. deaths, grouped by subtype (missing/corrupt fold into 'unknown')")
 deaths = metrics.death_counts(ticks)

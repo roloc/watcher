@@ -101,6 +101,9 @@ ALLOWED_FIELDS = {
     "recent", "project", "when", "quota",
     # the ship station (after the lanes): CI on main, and the box's own deployer
     "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
+    # the Needs Steve strip (card #96): every Stuck card on the board, whichever lane last
+    # touched it, with every round it has been asked, newest first
+    "stuck", "rounds", "label", "letter", "recommended",
 }
 
 
@@ -866,8 +869,8 @@ def _fmt_quota(cost):
 # --- assembling the page's data -----------------------------------------------------------
 
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
-                 images_fn=None, now=None, box_name=None, ci_fetcher=None, deploy_fn=None,
-                 deploy_repo=None):
+                 images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
+                 deploy_fn=None, deploy_repo=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -898,8 +901,6 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
             desk = lane_desk(lane, items_by_number, p["board_url"], now,
                               last_tick=ticks[-1] if ticks else None,
                               unit_active=active, ask=ask_fn, images=images_fn)
-            if desk["pill"] == "needs_steve":
-                needs_steve_total += 1
             lane_out.append(desk)
 
             for t in ticks[-RECENT_PER_LANE:]:
@@ -909,6 +910,27 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                     "card": {"number": t.issue, "url": url},
                     "when": t.mtime.isoformat(), "quota": _fmt_quota(t.cost),
                 })
+
+        # Every card Stuck on this board, whichever lane last touched it — a lane's own
+        # desk only shows the one card that lane itself last worked (`lane_desk`, above),
+        # so a design lane that ran five cards back to back and parked three of them would
+        # otherwise show only the last of the three, or none at all if its very last card
+        # wasn't one of them (card #96's "why nothing shows today"). Counted once per card,
+        # never once per lane: `needs_steve_total` comes from this list, not from how many
+        # lane pills happen to read `needs_steve`, so the same Stuck card is never counted
+        # twice and a Stuck card no lane's last tick points at is still counted once.
+        stuck_out = []
+        for it in items:
+            if it.get("state") != "OPEN" or (it.get("status") or "").strip() != STUCK_STATUS:
+                continue
+            num = it.get("number")
+            url = it.get("url") or p["board_url"]
+            ask_text = ask_fn(num, p["project_repo"]) if ask_fn else ""
+            rounds = rounds_fn(num, p["project_repo"]) if rounds_fn else []
+            stuck_out.append({"card": {"number": num, "url": url}, "ask": ask_text or "",
+                               "rounds": rounds})
+        stuck_out.sort(key=lambda s: s["card"]["number"])
+        needs_steve_total += len(stuck_out)
 
         ci = None
         if ci_fetcher:
@@ -929,7 +951,8 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                     needs_steve_total += 1
 
         entry = {"name": p["name"], "board_url": p["board_url"],
-                  "counts": project_counts(items), "lanes": lane_out, "ship": ship}
+                  "counts": project_counts(items), "lanes": lane_out, "ship": ship,
+                  "stuck": stuck_out}
         if board_error:
             entry["board_error"] = board_error
         out_projects.append(entry)
@@ -986,6 +1009,28 @@ def board_images(issue, project_repo, board_py=None, timeout=20):
     if r.returncode != 0:
         return []
     return [line.strip() for line in r.stdout.splitlines() if line.strip()]
+
+
+def board_rounds(issue, project_repo, board_py=None, timeout=20):
+    """Every `Needs Steve` round for this card, newest first — `board.py images
+    --all-rounds`, which wraps `needs_steve_rounds` — each with its own pictures, lettered
+    by direction (card #96: the Needs Steve strip's carousel, which flips through every
+    round a card has been asked, not only the lane's own single-thumbnail desk pill).
+    Same `GH_REPO` pinning as `board_ask`/`board_images`, for the same reason. `[]` on any
+    failure — a card the strip then shows with its ask and no pictures, never a crash."""
+    board_py = board_py or os.path.join(HERE, "board.py")
+    env = dict(os.environ, GH_REPO=project_repo)
+    try:
+        r = subprocess.run([sys.executable, board_py, "images", str(issue), "--all-rounds"],
+                            capture_output=True, text=True, env=env, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if r.returncode != 0:
+        return []
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return []
 
 
 # --- the HTTP server -----------------------------------------------------------------------
@@ -1050,6 +1095,67 @@ INDEX_HTML = """<!doctype html>
   .mockup-thumb {
     max-width: 120px; max-height: 90px; border-radius: 6px; border: 1px solid var(--line);
     object-fit: cover;
+  }
+  /* The Needs Steve strip (card #96): every card Stuck on this board, whichever lane last
+     touched it — a mockup to approve right here, flipped through with a carousel, never
+     only a link off to the card. */
+  .needs-strip { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .needs-strip.compact { gap: 6px; }
+  .needs-card {
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+    background: color-mix(in srgb, var(--needs) 5%, transparent); flex: 1 1 220px; max-width: 320px;
+  }
+  .needs-strip.compact .needs-card { flex: 0 0 auto; max-width: 150px; padding: 4px 6px; font-size: 11px; }
+  .needs-ask {
+    display: block; font-size: 13px; font-weight: 600; color: inherit; text-decoration: none;
+    margin-bottom: 6px;
+  }
+  .needs-strip.compact .needs-ask { font-size: 10px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .carousel { }
+  .car-frame {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); border-radius: 6px; overflow: hidden; min-height: 60px;
+  }
+  .car-img { display: block; max-width: 100%; max-height: 160px; width: 100%; object-fit: contain; }
+  .carousel.compact .car-img { max-height: 70px; }
+  .car-btn {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+    border: none; background: rgba(0, 0, 0, .45); color: #fff; width: 26px; height: 26px;
+    border-radius: 999px; font-size: 16px; line-height: 1; cursor: pointer; padding: 0;
+  }
+  .carousel.compact .car-btn { width: 18px; height: 18px; font-size: 12px; }
+  .car-prev { left: 4px; } .car-next { right: 4px; }
+  .car-chip {
+    position: absolute; top: 4px; right: 4px; background: var(--working); color: #fff;
+    font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  }
+  .carousel.compact .car-chip { font-size: 9px; padding: 0 4px; }
+  .car-caption { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  .carousel.compact .car-caption { font-size: 10px; }
+  .car-counter { font-size: 11px; color: var(--dim); }
+  /* The studio's own row gets the same strip in miniature, plus a chip list so a crowded
+     row still names every card even where there is no room to draw its pictures. */
+  .row-stuck {
+    position: absolute; right: 2%; display: flex; flex-direction: column; align-items: flex-end;
+    gap: 4px; max-width: 46%; pointer-events: auto;
+  }
+  .row-stuck-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  /* In the office the same strip is the in-tray on Steve's desk: a paper tray in front of
+     it, chips grouped by board, the carousel inside. */
+  .row-stuck.in-tray {
+    right: auto; max-width: none; box-sizing: border-box; align-items: stretch; padding: 4px 6px;
+    border: 1.5px solid var(--line); border-radius: 4px;
+    background: color-mix(in srgb, var(--needs) 8%, var(--panel));
+  }
+  .row-stuck.in-tray .row-stuck-chips { justify-content: flex-start; align-items: center; }
+  .row-stuck.in-tray .carousel { align-self: center; width: min(100%, 150px); }
+  .tray-label, .tray-board {
+    font-size: 9px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .05em;
+  }
+  .tray-board { margin-left: 4px; text-transform: none; letter-spacing: 0; }
+  .row-stuck-chip {
+    font-size: 10px; font-weight: 600; color: var(--needs); background: color-mix(in srgb, var(--needs) 14%, transparent);
+    border-radius: 999px; padding: 1px 6px; text-decoration: none;
   }
   /* The characters (card #40: "a small character at a desk"): one pose per pill. */
   .sprite { display: block; width: 100%; max-width: 150px; height: 84px; margin-bottom: 4px; }
@@ -1246,7 +1352,7 @@ INDEX_HTML = """<!doctype html>
   .pin-card:nth-child(3n)::before { background: #58a6ff; }
   .pin-card:nth-child(3n+1)::before { background: var(--working); }
   .pin-card b { font-weight: 600; }
-  #room-rooms, #room-desks, #room-characters { position: absolute; inset: 0; pointer-events: none; }
+  #room-rooms, #room-desks, #room-characters, #room-stuck { position: absolute; inset: 0; pointer-events: none; }
   #room-rooms .room-name { pointer-events: auto; }
   .character {
     /* As wide as its own plate (not a fixed 30px that the plate overflowed to the right),
@@ -1324,6 +1430,7 @@ window.addEventListener("unhandledrejection", function () {
     <div class="pin-wall" id="pin-wall"></div>
     <div id="beacon" class="beacon-green"></div>
     <div id="room-desks"></div>
+    <div id="room-stuck"></div>
     <div id="room-characters"></div>
   </div>
 </div>
@@ -1495,6 +1602,114 @@ function mockupThumbsHTML(images, cls) {
          onerror="this.style.display='none'">`).join("")}</div>`;
 }
 
+// The Needs Steve carousel (card #96): every picture a Stuck card's Needs Steve comments
+// have shown, newest round first, lettered by direction when the comment named one —
+// shared by the floor's per-project strip and the studio's per-row strip, so the two
+// views never disagree about what a card's carousel holds. The slide a viewer left a
+// card on persists across refreshes (keyed by card number, not re-read from the server),
+// so a poll mid-flip never snaps it back to the first picture.
+const carouselSlide = {};
+
+function stuckSlides(entry) {
+  const slides = [];
+  (entry.rounds || []).forEach((r, i) => {
+    (r.images || []).forEach(img => slides.push({...img, when: r.when, dated: i !== 0}));
+  });
+  return slides;
+}
+
+// The slide a card's carousel is on right now — clamped into range, so a prev/next past
+// either end wraps instead of pointing at nothing.
+function currentSlide(entry) {
+  const slides = stuckSlides(entry);
+  if (!slides.length) return {slides, idx: 0, slide: null};
+  const n = entry.card.number;
+  let idx = carouselSlide[n] || 0;
+  if (idx < 0) idx = slides.length - 1;
+  if (idx >= slides.length) idx = 0;
+  carouselSlide[n] = idx;
+  return {slides, idx, slide: slides[idx]};
+}
+
+function carouselHTML(entry, compact) {
+  const {slides, idx, slide} = currentSlide(entry);
+  if (!slide) return "";
+  const n = entry.card.number;
+  const chip = slide.letter
+    ? `<span class="car-chip">${esc(slide.letter)}${slide.recommended ? " ★" : ""}</span>` : "";
+  const cap = [slide.label, slide.dated ? relTime(slide.when) : ""].filter(Boolean).map(esc).join(" · ");
+  const arrows = slides.length > 1
+    ? `<button class="car-btn car-prev" type="button" data-car-prev="${n}" aria-label="Previous picture">&lsaquo;</button>
+       <button class="car-btn car-next" type="button" data-car-next="${n}" aria-label="Next picture">&rsaquo;</button>`
+    : "";
+  return `<div class="carousel${compact ? " compact" : ""}" data-carousel="${n}" tabindex="0">
+    <div class="car-frame">
+      ${arrows}
+      <img class="car-img" src="${esc(slide.url)}" alt="${esc(slide.label || "Mockup to approve")}"
+           loading="lazy" onerror="this.style.display='none'">
+      ${chip}
+    </div>
+    <div class="car-caption">${cap}</div>
+    <div class="car-counter">${idx + 1} of ${slides.length}</div>
+  </div>`;
+}
+
+// Every card Stuck on this board, whichever lane last touched it (card #96's "why
+// nothing shows today": a lane's own desk only ever shows the one card it last worked,
+// so a design lane that parked three cards and moved on to a fourth showed none of the
+// three). `compact` is the studio's own miniature version of the same strip.
+function stuckStripHTML(stuck, compact) {
+  if (!stuck || !stuck.length) return "";
+  return `<div class="needs-strip${compact ? " compact" : ""}">${stuck.map(s => `
+    <div class="needs-card">
+      <a class="needs-ask" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}: ${esc(s.ask) || "needs a decision"}</a>
+      ${carouselHTML(s, compact)}
+    </div>`).join("")}</div>`;
+}
+
+function stepCarousel(cardNum, dir) {
+  carouselSlide[cardNum] = (carouselSlide[cardNum] || 0) + dir;
+  if (lastState) { render(lastState); renderStudio(lastState); }
+  // render()/renderStudio() replace the carousel's own DOM node (a fresh innerHTML each
+  // time), so a re-render drops focus to <body> and every arrow key after the first one
+  // stops doing anything — the strip exists twice (floor and studio), and only the
+  // currently-visible copy can actually take focus back.
+  for (const el of document.querySelectorAll(`[data-carousel="${cardNum}"]`)) {
+    el.focus({preventScroll: true});
+    if (document.activeElement === el) break;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const prev = e.target.closest("[data-car-prev]"), next = e.target.closest("[data-car-next]");
+  if (!prev && !next) return;
+  e.preventDefault(); e.stopPropagation();
+  const btn = prev || next;
+  stepCarousel(Number(btn.dataset.carPrev || btn.dataset.carNext), prev ? -1 : 1);
+});
+// Arrow keys and a swipe, for a carousel that has focus (phone-first: `tabindex` above
+// makes a tap on the frame itself focus it, no separate "activate" step needed).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const el = document.activeElement && document.activeElement.closest("[data-carousel]");
+  if (!el) return;
+  e.preventDefault();
+  stepCarousel(Number(el.dataset.carousel), e.key === "ArrowLeft" ? -1 : 1);
+});
+let swipeStartX = null, swipeCard = null;
+document.addEventListener("touchstart", (e) => {
+  const el = e.target.closest("[data-carousel]");
+  if (!el) { swipeCard = null; return; }
+  swipeCard = Number(el.dataset.carousel);
+  swipeStartX = e.changedTouches[0].clientX;
+}, {passive: true});
+document.addEventListener("touchend", (e) => {
+  if (swipeCard == null || swipeStartX == null) return;
+  const dx = e.changedTouches[0].clientX - swipeStartX;
+  if (Math.abs(dx) > 40) stepCarousel(swipeCard, dx < 0 ? 1 : -1);
+  swipeCard = swipeStartX = null;
+}, {passive: true});
+
 function deskHTML(d) {
   let detail = "";
   if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
@@ -1517,7 +1732,10 @@ function deskHTML(d) {
   </div>`;
 }
 
+let lastState = null;
+
 function render(state) {
+  lastState = state;
   document.getElementById("box").textContent =
     "The floor — " + state.header.box +
     (state.header.needs_steve_total > 0 ? ` — ${state.header.needs_steve_total} need Steve` : "");
@@ -1530,6 +1748,7 @@ function render(state) {
       <div class="counts">Ready ${p.counts.ready} · In progress ${p.counts.in_progress} · Backlog ${p.counts.backlog}
         ${p.board_error ? `<span class="alert"> — board unreachable</span>` : ""}</div>
       <div class="desks">${p.lanes.map(deskHTML).join("")}${shipHTML(p.ship, p.name)}</div>
+      ${stuckStripHTML(p.stuck)}
     </section>`).join("");
 
   const tbody = document.querySelector("#recent tbody");
@@ -1671,7 +1890,6 @@ document.addEventListener("click", (e) => {
 // rows, one per board, and read as the floor page drawn smaller — October 9, 2026: "this
 // should look like an office with workers wandering around".)
 
-let lastState = null;
 function showStudio() {
   document.getElementById("floor-view").style.display = "none";
   document.getElementById("studio").classList.add("open");
@@ -1788,6 +2006,7 @@ const EDGE = 10, GAP = 8, HALL_H = 64, ROOM_PAD = 6;
 const BREAK = {padTop: 86, rowH: 64, padBottom: 28};
 const BOSS = {padTop: 138, rowH: 100, padBottom: 28};
 const BOSS_EMPTY_H = 72;           // nobody waiting: just his desk
+const TRAY_CHIP_H = 34, TRAY_PIC_H = 146;   // the in-tray: chips alone, or chips and a compact carousel
 const TEAM = {padTop: 80, rowH: 68, padBottom: 20};
 const BREAK_EXTRA = 2;             // free spots in the break room, so a wanderer has somewhere to go
 
@@ -1876,13 +2095,19 @@ function computeStudio(state) {
   const bossW = narrow ? inner : inner - breakW - GAP;
   const nBreak = breakers.length + sleepers.length + BREAK_EXTRA;
   const breakH = roomHeight(nBreak, breakW, BREAK);
-  const bossH = needs.length ? roomHeight(needs.length, bossW, BOSS) : BOSS_EMPTY_H;
+  // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
+  // row of chips, or the chips and the compact carousel when a card has a picture.
+  const stuck = projects.flatMap(p => p.stuck || []);
+  const trayH = !stuck.length ? 0 : stuck.some(s => stuckSlides(s).length) ? TRAY_PIC_H : TRAY_CHIP_H;
+  const bossSpec = {...BOSS, padTop: BOSS.padTop + trayH};
+  const bossH = needs.length ? roomHeight(needs.length, bossW, bossSpec) : BOSS_EMPTY_H + trayH + (trayH ? 14 : 0);
   const bandH = Math.max(breakH, bossH);
   const breakRoom = {kind: "break", name: "Break room", x: EDGE, y: EDGE, w: breakW,
                      h: narrow ? breakH : bandH, door: narrow ? "left" : "bottom"};
   const boss = {kind: "boss", name: "Steve's office", w: bossW, door: "bottom",
                 x: narrow ? EDGE : EDGE + breakW + GAP, y: narrow ? EDGE + breakH + GAP : EDGE,
-                h: narrow ? bossH : bandH};
+                h: narrow ? bossH : bandH, spec: bossSpec,
+                tray: trayH ? {x: ROOM_PAD + 2, y: BOSS_EMPTY_H - 8, w: bossW - 2 * ROOM_PAD - 4, h: trayH} : null};
   rooms.push(breakRoom, boss);
   const hall = {x: EDGE, y: boss.y + boss.h + GAP, w: inner, h: HALL_H};
 
@@ -1929,7 +2154,7 @@ function computeStudio(state) {
     breakRoom.couch = {x: first.x - CHAR_W / 2 + 6 - breakRoom.x, w: last.x - first.x + CHAR_W - 12,
                        y: first.y - 24 - breakRoom.y};
   }
-  const vg = gridSpots(boss, needs.length, BOSS);
+  const vg = gridSpots(boss, needs.length, boss.spec);
   needs.forEach((l, i) => {
     const s = vg.spots[i];
     l.pos = {x: pct(s.x), y: s.y}; l.away = true; l.room = boss.name;
@@ -1996,6 +2221,22 @@ function plateHTML(kind, project, away) {
 // Characters keep the same DOM node across renders, so moving `left`/`top` is a CSS
 // transition — a walk — rather than a jump cut (`prefers-reduced-motion` drops it to a
 // jump cut on purpose). While the walk runs the figure bobs.
+// The mockup held up over a waving character's head — the carousel's own current slide
+// when this card has one (card #96: so flipping it in Steve's in-tray flips it here
+// too), the old single thumbnail otherwise (a demo fixture with no `rounds` of its own).
+function heldMockupHTML(l, stuckByCard) {
+  const entry = l.card && stuckByCard && stuckByCard[l.card.number];
+  if (entry) {
+    const {slide} = currentSlide(entry);
+    if (slide) {
+      return `<div class="character-mockup"><img class="mockup-thumb" src="${esc(slide.url)}"
+        alt="${esc(slide.label || "Mockup to approve")}" loading="lazy" onerror="this.style.display='none'"></div>`;
+    }
+    return "";
+  }
+  return mockupThumbsHTML((l.images || []).slice(0, 1), "character-mockup");
+}
+
 const charEls = {};
 function newCharacter(container, cls) {
   const el = document.createElement("div");
@@ -2006,7 +2247,7 @@ function newCharacter(container, cls) {
   container.appendChild(el);
   return el;
 }
-function renderCharacters(lanes) {
+function renderCharacters(lanes, stuckByCard) {
   const container = document.getElementById("room-characters");
   const seen = new Set();
   for (const l of lanes) {
@@ -2023,7 +2264,7 @@ function renderCharacters(lanes) {
     el.dataset.room = l.room;
     // Held up over the waving character, the same mockup the floor's own desk shows — the
     // room Steve walks instead of the card he'd otherwise click through to (card #91).
-    const held = l.pill === "needs_steve" ? mockupThumbsHTML((l.images || []).slice(0, 1), "character-mockup") : "";
+    const held = l.pill === "needs_steve" ? heldMockupHTML(l, stuckByCard) : "";
     el.innerHTML = held + characterSVG(l.pill, laneLook(l.lane)) + plateHTML(l.kind, l.project, l.away);
     el.style.left = l.pos.x + "%";
     el.style.top = l.pos.y + "px";
@@ -2067,8 +2308,29 @@ function markWallScroll() {
   wall.classList.toggle("scrolls", wall.scrollWidth > wall.clientWidth + 1);
 }
 
-// The light over Steve's door: red while anyone is waiting in his office, amber when a
-// lane is paused or asleep or a build is blocked, green otherwise.
+// The in-tray on Steve's desk (card #96: "in each board's row, on the floor page and in
+// the studio" — in the office, the cards waiting on him are on his desk): every Stuck
+// card's chip, always, grouped by board, and one carousel for whichever of them actually
+// has a picture to show (a direction linked only as a `.html` mockup has none yet, and
+// still gets its chip with no frame beside it).
+function renderRoomStuck(projects, boss) {
+  const groups = [];
+  for (const p of projects || []) if ((p.stuck || []).length) groups.push(p);
+  if (!groups.length || !boss.tray) { document.getElementById("room-stuck").innerHTML = ""; return; }
+  const chips = groups.map(p => `<span class="tray-board">${esc(p.name)}</span>` + p.stuck.map(s =>
+    `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}</a>`
+  ).join("")).join("");
+  const withPics = groups.flatMap(p => p.stuck).filter(s => stuckSlides(s).length);
+  const pic = withPics.length ? carouselHTML(withPics[0], true) : "";
+  document.getElementById("room-stuck").innerHTML = `<div class="row-stuck in-tray"
+      style="left:${boss.x + boss.tray.x}px;top:${boss.y + boss.tray.y}px;width:${boss.tray.w}px">
+    <div class="row-stuck-chips"><span class="tray-label">In-tray</span>${chips}</div>
+    ${pic}
+  </div>`;
+}
+
+// The light over Steve's door: red while anyone is waiting in his office or a card sits in
+// his in-tray, amber when a lane is paused or asleep or a build is blocked, green otherwise.
 function renderBeacon(state) {
   let color = "green";
   if ((state.header.needs_steve_total || 0) > 0) {
@@ -2088,8 +2350,11 @@ function renderStudio(state) {
   lastState = state;
   const office = computeStudio(state);
   renderRooms(office);
+  const stuckByCard = {};
+  for (const p of state.projects || []) for (const s of p.stuck || []) stuckByCard[s.card.number] = s;
   renderRoomDesks(office.lanes);
-  renderCharacters(office.lanes);
+  renderRoomStuck(state.projects, office.boss);
+  renderCharacters(office.lanes, stuckByCard);
   renderShipDock(office.ships);
   renderPinWall(state.recent);
   renderBeacon(state);
@@ -2171,11 +2436,24 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBubbl
 
 // A canned fixture for ?demo=1 — every pill, every ship state, cycled on a timer, for
 // designing the room and for the screenshot script to catch every pose even on a quiet day.
+// A tiny real PNG (a few grey pixels) — enough for the browser to actually draw an <img>,
+// never a network fetch, so the demo and the screenshot script work with no network.
+const DEMO_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQVR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC";
+// Three directions of four shots each (commands/watch.md's own words for the fixture a
+// screen change ships with) — one Needs Steve round, lettered and recommended like a
+// real one (card #96).
+function demoDirectionShots() {
+  const labels = ["phone light", "phone dark", "desktop light", "desktop dark"];
+  const dir = (letter, recommended) => labels.map(label => ({url: DEMO_PNG, label, letter, recommended}));
+  return [...dir("A", true), ...dir("B", false), ...dir("C", false)];
+}
+
 function buildDemoStates() {
   const now = new Date().toISOString();
-  const proj = (name, lanes, ciState, dep) => ({
+  const proj = (name, lanes, ciState, dep, stuck) => ({
     name, board_url: "#", counts: {ready: 2, in_progress: 1, backlog: 3},
-    lanes, ship: {ci: {state: ciState, sha: "abc1234", url: "#"}, ...(dep ? {deploy: dep} : {})},
+    lanes, stuck: stuck || [],
+    ship: {ci: {state: ciState, sha: "abc1234", url: "#"}, ...(dep ? {deploy: dep} : {})},
   });
   const L = (lane, kind, pill, extra) => ({lane, kind, unit: `watcher@${lane}`, pill, link: "#", ...extra});
   return [
@@ -2186,12 +2464,22 @@ function buildDemoStates() {
                 "passing"),
                 proj("beta", [L("beta", "Build", "idle", {reason: "Nothing to pick up right now."})], "passing")],
      recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}]},
-    {header: {box: "demo", time: now, needs_steve_total: 1},
+    {header: {box: "demo", time: now, needs_steve_total: 2},
      projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B",
-                               images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQVR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC"]}),
+                               images: [DEMO_PNG]}),
                                L("alpha-design", "Design", "paused", {}),
                                L("alpha-triage", "Triage", "working", {card: {number: 12, url: "#"}, stage: "Claimed", minutes: 1})],
-                "failing"),
+                "failing", null,
+                // #11 is this lane's own card (also the podium's held picture); #13 is a
+                // card no lane's last tick points at — the design lane parked it earlier
+                // and has since moved on (card #96's "why nothing shows today"), and it
+                // still has to show up here.
+                [{card: {number: 11, url: "#"}, ask: "Pick A or B",
+                  rounds: [{when: now, images: demoDirectionShots()}]},
+                 {card: {number: 13, url: "#"}, ask: "Which weekend fixture should the home page use",
+                  rounds: [{when: now, images: []},
+                           {when: "2026-09-20T00:00:00Z",
+                            images: [{url: DEMO_PNG, label: "the only shot on file", letter: null, recommended: false}]}]}]),
                 proj("beta", [L("beta", "Build", "sleeping", {reason: "Card #2 did not finish; trying again shortly."})], "passing")],
      recent: [{project: "alpha", lane: "alpha", card: {number: 11, url: "#"}, when: now, quota: "~$0.90 equivalent (subscription — not billed)"}]},
     {header: {box: "demo", time: now, needs_steve_total: 0},
@@ -2378,7 +2666,7 @@ def main(argv):
     def build():
         return build_state(projects_dir, state_root, fetch_board,
                             unit_active_fn=systemctl_is_active, ask_fn=board_ask,
-                            images_fn=board_images,
+                            images_fn=board_images, rounds_fn=board_rounds,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo))
 

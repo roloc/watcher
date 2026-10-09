@@ -174,11 +174,28 @@ open(os.path.join(STATE, "beta", "PAUSE"), "w").close()
 tick_log("beta", 3, "20260927T090000Z")
 transcript(f"{ROOT}/beta-worktrees", 3, [say("Parked: the build needs a decision.")])
 
+# A tiny real PNG, inline — no network, same one bin/floor.py's own demo fixture uses.
+TINY_PNG = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQ"
+            "VR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC")
+
 BOARDS = {
     ("roloc", 1): [{"number": 7, "state": "OPEN", "status": "In progress", "stage": "Building",
-                    "labels": [], "url": "https://github.com/roloc/alpha/issues/7"}],
+                    "labels": [], "url": "https://github.com/roloc/alpha/issues/7"},
+                   # #778 is Stuck but no lane's own last tick points at it (alpha's last
+                   # card is #7, alpha-design's is #5) — exactly card #96's "why nothing
+                   # shows today": a lane that moved on must not make this card invisible.
+                   {"number": 778, "state": "OPEN", "status": "Stuck - Needs help", "stage": "Parked",
+                    "labels": [], "url": "https://github.com/roloc/alpha/issues/778"}],
     ("roloc", 2): [],
 }
+
+ROUNDS = {778: [{"when": "2026-10-09T08:00:00Z", "images": [
+    {"url": TINY_PNG, "label": "phone", "letter": "A", "recommended": True},
+    {"url": TINY_PNG, "label": "desktop", "letter": "A", "recommended": True},
+    {"url": TINY_PNG, "label": "phone", "letter": "B", "recommended": False},
+    {"url": TINY_PNG, "label": "desktop", "letter": "B", "recommended": False},
+]}]}
+ASKS = {778: "Needs Steve: pick a direction for the earlier thing"}
 
 
 class LiveCache:
@@ -189,7 +206,9 @@ class LiveCache:
         if self.broken:
             raise RuntimeError("the fixture's data endpoint is switched off")
         return floor.build_state(PROJECTS, STATE, lambda o, n: BOARDS.get((o, n), []),
-                                 unit_active_fn=lambda u: True, ask_fn=lambda i, r: "",
+                                 unit_active_fn=lambda u: True,
+                                 ask_fn=lambda i, r: ASKS.get(i, ""),
+                                 rounds_fn=lambda i, r: ROUNDS.get(i, []),
                                  box_name="test-box")
 
 
@@ -331,6 +350,68 @@ try:
               b.eval("[...document.querySelectorAll('a')].every(a => a.target === '_blank')"))
         shot(b, "floor-desktop.png")
 
+        print("2b. the Needs Steve strip (card #96): a mockup to approve right on the "
+              "floor, for a card Stuck on the board even though no lane's own desk shows it")
+        check("#778's ask is on the strip, though no lane's last tick is #778",
+              "pick a direction for the earlier thing" in text, text[:800])
+        slide = "document.querySelector('.carousel[data-carousel=\"778\"]')"
+        check("the carousel is drawn, with a picture", b.wait_for(f"!!{slide}?.querySelector('.car-img')"))
+        check("it opens on direction A, recommended, 1 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "phone"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "1 of 4")
+        b.click('[data-car-next="778"]')
+        check("next: still A, now the desktop shot, 2 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
+        b.click('[data-car-next="778"]')
+        check("next again: direction B, not recommended, phone, 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "B"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "phone"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        b.click('[data-car-prev="778"]')
+        check("previous: back to direction A's desktop shot, 2 of 4",
+              b.eval(f"{slide}.querySelector('.car-chip').textContent") == "A ★"
+              and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
+              and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
+        check("no uncaught exception after flipping through the carousel", b.errors == [], b.errors)
+
+        # Arrow keys, pressed more than once in a row: a re-render replaces the carousel's
+        # own DOM node on every step, which used to drop focus to <body> after the first
+        # key — so the first ArrowRight worked and every one after it silently did nothing.
+        b.eval(f"{slide}.focus()")
+        check("the carousel can take keyboard focus", b.eval(f"document.activeElement === {slide}"))
+        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
+               "{key: 'ArrowRight', bubbles: true}))")
+        check("first ArrowRight: direction B's phone shot, 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
+               "{key: 'ArrowRight', bubbles: true}))")
+        check("second ArrowRight in a row still moves it: direction B's desktop shot, 4 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "4 of 4")
+        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
+               "{key: 'ArrowLeft', bubbles: true}))")
+        check("ArrowLeft steps back: 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+
+        # A swipe: the same prev/next, from a touch gesture rather than a tap on an arrow.
+        swipe = """((dx) => {
+          const el = document.querySelector('.carousel[data-carousel="778"]');
+          const r = el.getBoundingClientRect(), y = r.top + r.height / 2, x = r.left + r.width / 2;
+          const touch = (cx) => new Touch({identifier: 1, target: el, clientX: cx, clientY: y});
+          el.dispatchEvent(new TouchEvent('touchstart', {touches: [touch(x)], changedTouches: [touch(x)], bubbles: true}));
+          el.dispatchEvent(new TouchEvent('touchend', {touches: [], changedTouches: [touch(x + dx)], bubbles: true}));
+        })"""
+        b.eval(f"{swipe}(-80)")  # a swipe left: forward, same as next
+        check("a swipe left moves forward: direction B's desktop shot, 4 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "4 of 4")
+        b.eval(f"{swipe}(80)")  # a swipe right: back
+        check("a swipe right moves back: 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        check("no uncaught exception after the keyboard and swipe round trip", b.errors == [], b.errors)
+        shot(b, "floor-needs-strip.png")
+
         print("3. Peek is on every lane's desk, whatever the lane is doing (card #63)")
         for lane in LANES:
             check(f"{lane}: a Peek button, drawn and big enough to hit",
@@ -462,6 +543,13 @@ try:
         check("the page is no wider than the screen",
               b.eval("document.documentElement.scrollWidth <= window.innerWidth"),
               b.eval("[document.documentElement.scrollWidth, window.innerWidth]"))
+        check("the Needs Steve carousel fills the width on a phone, one picture at a time, "
+              "and its arrows are big enough for a thumb",
+              b.eval("""(() => {
+                const c = document.querySelector('.carousel[data-carousel="778"]').getBoundingClientRect();
+                const btn = document.querySelector('[data-car-next="778"]').getBoundingClientRect();
+                return c.right <= window.innerWidth + 1 && btn.width >= 20 && btn.height >= 20;
+              })()"""))
         shot(b, "floor-phone.png")
         b.click(peek_button("alpha"))
         check("Peek opens and fills at phone width",
@@ -570,6 +658,21 @@ try:
               "document.querySelector('.office-room.boss').textContent.includes('STEVE')"))
         check("nobody stands on anybody", overlaps(b) == [], overlaps(b))
 
+        print("12a. the in-tray on Steve's desk (card #96): #778 is there, named for alpha, "
+              "even though no lane is in his office for it")
+        check("#778's chip is in the in-tray, after its board's name",
+              b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778"
+              and b.eval("document.querySelector('.tray-board')?.textContent") == "alpha")
+        check("...and the tray's own carousel shows its picture too",
+              b.wait_for("!!document.querySelector('#room-stuck .car-img')"))
+        check("the tray is in Steve's office, in front of his desk, and the office grew to hold it",
+              b.eval("""(() => { const t = document.querySelector('.in-tray').getBoundingClientRect();
+                      const o = document.querySelector('.office-room.boss').getBoundingClientRect();
+                      const d = document.querySelector('.office-room.boss .prop').getBoundingClientRect();
+                      return t.left >= o.left && t.right <= o.right && t.top >= d.bottom - 12 && t.bottom <= o.bottom; })()"""))
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "studio-needs-strip.png")
+
         print("12b. the floor Steve sent back on October 8, 2026: seven lanes, six idle, three boards")
         b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); true")
         settled(b)
@@ -635,8 +738,9 @@ try:
                     "'.desk-monitor[data-lane=\"alpha-design\"] .scanline')).opacity") == "0")
 
         print("13. the light over Steve's door reads the same state the pills do")
-        check("a paused lane and a failing build: amber, not green",
-              b.eval("document.getElementById('beacon').className") == "beacon-amber")
+        check("a paused lane, a failing build, AND #778 sitting Stuck on alpha's board: red "
+              "— a Stuck card outranks amber even with no lane pointing at it (card #96)",
+              b.eval("document.getElementById('beacon').className") == "beacon-red")
         check("the light is actually visible — inside #room's own box, which clips "
               "(it used to sit mostly above it, clipped to a sliver) — and over his door",
               b.eval("""(() => {
@@ -758,6 +862,12 @@ try:
               "right there in the room — no click through to the card needed",
               b.eval("!!document.querySelector("
                     "'.character[data-pill=\"needs_steve\"] .character-mockup img')"))
+        HELD_ALT = "document.querySelector('.character[data-pill=\"needs_steve\"] .character-mockup img')?.alt"
+        check("it starts on direction A's first shot",
+              b.eval(HELD_ALT) == "phone light", b.eval(HELD_ALT))
+        b.eval("stepCarousel(11, 1)")
+        check("stepping the shared carousel (card #96) moves what the podium holds too, "
+              "not just the floor's own strip", b.eval(HELD_ALT) == "phone dark", b.eval(HELD_ALT))
         settled(b)
         check("it walked to Steve's office, and its plate says whose it is",
               info(b, "alpha") == ["needs_steve", "Steve's office", "Build\nalpha"], info(b, "alpha"))

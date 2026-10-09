@@ -204,6 +204,11 @@ INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-7200}"
 # Each one is a full board read, so it is not done every poll.
 STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-300}"
 case "$STAGE_SWEEP_SEC" in ''|*[!0-9]*) echo "spawn.sh: STAGE_SWEEP_SEC must be a number, not '$STAGE_SWEEP_SEC'" >&2; exit 64 ;; esac
+# The awaiting-rebuild stale-label sweep (sweep_awaiting_rebuild, card #85): a card that has
+# carried `awaiting-rebuild` this long with no project workflow ever dropping the label is
+# parked in Stuck rather than waiting forever on a notifier that may be dead.
+AWAITING_REBUILD_STALE_SEC="${AWAITING_REBUILD_STALE_SEC:-43200}"
+case "$AWAITING_REBUILD_STALE_SEC" in ''|*[!0-9]*) echo "spawn.sh: AWAITING_REBUILD_STALE_SEC must be a number, not '$AWAITING_REBUILD_STALE_SEC'" >&2; exit 64 ;; esac
 LANE_AGENTS="${LANE_AGENTS:-}"
 LANE_COMMAND="${LANE_COMMAND:-/watch}"
 LANE_WORKDIR="${LANE_WORKDIR:-card}"
@@ -516,6 +521,28 @@ $undo"; then
   fi
 }
 
+# note_awaiting_rebuild <n> — the one FYI comment per wait, the first poll this lane sees
+# the card still carrying `awaiting-rebuild` (card #85: the tick's own exit for a merged fix
+# whose artifact is gated on a known downstream rebuild, commands/watch.md §3). The marker
+# under $WATCHER_STATE/awaiting-rebuild/<n>.noted guards the comment, the same way
+# waiting/<n> guards note_waiting's; `.since`, read but never written here, is
+# sweep_awaiting_rebuild's own clock for the 12-hour stale-label safety net below. Never in
+# --dry-run.
+note_awaiting_rebuild() {
+  local n="$1" dir="$WATCHER_STATE/awaiting-rebuild" noted
+  [ "${DRY_RUN:-0}" != 1 ] || return 0
+  mkdir -p "$dir"
+  noted="$dir/$n.noted"
+  [ -f "$noted" ] && return 0
+  if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card is waiting on a downstream rebuild, so I am not launching a tick for it.
+- I pick it up again on the poll after the label drops.
+- Nothing for Steve to do."; then
+    : > "$noted"
+  else
+    log "awaiting-rebuild FYI comment failed for #$n; retried on a later poll"
+  fi
+}
+
 # wip_count — how many cards are open in the In progress column right now, counted from
 # ROWS (the poll we already did). Blank lines do not count; an empty ROWS is 0.
 wip_count() {
@@ -564,6 +591,14 @@ pick_card() {
     # Another lane's card. Nothing below this line — the parked-ok reconciliation, the
     # attempts safety net, the pick itself — is this instance's business for it.
     if ! lane_takes "$r_agent"; then log "#$r_issue skipped: agent '$r_agent' is not in this lane ($LANE_AGENTS)"; continue; fi
+    # awaiting-rebuild (card #85): a tick already merged this card's fix and found the
+    # artifact gated on a known downstream rebuild (commands/watch.md §3); it left the
+    # label as its own hand-off and ended the turn. Skip it, the same way in-flight is
+    # skipped above, with one FYI comment the first poll that sees it — never launch a
+    # tick for it while the label is on, and never bump its attempts for sitting here.
+    case ",$r_flags," in
+      *,awaiting-rebuild,*) note_awaiting_rebuild "$r_issue"; log "#$r_issue skipped: awaiting-rebuild"; continue ;;
+    esac
     attn="$WATCHER_STATE/attempts/$r_issue"
     attempts=0
     [ -f "$attn" ] && attempts="$(cat "$attn" 2>/dev/null || echo 0)"
@@ -647,7 +682,10 @@ pick_card() {
       note_waiting "$r_issue" "$blockers" "$blockers_src"
       continue
     fi
-    [ "${DRY_RUN:-0}" = 1 ] || rm -f "$WATCHER_STATE/waiting/$r_issue"
+    if [ "${DRY_RUN:-0}" != 1 ]; then
+      rm -f "$WATCHER_STATE/waiting/$r_issue"
+      rm -f "$WATCHER_STATE/awaiting-rebuild/$r_issue.since" "$WATCHER_STATE/awaiting-rebuild/$r_issue.noted"
+    fi
     ISSUE="$r_issue"; PRIORITY="$r_priority"; AGENT="$r_agent"; TITLE="$r_title"
     return 0
   done <<< "${1-$ROWS}"
@@ -1050,7 +1088,7 @@ for p in prs:
 
 handle_exit() {
   local n="$1" json="$2" rc="$3"
-  local subtype total_cost num_turns denials elapsed_min show has_in_flight is_closed is_in_progress attn attempts pr
+  local subtype total_cost num_turns denials elapsed_min show has_in_flight is_closed is_in_progress attn attempts pr has_awaiting_rebuild
 
   subtype="$(json_field "$json" 'd.get("subtype","unknown")')"; subtype="${subtype:-unknown}"
   total_cost="$(json_field "$json" 'd.get("total_cost_usd","")')"
@@ -1136,6 +1174,15 @@ try:
 except Exception:
     print("-")' "$show")"
   if [ "$is_in_progress" = yes ] && ! lane_takes "$agent_now"; then left_lane=yes; fi
+  # The tick's own awaiting-rebuild exit (card #85, commands/watch.md §3): it merged the
+  # card's fix, found the artifact gated on a known downstream rebuild, labeled the card
+  # and left it In progress on purpose — a success, the same as leaving In progress to
+  # route a design card to another lane, not a no-progress attempt.
+  has_awaiting_rebuild="$(python3 -c 'import json,sys
+try:
+    d=json.loads(sys.argv[1]); print("yes" if "awaiting-rebuild" in d.get("labels",[]) else "no")
+except Exception:
+    print("no")' "$show")"
 
   # Only ever sweeps the card THIS run holds — never a claim it did not make.
   if [ "$has_in_flight" = yes ] && [ "$(cat "$CURRENTFILE" 2>/dev/null || true)" = "$n" ]; then
@@ -1177,7 +1224,7 @@ except Exception:
   fi
 
   attn="$WATCHER_STATE/attempts/$n"
-  if [ "$subtype" = "success" ] && { [ "$is_in_progress" != yes ] || [ "$left_lane" = yes ]; }; then
+  if [ "$subtype" = "success" ] && { [ "$is_in_progress" != yes ] || [ "$left_lane" = yes ] || [ "$has_awaiting_rebuild" = yes ]; }; then
     # The tick succeeded and moved the card out of In progress (Done, In review, Stuck by
     # its own contract) — reset rather than increment, so a card that comes back to
     # In progress later (a fresh pass, a re-open) starts its two-attempt budget over
@@ -1186,6 +1233,8 @@ except Exception:
     rm -f "$attn"
     if [ "$left_lane" = yes ]; then
       log "tick #$n succeeded and relabeled the card for another lane (agent '$agent_now'): attempts/$n reset"
+    elif [ "$has_awaiting_rebuild" = yes ]; then
+      log "tick #$n succeeded and labeled the card awaiting-rebuild: attempts/$n reset"
     else
       log "tick #$n succeeded and left In progress: attempts/$n reset"
     fi
@@ -1449,6 +1498,112 @@ sweep_closed_stages() {
   return 0
 }
 
+# --- the awaiting-rebuild stale-label sweep ----------------------------------------------
+# A tick that merges a fix gated on a known downstream rebuild labels the card
+# `awaiting-rebuild` and ends (commands/watch.md §3, card #85): pick_card (above) skips it
+# until a project's own workflow removes the label when the rebuild finishes. That workflow
+# runs off this box — a dead notifier, a rebuild that silently never ran, a label dropped
+# by hand with nobody re-checking the card — so the wait cannot be open-ended. Every poll,
+# for this lane's cards (lane_takes, the same complement rule every other sweep uses), a
+# card still carrying the label after AWAITING_REBUILD_STALE_SEC (default 12 hours) is
+# parked in Stuck. park_stale_rebuild, not park_stuck: "failed 2 attempts" would be a lie
+# here, and attempts was reset to 0 the moment the label went on.
+sweep_awaiting_rebuild() {
+  local r_issue r_priority r_agent r_flags r_stage r_title now since age dir marker
+  local parked_list="" new_rows="" line first tab nl
+  tab="$(printf '\t')"; nl="$(printf '\n')"
+  dir="$WATCHER_STATE/awaiting-rebuild"
+  now="$(date +%s)"
+  while IFS=$'\t' read -r r_issue r_priority r_agent r_flags r_stage r_title; do
+    [ -z "$r_issue" ] && continue
+    case ",$r_flags," in *,awaiting-rebuild,*) ;; *) continue ;; esac
+    lane_takes "$r_agent" || continue
+    mkdir -p "$dir"
+    marker="$dir/$r_issue.since"
+    [ -f "$marker" ] || echo "$now" > "$marker"
+    since="$(cat "$marker" 2>/dev/null || echo "$now")"
+    case "$since" in ''|*[!0-9]*) since="$now" ;; esac
+    age=$((now - since))
+    [ "$age" -ge "$AWAITING_REBUILD_STALE_SEC" ] || continue
+    park_stale_rebuild "$r_issue"
+    parked_list="$parked_list $r_issue "
+  done <<< "${ROWS:-}"
+  # $ROWS was read once at the top of this poll (poll_board), before this sweep ran, so a
+  # card just parked above still sits in it as "In progress, awaiting-rebuild" — without
+  # dropping it here, pick_card (which reads the same $ROWS right after this function
+  # returns) would process that same stale row this same poll and have
+  # note_awaiting_rebuild post a fresh "still waiting" FYI on a card that was just moved to
+  # Stuck a moment ago.
+  if [ -n "$parked_list" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      first="${line%%"$tab"*}"
+      case "$parked_list" in *" $first "*) continue ;; esac
+      new_rows="${new_rows:+$new_rows$nl}$line"
+    done <<< "${ROWS:-}"
+    ROWS="$new_rows"
+  fi
+}
+
+# park_stale_rebuild <n> — the move+comment for the sweep above. Shares park_stuck's two
+# markers (parked/<n>, parked-ok/<n>: "the one Stuck comment went out", "the move actually
+# landed") so the two park paths can never both fire for the same card, but not its body —
+# "this card failed 2 attempts" is not what happened here, so this writes its own.
+park_stale_rebuild() {
+  local n="$1" hours
+  hours=$(( AWAITING_REBUILD_STALE_SEC / 3600 ))
+  [ "$hours" -ge 1 ] || hours=1
+  local tried="$WATCHER_STATE/parked/$n" ok="$WATCHER_STATE/parked-ok/$n"
+  mkdir -p "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok"
+  rm -f "$WATCHER_STATE/inreview/$n.requeued"
+
+  if [ ! -f "$ok" ]; then
+    if $WATCHER_BOARD move "$n" "Stuck - Needs help" --why "The downstream rebuild this card is waiting on never reported back, so I parked it."; then
+      : > "$ok"
+      # Only now: removing the label here is what stops sweep_awaiting_rebuild (and
+      # pick_card's own skip, above) from ever looking at this card again, so it must not
+      # happen before the move actually lands — otherwise a failed move above leaves this
+      # card unlabeled and with attempts still at 0, and the very next poll's pick_card
+      # launches a fresh tick on it while this comment is telling Steve it is parked.
+      $WATCHER_GH issue edit "$n" --remove-label in-flight --remove-label awaiting-rebuild || true
+    else
+      log "move to Stuck failed for #$n; will keep retrying on later polls"
+    fi
+  fi
+
+  if [ -f "$tried" ]; then
+    log "#$n already has a Stuck comment on file; not re-commenting"
+  else
+    local retry_note=""
+    [ -f "$ok" ] || retry_note=$'\n- The move to Stuck did not go through yet; I will keep retrying it.'
+    local body
+    body="🤖 **Needs Steve: the downstream rebuild this card is waiting on never reported back.**
+
+- Moved to **Stuck - Needs help**. It had been waiting over $hours hours.
+- Why: the project's own rebuild-finished notice never arrived.${retry_note}
+
+**Question: what should happen to this card?**
+- **A. Check and try again** (recommended) — look at whether the rebuild actually ran, then move it back to **In progress**.
+- **B. Fix the card first** — make it smaller or clearer, then move it back to **In progress**.
+- **C. Drop it** — close the card.
+
+Reply A, B or C on this card, or say which way you lean, then move it.
+
+<details><summary>Details</summary>
+
+- Logs: $WATCHER_LOGS
+
+</details>"
+    $WATCHER_BOARD stage "$n" Parked >/dev/null 2>&1 || true
+    if $WATCHER_GH issue comment "$n" --body "$body"; then
+      : > "$tried"
+    else
+      log "stale-rebuild comment failed for #$n; retried on a later poll"
+    fi
+  fi
+  rm -f "$WATCHER_STATE/awaiting-rebuild/$n.since" "$WATCHER_STATE/awaiting-rebuild/$n.noted"
+}
+
 # --- one poll iteration --------------------------------------------------------------------
 tick_once() {
   # Every poll, before anything else — see reconcile_stale_current's own comment for why
@@ -1475,6 +1630,7 @@ tick_once() {
 
   sweep_in_review
   sweep_closed_stages
+  sweep_awaiting_rebuild
 
   QUEUED=0
   PROMOTE_FROM=""

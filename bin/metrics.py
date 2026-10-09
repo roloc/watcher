@@ -112,10 +112,15 @@ class Tick:
         """A tick that leaves the card no better off than before it ran — the shape
         `spawn.sh`'s attempts counter treats as one of the two failures that get a card
         parked. A died tick always qualifies; a `success` tick only when it left the card
-        In progress under THIS lane (routing to another lane is progress, not a failure)."""
+        In progress under THIS lane — neither routing to another lane nor labeling the
+        card `awaiting-rebuild` (card #85) is a failure, and `spawn.sh`'s own
+        `handle_exit` resets the attempt count for both the same way."""
         if self.died:
             return True
-        return self.ended_in == "In progress" and "routed to" not in (self.outcome or "").lower()
+        if self.ended_in != "In progress":
+            return False
+        outcome = (self.outcome or "").lower()
+        return "routed to" not in outcome and "awaiting rebuild" not in outcome
 
 
 def load_log(path):

@@ -431,6 +431,7 @@ run() {
   BOARD_REVIEW_FILE="${BOARD_REVIEW_FILE:-/dev/null}" BOARD_REVIEW_FAIL="${BOARD_REVIEW_FAIL:-0}" \
   INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-}" INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-}" \
   STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-}" BOARD_SWEEP_FILE="${BOARD_SWEEP_FILE:-}" BOARD_SWEEP_FAIL="${BOARD_SWEEP_FAIL:-0}" \
+  AWAITING_REBUILD_STALE_SEC="${AWAITING_REBUILD_STALE_SEC:-}" \
   BOARD_SHOW_FILE="${BOARD_SHOW_FILE:-/dev/null}" BOARD_SHOW_FAIL="${BOARD_SHOW_FAIL:-0}" \
   BOARD_MOVE_FAIL="${BOARD_MOVE_FAIL:-0}" \
   BOARD_MOVE_FAIL_COUNT="${BOARD_MOVE_FAIL_COUNT:-}" BOARD_MOVE_COUNTER_FILE="${BOARD_MOVE_COUNTER_FILE:-}" \
@@ -1576,6 +1577,130 @@ board_show '{"number":600,"state":"OPEN","status":"In progress","labels":[]}'
 mkdir -p "$STATE/attempts"; echo 1 > "$STATE/attempts/600"
 LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>&1 || true
 if grepped "board.py move 600 Stuck - Needs help"; then pass "…but a tick that leaves it unlabeled and In progress is still an attempt: parked at 2"; else flunk "unlabeled still counts" "$(cat "$TESTLOG")"; fi
+
+# ============================================================================
+echo "33b. awaiting-rebuild (card #85): a card carrying the label is never launched, gets"
+echo "     exactly one FYI comment across two polls, and no attempt is counted — until a"
+echo "     project workflow drops the label, when the very next poll launches it"
+# ============================================================================
+fresh_state
+board_list $'610\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting on the rebuild'
+OUT="$(run --dry-run 2>"$TMP/arb.err")"; RC=$?
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'nothing claimable' && grep -q "#610 skipped: awaiting-rebuild" "$TMP/arb.err"; then
+  pass "dry-run: the card is skipped, never picked"
+else
+  flunk "dry-run awaiting-rebuild" "rc=$RC out=[$OUT] err=[$(cat "$TMP/arb.err")]"
+fi
+if not_grepped "gh issue comment"; then pass "dry-run posts no FYI comment either (claim/write nothing)"; else flunk "dry-run commented" "$(cat "$TESTLOG")"; fi
+
+fresh_state
+board_list $'610\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting on the rebuild'
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+WATCHER_MAX_POLLS=2 run >/dev/null 2>&1 || true
+comments="$(grep -c "gh issue comment 610 --body 🤖 FYI: this card is waiting on a downstream rebuild" "$TESTLOG")"
+if [ "$comments" = 1 ] && [ ! -f "$STATE/attempts/610" ] && not_grepped "/watch 610"; then
+  pass "two polls: exactly one FYI comment, never launched, no attempt ever counted"
+else
+  flunk "awaiting-rebuild wait" "comments=$comments attempts=$(cat "$STATE/attempts/610" 2>/dev/null) $(cat "$TESTLOG")"
+fi
+if [ -f "$STATE/awaiting-rebuild/610.noted" ] && [ -f "$STATE/awaiting-rebuild/610.since" ]; then
+  pass "both markers on file while the wait continues"
+else
+  flunk "awaiting-rebuild markers" "$(ls "$STATE/awaiting-rebuild" 2>/dev/null)"
+fi
+
+# a project workflow drops the label — the very next poll launches it, and clears the markers
+board_list $'610\tP2\tbuilder\t-\tFix merged, waiting on the rebuild'
+board_show '{"number":610,"state":"OPEN","status":"In progress","labels":[]}'
+run --once >/dev/null 2>&1 || true
+if grepped "/watch 610" && [ ! -f "$STATE/awaiting-rebuild/610.since" ] && [ ! -f "$STATE/awaiting-rebuild/610.noted" ]; then
+  pass "label dropped → launched on the next poll, its wait markers cleared"
+else
+  flunk "post-label-drop pick" "$(cat "$TESTLOG") $(ls "$STATE/awaiting-rebuild" 2>/dev/null)"
+fi
+
+echo "33c. …the tick's own exit that SETS the label is a success: attempts reset, not bumped"
+fresh_state
+board_list $'611\tP2\tbuilder\t-\tFix merged, now waiting on the rebuild'
+board_show '{"number":611,"state":"OPEN","status":"In progress","labels":["awaiting-rebuild"]}'
+mkdir -p "$STATE/attempts"; echo 1 > "$STATE/attempts/611"
+CLAUDE_SUBTYPE=success CLAUDE_RC=0
+run --once >/dev/null 2>"$TMP/arb2.err" || true
+if [ ! -f "$STATE/attempts/611" ] && grep -q "labeled the card awaiting-rebuild: attempts/611 reset" "$TMP/arb2.err" && not_grepped "board.py move 611"; then
+  pass "card left In progress but now carries awaiting-rebuild → attempts reset, nothing parked"
+else
+  flunk "awaiting-rebuild exit success" "attempts=$(cat "$STATE/attempts/611" 2>/dev/null) err=[$(cat "$TMP/arb2.err")] $(cat "$TESTLOG")"
+fi
+if not_grepped "board.py unclaim 611" && not_grepped "gh issue comment 611"; then
+  pass "quiet exit: no sweeper comment, the same as routing a card to another lane"
+else
+  flunk "unexpected sweeper noise" "$(cat "$TESTLOG")"
+fi
+
+echo "33d. …12 hours with no word back (AWAITING_REBUILD_STALE_SEC) parks it, with its own"
+echo "     wording — never park_stuck's 'failed 2 attempts' — and attempts are never touched"
+fresh_state
+board_list $'612\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting a long time'
+AWAITING_REBUILD_STALE_SEC=0 run --once >/dev/null 2>&1 || true
+if grepped "board.py move 612 Stuck - Needs help"; then pass "stale label → parked in Stuck"; else flunk "stale-label park" "$(cat "$TESTLOG")"; fi
+stuck_comment="$(grep 'gh issue comment 612' "$TESTLOG" || true)"
+if printf '%s' "$stuck_comment" | grep -q 'Needs Steve' \
+   && printf '%s' "$stuck_comment" | grep -qi 'downstream rebuild' \
+   && ! printf '%s' "$stuck_comment" | grep -qi 'failed 2 attempts'; then
+  pass "its own Stuck comment — never claims the card 'failed 2 attempts'"
+else
+  flunk "stale-rebuild comment wording" "$stuck_comment"
+fi
+if grepped "gh issue edit 612 --remove-label in-flight --remove-label awaiting-rebuild"; then
+  pass "both labels removed on the way to Stuck"
+else
+  flunk "label removal on stale park" "$(cat "$TESTLOG")"
+fi
+if [ ! -f "$STATE/attempts/612" ]; then pass "attempts never touched by the stale sweep"; else flunk "attempts touched" "$(cat "$STATE/attempts/612" 2>/dev/null)"; fi
+if [ ! -f "$STATE/awaiting-rebuild/612.since" ] && [ ! -f "$STATE/awaiting-rebuild/612.noted" ]; then
+  pass "markers cleared once parked for staleness"
+else
+  flunk "stale markers survived the park" "$(ls "$STATE/awaiting-rebuild" 2>/dev/null)"
+fi
+if not_grepped "gh issue comment 612 --body 🤖 FYI: this card is waiting on a downstream rebuild"; then
+  pass "no separate 'still waiting' FYI in the SAME poll the stale park already fired (ROWS is stale-filtered after the sweep)"
+else
+  flunk "duplicate comment in one poll" "$(cat "$TESTLOG")"
+fi
+
+echo "33e. …a move to Stuck that FAILS must not strip the label: the card is still the"
+echo "     sweep's to retry, not a fresh pick with attempts back at 0"
+fresh_state
+board_list $'613\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting a long time'
+AWAITING_REBUILD_STALE_SEC=0 BOARD_MOVE_FAIL=1 run --once >/dev/null 2>&1 || true
+if not_grepped "gh issue edit 613 --remove-label"; then
+  pass "a failed move leaves both labels alone: the next poll's sweep still finds the card and retries the move"
+else
+  flunk "label stripped despite the move failing" "$(cat "$TESTLOG")"
+fi
+if grepped "gh issue comment 613"; then
+  comment_line="$(grep 'gh issue comment 613' "$TESTLOG")"
+  if printf '%s' "$comment_line" | grep -q 'move to Stuck did not go through yet'; then
+    pass "the Stuck comment still goes out, saying the move itself has not landed"
+  else
+    flunk "comment does not say the move is still pending" "$comment_line"
+  fi
+else
+  flunk "no comment at all on a failed move" "$(cat "$TESTLOG")"
+fi
+if [ ! -f "$STATE/parked-ok/613" ] && [ -f "$STATE/parked/613" ]; then
+  pass "parked-ok absent (move never landed), parked present (comment went out) — the sweep retries next poll"
+else
+  flunk "park markers after a failed move" "ok=$([ -f "$STATE/parked-ok/613" ] && echo yes || echo no) tried=$([ -f "$STATE/parked/613" ] && echo yes || echo no)"
+fi
+# the move succeeds on a later poll: NOW the labels come off, matching the comment already sent
+board_list $'613\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting a long time'
+AWAITING_REBUILD_STALE_SEC=0 run --once >/dev/null 2>&1 || true
+if grepped "gh issue edit 613 --remove-label in-flight --remove-label awaiting-rebuild" && grepped "board.py move 613 Stuck - Needs help"; then
+  pass "once the move lands, the labels come off and the card is truly done waiting"
+else
+  flunk "recovery poll did not finish the park" "$(cat "$TESTLOG")"
+fi
 
 # ============================================================================
 echo "In review sweep (watcher#18): a column nothing read becomes one the spawner empties"
