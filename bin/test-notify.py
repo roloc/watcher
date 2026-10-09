@@ -136,7 +136,7 @@ except SystemExit as e:
     check("move rejects stray arguments", "unexpected arguments" in str(e))
 
 print("6. board.py notify: a died run and a product breach, and nothing else")
-board.items = lambda: [dict(CARD, state="OPEN", status="In progress")]
+board.items = lambda fresh=False: [dict(CARD, state="OPEN", status="In progress")]
 sent.clear(); board.cmd_notify("87", "released", "The run ended after 12 min without finishing.")
 check("released carries the spawner's detail", len(sent) == 1 and "12 min" in embed()["description"])
 check("released names the card and links it",
@@ -146,7 +146,7 @@ check("breach carries the detector's detail",
       len(sent) == 1 and "Something broke" in last()["content"] and "0.7500" in embed()["description"])
 
 
-def board_down():
+def board_down(fresh=False):
     sys.exit("board.py: gh failed: outage")
 
 
@@ -179,7 +179,7 @@ cleared, looked_up = [], []
 board.gh = lambda q, **v: cleared.append(v["i"]) or {}
 board.project = lambda: (looked_up.append(1) or
                          ({"id": "P"}, {"Stage": {"id": "F", "name": "Stage", "options": []}}))
-board.items = lambda: [card(35, "CLOSED", "Parked"), card(36, "CLOSED", None),
+board.items = lambda fresh=False: [card(35, "CLOSED", "Parked"), card(36, "CLOSED", None),
                        card(37, "OPEN", "Parked"), card(38, "CLOSED", "Merging")]
 sent.clear()
 check("exit 0", board.cmd_sweep_stages() == 0)
@@ -188,16 +188,16 @@ check("every closed card with a Stage is emptied, whatever the Stage", cleared =
 check("an open card keeps its Stage (a parked card is still Parked)", "I37" not in cleared)
 check("no Discord post", not sent)
 cleared.clear(); looked_up.clear()
-board.items = lambda: [card(36, "CLOSED", None), card(37, "OPEN", "Parked")]
+board.items = lambda fresh=False: [card(36, "CLOSED", None), card(37, "OPEN", "Parked")]
 check("nothing stale → nothing cleared, and no second lookup",
       board.cmd_sweep_stages() == 0 and not cleared and not looked_up)
-board.items = lambda: [card(n, "CLOSED", "Merging") for n in range(100, 100 + board.SWEEP_MAX + 5)]
+board.items = lambda fresh=False: [card(n, "CLOSED", "Merging") for n in range(100, 100 + board.SWEEP_MAX + 5)]
 board.cmd_sweep_stages()
 check("one run empties at most SWEEP_MAX; the rest wait for the next",
       len(cleared) == board.SWEEP_MAX, str(len(cleared)))
 cleared.clear()
 board.project = lambda: ({"id": "P"}, {})
-board.items = lambda: [card(35, "CLOSED", "Parked")]
+board.items = lambda fresh=False: [card(35, "CLOSED", "Parked")]
 check("a board with no Stage field is a no-op", board.cmd_sweep_stages() == 0 and not cleared)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")
