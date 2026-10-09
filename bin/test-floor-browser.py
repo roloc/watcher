@@ -453,7 +453,7 @@ try:
         check("still no errors after the whole Review round trip", b.errors == [], b.errors)
         shot(b, "floor-needs-strip.png")
 
-        print("2c. card #106: the Ship desk names which release each lane on the box is on")
+        print("2g. card #106: the Ship desk names which release each lane on the box is on")
         ship_text = b.eval("document.querySelector('.desk.ship').textContent")
         check("the project that deploys names its own lanes: 2 of 3 on the live release",
               "alpha: 2 of 3 lane(s) on it" in ship_text, ship_text)

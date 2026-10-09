@@ -1042,10 +1042,11 @@ def board_images(issue, project_repo, board_py=None, timeout=20):
 def board_rounds(issue, project_repo, board_py=None, timeout=20):
     """Every `Needs Steve` round for this card, newest first — `board.py images
     --all-rounds`, which wraps `needs_steve_rounds` — each with its own pictures, lettered
-    by direction (card #96: the Needs Steve strip's carousel, which flips through every
-    round a card has been asked, not only the lane's own single-thumbnail desk pill).
-    Same `GH_REPO` pinning as `board_ask`/`board_images`, for the same reason. `[]` on any
-    failure — a card the strip then shows with its ask and no pictures, never a crash."""
+    by direction (card #96: the Needs Steve strip's Review overlay, card #100, which flips
+    through every round a card has been asked, not only the lane's own single-thumbnail
+    desk pill). Same `GH_REPO` pinning as `board_ask`/`board_images`, for the same reason.
+    `[]` on any failure — a card the strip then shows with its ask and no pictures, never
+    a crash."""
     board_py = board_py or os.path.join(HERE, "board.py")
     env = dict(os.environ, GH_REPO=project_repo)
     try:
