@@ -1594,8 +1594,8 @@ function laneReleaseLines(dep, lanes) {
     const behind = group.filter(l => !l.release || l.release.slice(0, 7) !== dep.live).map(l => l.lane);
     const onIt = group.length - behind.length;
     return behind.length
-      ? `  ${esc(name)}: ${onIt} of ${group.length} lane(s) on it (${behind.map(esc).join(", ")} still finishing on an older one)`
-      : `  ${esc(name)}: all ${group.length} lane(s) on it`;
+      ? `${esc(name)}: ${onIt} of ${group.length} lane(s) on it (${behind.map(esc).join(", ")} still finishing on an older one)`
+      : `${esc(name)}: all ${group.length} lane(s) on it`;
   });
 }
 function shipState(ship) {

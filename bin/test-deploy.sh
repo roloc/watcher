@@ -84,7 +84,11 @@ echo 'PROJECT_NAME=riffmap' > "$SEED/projects/riffmap.env"
 echo 'PROJECT_NAME=riffmap-design' > "$SEED/projects/riffmap-design.env"
 cat > "$SEED/deploy/install.sh" <<'EOF'
 #!/usr/bin/env bash
-echo "install $* NO_PULL=${INSTALL_NO_PULL:-0} DIR=${WATCHER_DIR:-}" >> "$CALLS"
+# "pointer=<target>" is what /opt/watcher itself resolves to AT THIS MOMENT — install.sh's
+# own unconditional floor-service restart depends on the pointer already being flipped by
+# the time this runs (found in review: it used to run before the flip, so the floor page
+# served one release behind every deploy).
+echo "install $* NO_PULL=${INSTALL_NO_PULL:-0} DIR=${WATCHER_DIR:-} pointer=$(basename "$(readlink -f "$TMP/opt/watcher" 2>/dev/null)")" >> "$CALLS"
 EOF
 # The replay suite: logs the commit it ran at and the box's HEAD at that moment.
 cat > "$SEED/bin/eval.sh" <<'EOF'
@@ -164,6 +168,8 @@ check "the suite ran at the target commit"             called "eval at $T"
 check "…before the pointer moved (box still at the old commit)" called "box $OLD"
 check "install.sh ran without its own pull"            called "NO_PULL=1"
 check "...from the release folder, not the old pointer" called "DIR=$RELEASES/${T:0:12}"
+check "the pointer is already flipped BEFORE install.sh runs (the floor page must see the new code when its restart happens inside install.sh)" \
+      called "pointer=${T:0:12}"
 check "install.sh got each project once"               called "install riffmap watcher NO_PULL"
 check "no lane is ever restarted by an ordinary deploy" not_called "systemctl restart"
 check "no PAUSE is ever written by an ordinary deploy"  [ ! -e "$STATE/riffmap/PAUSE" ] && [ ! -e "$STATE/watcher/PAUSE" ]
@@ -255,6 +261,29 @@ rm -f "$STATE/watcher/release"
 D="$(commit commands/watch.md v12d)"; run
 check "once no lane names it any more, an old release is swept" [ ! -d "$RELEASES/${A:0:12}" ]
 check "...but the newest two always survive"           [ -d "$RELEASES/${C:0:12}" ] && [ -d "$RELEASES/${D:0:12}" ]
+
+# 12e. A lane's own state dir can outlive the lane (a disabled/removed unit never cleans up
+# after itself) — its stale release/ file must not pin an old release against the sweep
+# forever, only an ACTIVE lane's own file counts.
+fresh
+mkdir -p "$STATE/retired-lane"
+E="$(commit commands/watch.md v12e)"; run
+echo "${E:0:12}" > "$STATE/retired-lane/release"   # "retired-lane" is not in $TMP/active
+F="$(commit commands/watch.md v12f)"; run
+G="$(commit commands/watch.md v12g)"; run
+check "a release only an INACTIVE lane's state still names is swept anyway" [ ! -d "$RELEASES/${E:0:12}" ]
+
+# 12f. A $WATCHER_DIR this script could not adopt (a permission problem renaming it) is
+# never silently nested into — the deploy holds instead of reporting success on a box that
+# never moved.
+fresh
+chmod 555 "$(dirname "$BOX")"
+H="$(commit commands/watch.md v12h)"
+run
+chmod 755 "$(dirname "$BOX")"
+check "a checkout the deployer cannot adopt is never silently nested into" \
+      out_lacks "now points at"
+check "...and the box genuinely did not move" [ "$(head_)" != "$H" ]
 
 # ============================================================================
 echo "Canary channel (card #46): a lane whose project file sets LANE_CHANNEL=canary"

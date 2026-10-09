@@ -75,17 +75,28 @@ else
 fi
 
 # Adopt a still-plain $WATCHER_DIR as its own first release — see deploy/autodeploy.sh's
-# own adopt_plain_checkout for the full reasoning; kept here too (above).
+# own adopt_plain_checkout for the full reasoning; kept here too (above). `mv`, not
+# `as_user "mv …"`: $WATCHER_DIR's parent (/opt) is root-owned, so only this script's own
+# root (never the watcher user) can rename an entry inside it (found in review alongside
+# deploy/autodeploy.sh's own copy of this bug: the as_user form failed silently, every
+# time, with the pointer never created).
 if [ ! -L "$WATCHER_DIR" ] && [ -d "$WATCHER_DIR/.git" ]; then
   cur="$(as_user "git -C '$WATCHER_DIR' rev-parse HEAD")"
   curdir="$RELEASES_DIR/${cur:0:12}"
   mkdir -p "$RELEASES_DIR"; chown "$RUN_AS:$RUN_AS" "$RELEASES_DIR" 2>/dev/null || true
   if [ ! -d "$curdir" ]; then
-    as_user "mv '$WATCHER_DIR' '$curdir'"
+    mv "$WATCHER_DIR" "$curdir" || { say "could not adopt $WATCHER_DIR as its own first release"; exit 1; }
   fi
   ln -sfn "$curdir" "$WATCHER_DIR"
   echo "${cur:0:12}" >> "$DSTATE/releases"
   say "adopted the existing checkout as its first release, ${cur:0:7}, at $curdir"
+fi
+# Never silently nest a release INSIDE $WATCHER_DIR — see deploy/autodeploy.sh's own swap()
+# for why this check matters (the adoption above failing leaves a real directory here, and
+# `ln -sfn` onto one succeeds by creating the link AS AN ENTRY inside it, not by replacing it).
+if [ -e "$WATCHER_DIR" ] && [ ! -L "$WATCHER_DIR" ]; then
+  say "$WATCHER_DIR is a real directory, not the pointer — refusing to flip onto it; fix by hand"
+  exit 1
 fi
 
 dir="$RELEASES_DIR/${SHA:0:12}"
@@ -95,12 +106,19 @@ if [ ! -d "$dir/.git" ]; then
   # own release_new for why (a release must outlive the one it was made from, and a plain
   # local clone's own default origin is the SOURCE PATH, not the true upstream).
   real_origin="$(as_user "git -C '$WATCHER_DIR' remote get-url origin")"
-  as_user "git clone -q '$WATCHER_DIR' '$dir' && git -C '$dir' remote set-url origin '$real_origin' && git -C '$dir' checkout -q --detach '$SHA'"
+  if ! as_user "git clone -q '$WATCHER_DIR' '$dir' && git -C '$dir' remote set-url origin '$real_origin' && git -C '$dir' checkout -q --detach '$SHA'"; then
+    as_user "rm -rf '$dir'"
+    say "could not clone ${SHA:0:7} into its own release folder"
+    exit 1
+  fi
 fi
+# The pointer flips BEFORE install.sh runs — see deploy/autodeploy.sh's own swap() for why:
+# install.sh's unconditional restart of watcher-floor.service must see the NEW code through
+# the pointer, or the floor page runs one release behind until the next deploy.
 say "moving $WATCHER_DIR to ${SHA:0:7} ($BRANCH)"
-INSTALL_NO_PULL=1 WATCHER_DIR="$dir" "$dir/deploy/install.sh" "$PROJECT"
 ln -sfn "$dir" "$WATCHER_DIR"
 echo "${SHA:0:12}" >> "$DSTATE/releases"
+INSTALL_NO_PULL=1 WATCHER_DIR="$dir" "$dir/deploy/install.sh" "$PROJECT"
 say "code at $(as_user "git -C '$WATCHER_DIR' log --oneline -1")"
 
 # A lane this commit added to the project: started right away, same as an ordinary deploy.

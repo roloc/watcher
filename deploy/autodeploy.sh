@@ -533,8 +533,13 @@ adopt_plain_checkout() {
   sha="$(wgit 'rev-parse HEAD')"
   dir="$(release_dir "$sha")"
   mkdir -p "$RELEASES_DIR"; chown "$RUN_AS:$RUN_AS" "$RELEASES_DIR" 2>/dev/null
+  # `mv`, not `as_user "mv …"`: $WATCHER_DIR's PARENT (/opt) is root-owned, so the watcher
+  # user cannot rename an entry inside it — only this script's own root can (found in
+  # review: the as_user form failed silently here on a real box, every run, forever, with
+  # the pointer never created and no hold to say why). The directory's own contents stay
+  # watcher:watcher; only the rename needs root.
   if [ ! -d "$dir" ]; then
-    as_user "mv '$WATCHER_DIR' '$dir'" || { say "could not adopt $WATCHER_DIR as its own first release; leaving it as a plain checkout"; return 1; }
+    mv "$WATCHER_DIR" "$dir" || { say "could not adopt $WATCHER_DIR as its own first release; leaving it as a plain checkout"; return 1; }
   fi
   ln -sfn "$dir" "$WATCHER_DIR"
   echo "${sha:0:12}" >> "$DSTATE/releases"
@@ -581,8 +586,13 @@ release_new() {
 # the next run.
 sweep_releases() {
   [ -d "$RELEASES_DIR" ] || return 0
-  local inuse="" f name d newest
-  for f in "$STATE_ROOT"/*/release; do
+  local inuse="" f name d newest l
+  # Only a lane that is actually running right now can protect a release this way — a
+  # lane's own state directory outlives the lane itself (a disabled or removed unit never
+  # cleans up after itself), and a stale release/ file in it would otherwise pin an old
+  # release against the sweep forever.
+  for l in $(active_lanes); do
+    f="$STATE_ROOT/$l/release"
     [ -f "$f" ] || continue
     name="$(cat "$f" 2>/dev/null)"
     [ -n "$name" ] && inuse="$inuse
@@ -603,7 +613,7 @@ $name"
 # own comment on WATCHER_HERE), so moving the pointer disturbs nothing in flight.
 swap() {
   local tgt="$1" cur="$2" force="$3" dir lanes projects l f p new=()
-  adopt_plain_checkout
+  adopt_plain_checkout || return 1
   dir="$(release_dir "$tgt")"
   if [ ! -d "$dir/.git" ]; then
     dir="$(release_new "$tgt")" || return 1
@@ -611,15 +621,29 @@ swap() {
   if [ "$force" = force ]; then
     as_user "git -C '$dir' reset -q --hard $tgt" || return 1
   fi
-  lanes="$(active_lanes | tr '\n' ' ')"
-  projects="$(for l in $lanes; do project_of "$l"; done | sort -u | tr '\n' ' ')"
-  # Runs from the NEW release's own install.sh, told (via WATCHER_DIR) that IT is the
-  # folder to set up — never the live pointer, which has not moved yet.
-  # shellcheck disable=SC2086
-  WATCHER_DIR="$dir" INSTALL_NO_PULL=1 "$dir/deploy/install.sh" $projects >/dev/null \
-    || say "install.sh reported a problem (see above); flipping the pointer anyway"
+  # Never silently nest a release INSIDE $WATCHER_DIR: adopt_plain_checkout above is what
+  # turns a real directory there into a symlink, and if it could not (a permission problem,
+  # logged there already), $WATCHER_DIR is still a real directory here — `ln -sfn` onto
+  # one does not fail, it creates the link AS AN ENTRY INSIDE it (found in review: that
+  # ran clean, logged "now points at", and never actually moved the box, forever, with
+  # nothing holding the commit to say why).
+  if [ -e "$WATCHER_DIR" ] && [ ! -L "$WATCHER_DIR" ]; then
+    say "$WATCHER_DIR is a real directory, not the pointer — refusing to flip onto it; fix by hand"
+    return 1
+  fi
+  # The pointer flips BEFORE install.sh runs: install.sh's own unconditional restart of
+  # watcher-floor.service (never drained or paused) resolves /opt/watcher at the moment IT
+  # restarts the unit — flip first, and that restart already serves the new code; flip
+  # after, and the floor page runs one release behind until the NEXT deploy (found in
+  # review). install.sh is still told WATCHER_DIR="$dir" explicitly either way, so its own
+  # self-references never depend on the pointer having moved.
   ln -sfn "$dir" "$WATCHER_DIR" || { say "could not flip $WATCHER_DIR onto $dir"; return 1; }
   echo "${tgt:0:12}" >> "$DSTATE/releases"
+  lanes="$(active_lanes | tr '\n' ' ')"
+  projects="$(for l in $lanes; do project_of "$l"; done | sort -u | tr '\n' ' ')"
+  # shellcheck disable=SC2086
+  WATCHER_DIR="$dir" INSTALL_NO_PULL=1 "$dir/deploy/install.sh" $projects >/dev/null \
+    || say "install.sh reported a problem (see above); the pointer already points at ${tgt:0:7}"
   say "$WATCHER_DIR now points at ${tgt:0:7}; each lane picks it up at its own next idle poll"
   # A lane file this commit added, for a project already running: started right away, the
   # same as every other lane adopting the new code at its own pace — unlike before this
