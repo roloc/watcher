@@ -619,6 +619,9 @@ try:
         check("the studio opens and the floor's own sections hide",
               b.wait_for(STUDIO_OPEN)
               and b.eval("getComputedStyle(document.getElementById('floor-view')).display") == "none")
+        # The page wanders one idle lane every nine seconds on its own. This section measures
+        # where people stand, so it wanders them itself (12c) and stops the page doing so.
+        b.eval("clearInterval(window.__studioWanderTimer); true")
         check("the Studio button hides once the room is open", b.wait_for(
               "getComputedStyle(document.getElementById('studio-btn')).display === 'none'"))
         check("no uncaught exception, console.error or failed request", b.errors == [], b.errors)

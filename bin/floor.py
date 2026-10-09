@@ -2098,7 +2098,11 @@ function computeStudio(state) {
   // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
   // row of chips, or the chips and the compact carousel when a card has a picture.
   const stuck = projects.flatMap(p => p.stuck || []);
-  const trayH = !stuck.length ? 0 : stuck.some(s => stuckSlides(s).length) ? TRAY_PIC_H : TRAY_CHIP_H;
+  // Chips wrap on a narrow tray: one more line of height per extra row of them.
+  const chipRows = Math.max(1, Math.ceil((stuck.length * 46 + projects.filter(p => (p.stuck || []).length).length * 40 + 48)
+                                          / Math.max(80, bossW - 2 * ROOM_PAD - 16)));
+  const trayH = !stuck.length ? 0
+    : (stuck.some(s => stuckSlides(s).length) ? TRAY_PIC_H : TRAY_CHIP_H) + (chipRows - 1) * 18;
   const bossSpec = {...BOSS, padTop: BOSS.padTop + trayH};
   const bossH = needs.length ? roomHeight(needs.length, bossW, bossSpec) : BOSS_EMPTY_H + trayH + (trayH ? 14 : 0);
   const bandH = Math.max(breakH, bossH);
@@ -2522,7 +2526,8 @@ if (new URLSearchParams(location.search).get("demo")) {
 }
 // Someone in the break room gets up and walks to another spot every so often — only
 // while the office is being looked at; a hidden room has nobody watching it wander.
-setInterval(() => {
+// (`window.__studioWanderTimer` so the suite can stop it and measure a still room.)
+window.__studioWanderTimer = setInterval(() => {
   if (!document.hidden && document.getElementById("studio").classList.contains("open")) wander();
 }, 9000);
 </script>
