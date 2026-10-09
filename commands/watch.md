@@ -397,6 +397,26 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     the deploy: a veto with nothing to veto, a ruler that never drew, a branch never
     reached leaves its trace in the artifact you were given. Green tests say the code does
     what you wrote; only the artifact says you wrote the right thing.
+  - **A known downstream rebuild is answered by waiting, not by asking.** Some projects'
+    own `CLAUDE.md` names a job that must finish off this box, in its own time, before a
+    merged fix is visible in the artifact — riffmap's `riffmap-rebuild.service`, kicked off
+    by its deploy's own log lines after a merge, a pass over every meeting that can run for
+    hours (riffmap [#602](https://github.com/roloc/riffmap/issues/602), October 8, 2026:
+    32 meetings, 09:23Z to 14:43Z, re-polled inside one tick's own window until it parked in
+    Stuck asking "should I keep checking back?"). When all three of these are true — the PR
+    is merged, the project's required CI succeeded, and the deploy's own log shows that job
+    starting — the artifact not having moved yet is not a question for Steve, because there
+    is nothing to ask: it only needs to finish. Comment in one sentence what was built and
+    what the artifact should show once that job ends, and that a project workflow will say
+    when it does; `gh issue edit <n> --add-label awaiting-rebuild`; `board unclaim <n>`;
+    leave the card **In progress**; stop with `Outcome: awaiting rebuild`. The PR still says
+    `Refs #<n>`, never `Closes #<n>` (above) — the card is not done, only unblocked from a
+    wasted wait. The spawner skips a card carrying that label until a project's own workflow
+    removes it (riffmap [#637](https://github.com/roloc/riffmap/issues/637)), then hands it
+    to the next tick to re-check the artifact and close or park on what it now shows. Any
+    other reason the artifact has not moved — the deploy is red, or its log shows no such
+    job starting — is still Stuck, same as always; this is not a general license to wait
+    instead of asking.
 - **When the last card spawned from a root card closes, re-check the root's own symptom.**
   Walk the chain up (§2), fetch the root's artifact, and comment what it now shows on the
   **root card**. A root whose children all closed green while its symptom survives is the
@@ -670,8 +690,8 @@ opinion of a card is not a gate; the card's own words are.
 Every tick ends with the card in exactly one of: **Done** (merged — the `Closes #n` does
 this), **In review** (finished, reviewed, green — only the merge is missing; §3),
 **Stuck - Needs help**, **Backlog** (you declined a card that gates itself; §4b), or still
-**In progress** if you got nowhere — or if you routed it to another lane (§2), which is
-the one In progress exit that is not a failure.
+**In progress** if you got nowhere — or if you routed it to another lane (§2) or labeled it
+`awaiting-rebuild` (§3), which are the two In progress exits that are not a failure.
 
 **A merged PR does not always mean Done.** A symptom card whose artifact still shows the
 symptom ends in **Stuck - Needs help** with its PR merged and its `Refs #<n>` leaving the
@@ -682,10 +702,17 @@ the symptom survived. A docs-only PR merged ahead of Steve's judgment (§3) ends
 way: `Refs #<n>` merged, card open, `Outcome: stuck`, and the `Needs Steve` line is the
 question itself rather than a fix that didn't take.
 
+**Nor does leaving a card In progress always mean no progress.** The `awaiting-rebuild`
+exit (§3) also merges its PR and leaves the card In progress on purpose: the spawner reads
+that as a success, the same as routing a card to another lane, and resets the two-attempt
+count rather than bumping it. Report it as `Outcome: awaiting rebuild` and
+`Ended in: In progress`.
+
 **Remove `in-flight` on every one of those exits, without exception** — Done and In review
-included. It marks *a tick actively working*, nothing else. A leaked label strands the card
-permanently, because the next tick reads it as owned and skips it. `board unclaim <n>` is
-the release; run it before you report.
+included, and `awaiting-rebuild` too even though the card stays In progress. It marks *a
+tick actively working*, nothing else. A leaked label strands the card permanently, because
+the next tick reads it as owned and skips it. `board unclaim <n>` is the release; run it
+before you report.
 
 If you abort for any reason, unclaim and say why in a comment first (`🤖 FYI:` plus three
 bullets is enough).
@@ -732,7 +759,7 @@ Bullets, five lines, in this order — it is what the log keeps and what Steve s
 
 ```
 - Card: #<n> <title>
-- Outcome: merged | PR up, waiting on merge | stuck | declined (gated) | routed to <agent> | no progress
+- Outcome: merged | PR up, waiting on merge | stuck | declined (gated) | routed to <agent> | awaiting rebuild | no progress
 - Ended in: Done | In review | Stuck - Needs help | Backlog | In progress
 - Quota: ~$<n> equivalent (subscription — not billed); project API spend $<x> (or "none")
 - Needs Steve: no | yes — <one line, the same as the first line of the Stuck comment>

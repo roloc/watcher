@@ -51,6 +51,12 @@ Labels and fields the bots read:
   that one to Stuck for a human.
 - **`steve-decision`** — a product decision. The tick never does these; straight to Stuck.
 - **`blocked`** — straight to Stuck.
+- **`awaiting-rebuild`** (card #85) — the tick merged this card's fix and found the artifact
+  gated on a known downstream rebuild (`commands/watch.md` §3): it left this label on and
+  ended, instead of looping on the artifact or parking in Stuck with nothing to ask. The
+  spawner skips the card while the label is on (one FYI comment, no attempt counted) and
+  picks it up again once a project's own workflow removes it — see "The awaiting-rebuild
+  sweep" below for the stale-label safety net.
 - **Priority** field `P0`, `P1`, `P2` — `board list` sorts P0 first, then by issue number.
 
 ## Life of a card
@@ -69,12 +75,15 @@ Labels and fields the bots read:
    --max-budget-usd 15`, with a 150 minute watchdog that kills the whole process group.
 5. **The tick** claims the card (comment first, label second), reads the card and the
    project's `CLAUDE.md`, does the work, opens a PR with `Closes #<n>`, waits for CI, runs
-   the reviewer once, merges. Or it moves the card to In review, or Stuck, or leaves it in
-   In progress if it got nowhere. It removes `in-flight` on every one of those exits.
+   the reviewer once, merges. Or it moves the card to In review, or Stuck, or labels it
+   `awaiting-rebuild` and leaves it In progress because the fix is merged but a known
+   downstream rebuild has to finish first, or leaves it in In progress if it got nowhere.
+   It removes `in-flight` on every one of those exits.
 6. **The spawner's exit handling** reads the card back. If `in-flight` leaked, it unclaims
-   and leaves a sweeper comment. A success that left In progress resets the attempt count.
-   Anything else bumps it; **two attempts with the card still In progress parks it in Stuck**
-   with a comment. A closed card gets its Stage emptied and its worktree removed.
+   and leaves a sweeper comment. A success that left In progress — including the
+   `awaiting-rebuild` exit — resets the attempt count. Anything else bumps it; **two
+   attempts with the card still In progress parks it in Stuck** with a comment. A closed
+   card gets its Stage emptied and its worktree removed.
 7. **Sleep:** 60 seconds after a normal poll, 10 minutes after a failed tick, 5 minutes
    after a board outage.
 
@@ -121,6 +130,30 @@ closed card that still has one, at most 20 a run. It is quiet (no Discord post),
 board-wide rather than per lane (a second lane's sweep finds nothing left), and it is
 best-effort: a sweep that fails is one line in the journal, waits for its next turn, and
 never costs the poll. An open card is never touched — a parked card stays Parked.
+
+## The awaiting-rebuild sweep
+
+A tick that merges a fix finds, sometimes, that the artifact cannot show it yet for a known
+reason: the project's own `CLAUDE.md` names a downstream rebuild that has to finish first,
+off this box, in its own time. `commands/watch.md` §3 gives that one case its own exit
+instead of Stuck or a wasted re-poll inside the tick's own window: label the card
+`awaiting-rebuild`, remove `in-flight`, leave it In progress, stop (riffmap
+[#602](https://github.com/roloc/riffmap/issues/602), October 8, 2026, is why — a tick that
+re-checked a 32-meeting rebuild a few times inside one run, then parked asking Steve
+"should I keep checking back?", for a wait that needed nobody). `pick_card` skips a card
+carrying that label (one FYI comment the first poll it sees it, no attempt counted), until
+a project's own workflow removes it when the rebuild ends (riffmap
+[#637](https://github.com/roloc/riffmap/issues/637)) — then the next poll hands it to a
+tick to re-check the artifact and close or park on what it now shows.
+
+That workflow runs off this box, so the wait cannot be open-ended: every poll, `spawn.sh`'s
+`sweep_awaiting_rebuild` parks a card that has carried the label for more than
+`AWAITING_REBUILD_STALE_SEC` (default 12 hours) in Stuck — a dead notifier, a rebuild that
+silently never ran, or a label dropped by hand with nobody re-checking the card. Its own
+comment, not `park_stuck`'s: "failed 2 attempts" would be a lie here, and attempts was
+reset to 0 the moment the label went on. State is `awaiting-rebuild/<n>.since` (when the
+wait was first seen) and `.noted` (the one FYI comment went out); both are cleared when the
+card is picked normally or parked for staleness.
 
 ## Lanes
 
@@ -356,6 +389,8 @@ money he had been charged (September 19, 2026). The number was never a bill.
 | `parked-ok/<n>` | the move to Stuck actually landed |
 | `stage-sweep.last` | when this lane last ran the closed-card Stage sweep (epoch seconds) |
 | `waiting/<n>` | the FYI comment saying what card n waits on was posted, and for which blockers; cleared when it is picked |
+| `awaiting-rebuild/<n>.since` | when a card first carried `awaiting-rebuild` was seen (the stale-label sweep's clock); cleared when it is picked normally or parked for staleness |
+| `awaiting-rebuild/<n>.noted` | the one FYI comment for that wait was posted; cleared the same way |
 | `logs/card-<n>-<ts>.json` | the tick's JSON result: `subtype`, `total_cost_usd` (quota, not a bill — see above), `num_turns`, `result` |
 | `logs/card-<n>-<ts>.stderr` | the tick's stderr |
 
@@ -367,6 +402,7 @@ money he had been charged (September 19, 2026). The number was never a bill.
 | In review | removed | success; attempts reset |
 | Stuck - Needs help | removed | success as far as the tick goes; attempts reset; Steve's turn |
 | Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog, so it waits for Steve to move it to Ready again |
+| In progress, labeled `awaiting-rebuild` | removed | success: the fix is merged but gated on a known downstream rebuild (`watch.md` §3); attempts reset. `pick_card` skips it until a project's workflow drops the label, or the stale-label sweep parks it after 12 hours |
 | In progress, with THIS lane's label (or none) | removed | no progress; attempts +1; at 2 the spawner parks it |
 | In progress, with ANOTHER lane's label | removed | success: the tick relabeled it for that lane (a triage, or `/watch` routing a design card); attempts reset, the other lane starts its own count |
 | any | still there | the tick died; the spawner unclaims, comments, attempts +1 |
