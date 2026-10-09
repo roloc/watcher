@@ -273,10 +273,16 @@ F="$(commit commands/watch.md v12f)"; run
 G="$(commit commands/watch.md v12g)"; run
 check "a release only an INACTIVE lane's state still names is swept anyway" [ ! -d "$RELEASES/${E:0:12}" ]
 
-# 12f. A $WATCHER_DIR this script could not adopt (a permission problem renaming it) is
-# never silently nested into — the deploy holds instead of reporting success on a box that
-# never moved.
+# 12f. A $WATCHER_DIR this script could not adopt (the rename itself fails) is never
+# silently nested into — the deploy holds instead of reporting success on a box that never
+# moved. $RELEASES is made FIRST, and still exists (and so still needs no write on its own
+# now-read-only parent to confirm, `mkdir -p` on an existing dir is a no-op) when
+# $(dirname "$BOX") goes read-only — so the failure lands on the guarded `mv` inside
+# adopt_plain_checkout specifically, not on an earlier, unguarded `mkdir -p` under `set -e`
+# (that would crash the whole run instead of holding it, and prove nothing about the guard
+# this case means to exercise — caught in review round 2).
 fresh
+mkdir -p "$RELEASES"
 chmod 555 "$(dirname "$BOX")"
 H="$(commit commands/watch.md v12h)"
 run

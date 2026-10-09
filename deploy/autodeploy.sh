@@ -539,7 +539,7 @@ adopt_plain_checkout() {
   # the pointer never created and no hold to say why). The directory's own contents stay
   # watcher:watcher; only the rename needs root.
   if [ ! -d "$dir" ]; then
-    mv "$WATCHER_DIR" "$dir" || { say "could not adopt $WATCHER_DIR as its own first release; leaving it as a plain checkout"; return 1; }
+    mv "$WATCHER_DIR" "$dir" || { say_once "adopt-fail $sha" "could not adopt $WATCHER_DIR as its own first release; leaving it as a plain checkout"; return 1; }
   fi
   ln -sfn "$dir" "$WATCHER_DIR"
   echo "${sha:0:12}" >> "$DSTATE/releases"
