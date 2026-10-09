@@ -1597,7 +1597,7 @@ fresh_state
 board_list $'610\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting on the rebuild'
 CLAUDE_SUBTYPE=success CLAUDE_RC=0
 WATCHER_MAX_POLLS=2 run >/dev/null 2>&1 || true
-comments="$(grep -c "gh issue comment 610 --body 🤖 FYI: this card is waiting on the staging rebuild" "$TESTLOG")"
+comments="$(grep -c "gh issue comment 610 --body 🤖 FYI: this card is waiting on a downstream rebuild" "$TESTLOG")"
 if [ "$comments" = 1 ] && [ ! -f "$STATE/attempts/610" ] && not_grepped "/watch 610"; then
   pass "two polls: exactly one FYI comment, never launched, no attempt ever counted"
 else
@@ -1645,7 +1645,7 @@ AWAITING_REBUILD_STALE_SEC=0 run --once >/dev/null 2>&1 || true
 if grepped "board.py move 612 Stuck - Needs help"; then pass "stale label → parked in Stuck"; else flunk "stale-label park" "$(cat "$TESTLOG")"; fi
 stuck_comment="$(grep 'gh issue comment 612' "$TESTLOG" || true)"
 if printf '%s' "$stuck_comment" | grep -q 'Needs Steve' \
-   && printf '%s' "$stuck_comment" | grep -qi 'staging rebuild' \
+   && printf '%s' "$stuck_comment" | grep -qi 'downstream rebuild' \
    && ! printf '%s' "$stuck_comment" | grep -qi 'failed 2 attempts'; then
   pass "its own Stuck comment — never claims the card 'failed 2 attempts'"
 else
@@ -1662,10 +1662,44 @@ if [ ! -f "$STATE/awaiting-rebuild/612.since" ] && [ ! -f "$STATE/awaiting-rebui
 else
   flunk "stale markers survived the park" "$(ls "$STATE/awaiting-rebuild" 2>/dev/null)"
 fi
-if not_grepped "gh issue comment 612 --body 🤖 FYI: this card is waiting on the staging rebuild"; then
+if not_grepped "gh issue comment 612 --body 🤖 FYI: this card is waiting on a downstream rebuild"; then
   pass "no separate 'still waiting' FYI in the SAME poll the stale park already fired (ROWS is stale-filtered after the sweep)"
 else
   flunk "duplicate comment in one poll" "$(cat "$TESTLOG")"
+fi
+
+echo "33e. …a move to Stuck that FAILS must not strip the label: the card is still the"
+echo "     sweep's to retry, not a fresh pick with attempts back at 0"
+fresh_state
+board_list $'613\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting a long time'
+AWAITING_REBUILD_STALE_SEC=0 BOARD_MOVE_FAIL=1 run --once >/dev/null 2>&1 || true
+if not_grepped "gh issue edit 613 --remove-label"; then
+  pass "a failed move leaves both labels alone: the next poll's sweep still finds the card and retries the move"
+else
+  flunk "label stripped despite the move failing" "$(cat "$TESTLOG")"
+fi
+if grepped "gh issue comment 613"; then
+  comment_line="$(grep 'gh issue comment 613' "$TESTLOG")"
+  if printf '%s' "$comment_line" | grep -q 'move to Stuck did not go through yet'; then
+    pass "the Stuck comment still goes out, saying the move itself has not landed"
+  else
+    flunk "comment does not say the move is still pending" "$comment_line"
+  fi
+else
+  flunk "no comment at all on a failed move" "$(cat "$TESTLOG")"
+fi
+if [ ! -f "$STATE/parked-ok/613" ] && [ -f "$STATE/parked/613" ]; then
+  pass "parked-ok absent (move never landed), parked present (comment went out) — the sweep retries next poll"
+else
+  flunk "park markers after a failed move" "ok=$([ -f "$STATE/parked-ok/613" ] && echo yes || echo no) tried=$([ -f "$STATE/parked/613" ] && echo yes || echo no)"
+fi
+# the move succeeds on a later poll: NOW the labels come off, matching the comment already sent
+board_list $'613\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting a long time'
+AWAITING_REBUILD_STALE_SEC=0 run --once >/dev/null 2>&1 || true
+if grepped "gh issue edit 613 --remove-label in-flight --remove-label awaiting-rebuild" && grepped "board.py move 613 Stuck - Needs help"; then
+  pass "once the move lands, the labels come off and the card is truly done waiting"
+else
+  flunk "recovery poll did not finish the park" "$(cat "$TESTLOG")"
 fi
 
 # ============================================================================

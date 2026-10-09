@@ -534,7 +534,7 @@ note_awaiting_rebuild() {
   mkdir -p "$dir"
   noted="$dir/$n.noted"
   [ -f "$noted" ] && return 0
-  if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card is waiting on the staging rebuild, so I am not launching a tick for it.
+  if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card is waiting on a downstream rebuild, so I am not launching a tick for it.
 - I pick it up again on the poll after the label drops.
 - Nothing for Steve to do."; then
     : > "$noted"
@@ -1510,7 +1510,8 @@ sweep_closed_stages() {
 # here, and attempts was reset to 0 the moment the label went on.
 sweep_awaiting_rebuild() {
   local r_issue r_priority r_agent r_flags r_stage r_title now since age dir marker
-  local parked_list="" new_rows="" line first
+  local parked_list="" new_rows="" line first tab nl
+  tab="$(printf '\t')"; nl="$(printf '\n')"
   dir="$WATCHER_STATE/awaiting-rebuild"
   now="$(date +%s)"
   while IFS=$'\t' read -r r_issue r_priority r_agent r_flags r_stage r_title; do
@@ -1536,9 +1537,9 @@ sweep_awaiting_rebuild() {
   if [ -n "$parked_list" ]; then
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      first="${line%%$'\t'*}"
+      first="${line%%"$tab"*}"
       case "$parked_list" in *" $first "*) continue ;; esac
-      new_rows="${new_rows:+$new_rows$'\n'}$line"
+      new_rows="${new_rows:+$new_rows$nl}$line"
     done <<< "${ROWS:-}"
     ROWS="$new_rows"
   fi
@@ -1557,8 +1558,14 @@ park_stale_rebuild() {
   rm -f "$WATCHER_STATE/inreview/$n.requeued"
 
   if [ ! -f "$ok" ]; then
-    if $WATCHER_BOARD move "$n" "Stuck - Needs help" --why "The staging rebuild this card is waiting on never reported back, so I parked it."; then
+    if $WATCHER_BOARD move "$n" "Stuck - Needs help" --why "The downstream rebuild this card is waiting on never reported back, so I parked it."; then
       : > "$ok"
+      # Only now: removing the label here is what stops sweep_awaiting_rebuild (and
+      # pick_card's own skip, above) from ever looking at this card again, so it must not
+      # happen before the move actually lands — otherwise a failed move above leaves this
+      # card unlabeled and with attempts still at 0, and the very next poll's pick_card
+      # launches a fresh tick on it while this comment is telling Steve it is parked.
+      $WATCHER_GH issue edit "$n" --remove-label in-flight --remove-label awaiting-rebuild || true
     else
       log "move to Stuck failed for #$n; will keep retrying on later polls"
     fi
@@ -1567,11 +1574,10 @@ park_stale_rebuild() {
   if [ -f "$tried" ]; then
     log "#$n already has a Stuck comment on file; not re-commenting"
   else
-    $WATCHER_GH issue edit "$n" --remove-label in-flight --remove-label awaiting-rebuild || true
     local retry_note=""
     [ -f "$ok" ] || retry_note=$'\n- The move to Stuck did not go through yet; I will keep retrying it.'
     local body
-    body="🤖 **Needs Steve: the staging rebuild this card is waiting on never reported back.**
+    body="🤖 **Needs Steve: the downstream rebuild this card is waiting on never reported back.**
 
 - Moved to **Stuck - Needs help**. It had been waiting over $hours hours.
 - Why: the project's own rebuild-finished notice never arrived.${retry_note}
