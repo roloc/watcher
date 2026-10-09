@@ -27,6 +27,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from http.server import ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -258,8 +259,13 @@ def settled(b):
 
 
 # What no two of may overlap: every character's own box (figure and plate), as drawn.
+# Someone in the break room may be mid-walk (the page wanders one lane every few seconds),
+# and two walkers may cross: the check is only read once nobody is moving, in the same
+# synchronous call, so a timer cannot start a walk between the look and the measure.
 NO_OVERLAP = """(() => {
-  const boxes = [...document.querySelectorAll('.character')].map(e => [e.dataset.lane || ('ship:' + e.dataset.ship), e.getBoundingClientRect()]);
+  const chars = [...document.querySelectorAll('.character')];
+  if (chars.some(e => e.getAnimations().some(a => a instanceof CSSTransition && a.playState === 'running'))) return null;
+  const boxes = chars.map(e => [e.dataset.lane || ('ship:' + e.dataset.ship), e.getBoundingClientRect()]);
   const hits = [];
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
     const [na, a] = boxes[i], [nb, b] = boxes[j];
@@ -267,6 +273,17 @@ NO_OVERLAP = """(() => {
   }
   return hits;
 })()"""
+
+
+def overlaps(b):
+    """The pairs of characters standing on each other, read once everyone has stopped."""
+    for _ in range(40):
+        hits = b.eval(NO_OVERLAP)
+        if hits is not None:
+            return hits
+        time.sleep(0.1)
+    return ["still walking after four seconds"]
+
 
 # A floor shaped like the real box on October 8, 2026 (three boards, seven lanes, six of
 # them idle), fed straight to the page's own drawing code — the floor whose picture Steve
@@ -491,8 +508,20 @@ try:
 
     STUDIO_OPEN = "document.getElementById('studio').classList.contains('open')"
     CHAR_COUNT = "document.querySelectorAll('.character').length"
+    ROOM_NAMES = "[...document.querySelectorAll('.office-room')].map(r => r.dataset.room)"
 
-    print("11. the studio: one room the lanes walk around in (card #88)")
+    # Which room a character's feet are in (its box's bottom edge, which is where it stands;
+    # the plate hangs below the feet, so the box bottom is the plate's bottom), and its plate.
+    def info(b, lane):
+        return b.eval(f"""(() => {{
+          const e = document.querySelector('.character[data-lane="{lane}"]');
+          const r = e.getBoundingClientRect(), feet = r.bottom - e.querySelector('.plate').getBoundingClientRect().height;
+          const room = [...document.querySelectorAll('.office-room')].find(z => {{
+            const q = z.getBoundingClientRect();
+            return r.left >= q.left - 1 && r.right <= q.right + 1 && feet > q.top && feet <= q.bottom + 1; }});
+          return [e.dataset.pill, room ? room.dataset.room : null, e.querySelector('.plate').innerText.trim()]; }})()""")
+
+    print("11. the studio: an office the lanes walk around in (card #88)")
     with browse.Browser(width=1280, height=900) as b:
         b.goto(URL)
         b.wait_for(DESKS_DRAWN)
@@ -510,37 +539,54 @@ try:
         settled(b)
         shot(b, "studio-desktop.png")
 
-        print("12. a character stands in its own project's row, whatever it is doing")
-        settled(b)
-        info = lambda lane: b.eval(
-            f'(() => {{ const e = document.querySelector(`.character[data-lane="{lane}"]`); '
-            'const r = e.getBoundingClientRect(); const row = [...document.querySelectorAll(".zone")]'
-            '.findIndex(z => { const q = z.getBoundingClientRect(); return r.bottom <= q.bottom + 1 && r.bottom > q.top; });'
-            'return [e.dataset.pill, row, e.querySelector(".plate").textContent.trim()]; })()')
-        rows = b.eval("[...document.querySelectorAll('.zone-name')].map(a => a.textContent)")
-        check("one row per board, named after it, in the board's order", rows == ["alpha", "beta"], rows)
-        check("alpha (working) stands at its desk in alpha's row, its plate saying what it is",
-              info("alpha") == ["working", 0, "Build"], info("alpha"))
-        check("alpha-triage (idle) stays at its counter in alpha's row — not off in a lounge "
-              "where nothing said whose it was",
-              info("alpha-triage") == ["idle", 0, "Triage"], info("alpha-triage"))
-        check("an idle lane holds a mug (the pose says idle, not just the dark screen)",
+        print("12. an office: a break room, Steve's office, and a room per board")
+        rooms = b.eval(ROOM_NAMES)
+        check("the break room and Steve's office, then one room per board in the board's order",
+              rooms == ["Break room", "Steve's office", "alpha", "beta"], rooms)
+        check("a board's room has its name on the door, a link to the board in a new tab",
+              b.eval("[...document.querySelectorAll('.office-room.team .room-name')]"
+                     ".every(a => a.href && a.target === '_blank')"))
+        check("the board's counts are on the room's whiteboard",
+              b.eval("document.querySelector('.office-room[data-room=\"alpha\"] .whiteboard').textContent")
+              == "Ready 0 · Doing 1 · Backlog 0")
+        check("alpha (working) is at its desk in alpha's room, its plate saying what it is",
+              info(b, "alpha") == ["working", "alpha", "Build"], info(b, "alpha"))
+        check("beta (paused) is at its own desk in beta's room, hands up, not off anywhere",
+              info(b, "beta") == ["paused", "beta", "Build"], info(b, "beta"))
+        check("alpha-design (idle) has gone to the break room, mug in hand, its plate saying whose it is",
+              info(b, "alpha-design") == ["idle", "Break room", "Design\nalpha"], info(b, "alpha-design"))
+        check("alpha-triage (idle) is in the break room too",
+              info(b, "alpha-triage")[:2] == ["idle", "Break room"], info(b, "alpha-triage"))
+        check("the mug is drawn (the pose says idle, not just the dark screen)",
               b.eval("document.querySelector('.character[data-lane=\"alpha-design\"] svg').innerHTML.includes('f3f4f6')"))
-        check("beta (paused) stands by its own desk in beta's row, not at the podium",
-              info("beta") == ["paused", 1, "Build"], info("beta"))
-        check("the row's name is a link to its board, opening in a new tab",
-              b.eval("[...document.querySelectorAll('.zone-name')].every(a => a.href && a.target === '_blank')"))
-        check("nobody stands on anybody", b.eval(NO_OVERLAP) == [], b.eval(NO_OVERLAP))
+        check("their desks are still in alpha's room, each tagged as theirs and out",
+              b.eval("[...document.querySelectorAll('.desk-tag')].map(t => t.dataset.lane + ':' + t.textContent).sort()")
+              == ["alpha-design:Design · out", "alpha-triage:Triage · out"])
+        check("the break room has a couch, a coffee machine (steaming) and a vending machine",
+              b.eval("""(() => { const r = document.querySelector('.office-room.break');
+                      return !!r.querySelector('.couch') && !!r.querySelector('.prop .steam')
+                          && r.querySelectorAll('.prop').length >= 4; })()"""))
+        check("Steve's desk has his name on it", b.eval(
+              "document.querySelector('.office-room.boss').textContent.includes('STEVE')"))
+        check("nobody stands on anybody", overlaps(b) == [], overlaps(b))
 
         print("12b. the floor Steve sent back on October 8, 2026: seven lanes, six idle, three boards")
         b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); true")
         settled(b)
         check("ten characters: seven lanes and three ship docks", b.eval(CHAR_COUNT) == 10)
         check("no two characters overlap (six idle lanes used to share five fixed spots, so the "
-              "sixth stood on the first)", b.eval(NO_OVERLAP) == [], b.eval(NO_OVERLAP))
-        rows = b.eval("[...document.querySelectorAll('.zone-name')].map(a => a.textContent)")
-        check("each board's name is on its row, so who works for whom is readable at a glance",
-              rows == ["riffmap", "riffmap-site", "watcher"], rows)
+              "sixth stood on the first)", overlaps(b) == [], overlaps(b))
+        rooms = b.eval(ROOM_NAMES)
+        check("three team rooms, named for their boards",
+              rooms == ["Break room", "Steve's office", "riffmap", "riffmap-site", "watcher"], rooms)
+        check("all six idle lanes are in the break room, each plate naming its board",
+              b.eval("""[...document.querySelectorAll('.character[data-pill="idle"]')]
+                     .every(e => e.dataset.room === 'Break room' && e.querySelector('.where').textContent === e.dataset.project)"""))
+        check("a ship shelf stands in each board's own room, on the same row as its desks",
+              b.eval("""(() => { const s = document.querySelector('.character[data-ship="riffmap"]').getBoundingClientRect();
+                      const d = document.querySelector('.character[data-lane="riffmap-site-design"]').getBoundingClientRect();
+                      const r = document.querySelector('.office-room[data-room="riffmap"]').getBoundingClientRect();
+                      return s.left >= r.left && s.right <= r.right && s.bottom <= r.bottom + 1 && Math.abs(s.bottom - d.bottom) < 2; })()"""))
         check("a lane's plate is readable: no plate is covered by another character",
               b.eval("""(() => {
                 const plates = [...document.querySelectorAll('.character .plate')].map(p => p.getBoundingClientRect());
@@ -554,12 +600,27 @@ try:
           return [...document.querySelectorAll('.pin-card')].map(c => c.getBoundingClientRect())
             .filter(r => r.top < wall.top - 1 || r.bottom > wall.bottom + 1 || r.bottom > room.bottom + 1).length;
         })()""")
-        check("every pinned card on the wall is whole, none cut off at the wall's edge", cut == 0, cut)
-        check("the first pinned card is in view without scrolling the wall",
+        check("every pinned card on the bulletin board is whole, none cut off at its edge", cut == 0, cut)
+        check("the first pinned card is in view without scrolling the board",
               b.eval("""(() => { const c = document.querySelector('.pin-card').getBoundingClientRect();
                       const w = document.getElementById('pin-wall').getBoundingClientRect();
                       return c.left >= w.left - 1 && c.right <= w.right + 1; })()"""))
         shot(b, "studio-live-shaped.png")
+
+        print("12c. the break room wanders: someone gets up and walks to another spot, nobody else moves")
+        before = b.eval("Object.fromEntries([...document.querySelectorAll('.character')]"
+                        ".map(e => [e.dataset.lane || ('ship:' + e.dataset.ship), e.style.left + ' ' + e.style.top]))")
+        b.eval("window.__studioWander(); true")
+        settled(b)
+        after = b.eval("Object.fromEntries([...document.querySelectorAll('.character')]"
+                       ".map(e => [e.dataset.lane || ('ship:' + e.dataset.ship), e.style.left + ' ' + e.style.top]))")
+        moved = sorted(k for k in before if before[k] != after[k])
+        check("exactly one idle lane moved", len(moved) == 1
+              and b.eval(f"document.querySelector('.character[data-lane=\"{moved[0]}\"]').dataset.pill") == "idle", moved)
+        check("...to another spot in the break room", info(b, moved[0])[1] == "Break room", info(b, moved[0]))
+        check("and still nobody stands on anybody", overlaps(b) == [], overlaps(b))
+        check("a working lane never wanders (riffmap-site-design is where it was)",
+              before["riffmap-site-design"] == after["riffmap-site-design"])
         b.eval("refresh().then(() => true)")
         settled(b)
         check("every lane keeps the same look across a redraw (the hash never changes)",
@@ -573,16 +634,17 @@ try:
               b.eval("getComputedStyle(document.querySelector("
                     "'.desk-monitor[data-lane=\"alpha-design\"] .scanline')).opacity") == "0")
 
-        print("13. the beacon over the door reads the same state the pills do")
+        print("13. the light over Steve's door reads the same state the pills do")
         check("a paused lane and a failing build: amber, not green",
               b.eval("document.getElementById('beacon').className") == "beacon-amber")
-        check("the beacon is actually visible — inside #room's own box, which clips "
-              "(it used to sit mostly above it, clipped to a sliver)",
+        check("the light is actually visible — inside #room's own box, which clips "
+              "(it used to sit mostly above it, clipped to a sliver) — and over his door",
               b.eval("""(() => {
                 const beacon = document.getElementById("beacon").getBoundingClientRect();
                 const room = document.getElementById("room").getBoundingClientRect();
-                return beacon.top >= room.top && beacon.bottom <= room.bottom
-                    && beacon.height > 10;
+                const office = document.querySelector(".office-room.boss").getBoundingClientRect();
+                return beacon.top >= room.top && beacon.bottom <= room.bottom && beacon.height > 10
+                    && beacon.left >= office.left && beacon.right <= office.right && beacon.bottom <= office.bottom + 2;
               })()"""))
 
         print("14. tap a character for a speech bubble; tap the bubble for the full Peek")
@@ -600,7 +662,7 @@ try:
         b.key("Escape")
         check("still no errors after the bubble round trip", b.errors == [], b.errors)
 
-        print("15. the wall by the door: recent ticks, newest on top, each one a link")
+        print("15. the bulletin board in the hallway: recent ticks, newest first, each one a link")
         # Both fixture ticks are pinned; which sorts first depends on the real mtime of the
         # two log files this suite just wrote (`metrics.py` keys "when" on that, not the
         # stamp in the filename) — true to #5 and #3, never guess which ran "newer" here.
@@ -608,6 +670,11 @@ try:
         check("one pinned card per recent tick, each linking straight to its issue",
               sorted(hrefs) == ["https://github.com/roloc/alpha/issues/5",
                                 "https://github.com/roloc/beta/issues/3"], hrefs)
+        check("the board hangs in the hallway, between the top rooms and the team rooms",
+              b.eval("""(() => { const w = document.getElementById('pin-wall').getBoundingClientRect();
+                      const top = document.querySelector('.office-room.boss').getBoundingClientRect();
+                      const team = document.querySelector('.office-room.team').getBoundingClientRect();
+                      return w.top >= top.bottom && w.bottom <= team.top; })()"""))
 
         print("16. Floor goes back, and the floor page is exactly as it was")
         b.click("#floor-btn")
@@ -619,7 +686,7 @@ try:
         check("the floor's own desks are still there, same as section 2", b.eval(CHAR_COUNT) >= 0
               and b.eval("document.querySelectorAll('.desk').length") == 6)
 
-    print("17. on a phone: the room fits without scrolling sideways, and walking respects reduced motion")
+    print("17. on a phone: the office fits without scrolling sideways, and walking respects reduced motion")
     with browse.Browser(width=390, height=844) as b:
         b.goto(URL)
         b.wait_for(DESKS_DRAWN)
@@ -633,20 +700,28 @@ try:
         b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); true")
         settled(b)
         check("the floor Steve sent back, on a phone: nobody stands on anybody",
-              b.eval(NO_OVERLAP) == [], b.eval(NO_OVERLAP))
-        check("...and the room still fits the screen",
+              overlaps(b) == [], overlaps(b))
+        check("...and the office still fits the screen",
               b.eval("document.documentElement.scrollWidth <= window.innerWidth"))
-        check("eight cards on a phone-wide wall: it scrolls, and its edge fades to say so",
+        check("on a phone the break room sits over Steve's office, each room as tall as it needs",
+              b.eval("""(() => { const br = document.querySelector('.office-room.break').getBoundingClientRect();
+                      const bo = document.querySelector('.office-room.boss').getBoundingClientRect();
+                      return bo.top >= br.bottom && Math.abs(br.width - bo.width) < 2; })()"""))
+        check("every room is inside the office, none runs off its bottom edge",
+              b.eval("""(() => { const room = document.getElementById('room').getBoundingClientRect();
+                      return [...document.querySelectorAll('.office-room')].every(z => { const q = z.getBoundingClientRect();
+                        return q.bottom <= room.bottom + 1 && q.right <= room.right + 1; }); })()"""))
+        check("eight cards on a phone-wide board: it scrolls, and its edge fades to say so",
               b.eval("document.getElementById('pin-wall').classList.contains('scrolls')"))
         shot(b, "studio-live-shaped-phone.png")
-        # The same wall drawn while the studio was closed (every 30s poll draws it hidden)
+        # The same board drawn while the studio was closed (every 30s poll draws it hidden)
         # and then opened: the fade has to be there on the first open, not the next poll.
         b.click("#floor-btn")
         b.wait_for("!" + STUDIO_OPEN)
         b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); true")
         b.click("#studio-btn")
         b.wait_for(STUDIO_OPEN)
-        check("a wall drawn while the studio was hidden still fades the moment it opens",
+        check("a board drawn while the studio was hidden still fades the moment it opens",
               b.eval("document.getElementById('pin-wall').classList.contains('scrolls')"))
         check("a character walks: the CSS transition is on by default",
               b.eval("getComputedStyle(document.querySelector('.character')).transitionDuration") != "0s")
@@ -660,7 +735,7 @@ try:
         check("prefers-reduced-motion: reduce drops the walk to an instant jump",
               b.eval("getComputedStyle(document.querySelector('.character')).transitionDuration") == "0s")
 
-    print("18. demo mode (?demo=1): cycles the fixture through every state, for designing the room")
+    print("18. demo mode (?demo=1): cycles the fixture through every state, for designing the office")
     with browse.Browser(width=390, height=844) as b:
         b.goto(URL + "?demo=1")
         b.wait_for(CHAR_COUNT + " > 0")
@@ -673,7 +748,7 @@ try:
         for i in range(3):
             b.eval(f"window.__demoGoto({i})")  # synchronous: the redraw is done when this returns
             colors.append(b.eval("document.getElementById('beacon').className"))
-        check("stepping through the fixture's states changes the beacon (never stuck on one color)",
+        check("stepping through the fixture's states changes the light over Steve's door (never stuck on one color)",
               len(set(colors)) > 1, colors)
         b.eval("window.__demoGoto(1)")  # the demo state with a needs_steve lane
         check("a needs_steve lane waves, not just stands with its hands up",
@@ -684,15 +759,16 @@ try:
               b.eval("!!document.querySelector("
                     "'.character[data-pill=\"needs_steve\"] .character-mockup img')"))
         settled(b)
-        check("it walked to the podium by the door, above every row, and its plate says whose it is",
-              b.eval("""(() => { const e = document.querySelector('.character[data-pill="needs_steve"]');
-                      const r = e.getBoundingClientRect(); const z = document.querySelector('.zone').getBoundingClientRect();
-                      return r.bottom <= z.top + 1 && e.querySelector('.plate').textContent.includes('alpha'); })()"""))
-        check("the sleeping lane is on the couch, below every row, named for its board too",
-              b.eval("""(() => { const e = document.querySelector('.character[data-pill="sleeping"]');
-                      const r = e.getBoundingClientRect(); const zs = [...document.querySelectorAll('.zone')];
-                      const last = zs[zs.length - 1].getBoundingClientRect();
-                      return r.top >= last.bottom - 1 && e.querySelector('.plate').textContent.includes('beta'); })()"""))
+        check("it walked to Steve's office, and its plate says whose it is",
+              info(b, "alpha") == ["needs_steve", "Steve's office", "Build\nalpha"], info(b, "alpha"))
+        check("the light over his door is red while it waits there",
+              b.eval("document.getElementById('beacon').className") == "beacon-red")
+        check("the sleeping lane naps on the break room couch, named for its board too",
+              info(b, "beta") == ["sleeping", "Break room", "Build\nbeta"]
+              and b.eval("""(() => { const e = document.querySelector('.character[data-pill="sleeping"]').getBoundingClientRect();
+                      const c = document.querySelector('.couch').getBoundingClientRect();
+                      const x = (e.left + e.right) / 2; return x >= c.left && x <= c.right; })()"""),
+              info(b, "beta"))
         shot(b, "studio-demo.png")
         b.click("#floor-btn")
         b.wait_for("!" + STUDIO_OPEN)
