@@ -936,9 +936,10 @@ def proxmox_summary(data):
 
 def fetch_proxmox(url=None, token=None, verify=None, timeout=10):
     """The lab's other boxes, from Proxmox's own API. Opt-in: `PROXMOX_URL`
-    (https://host:8006) and `PROXMOX_TOKEN` (user@realm!tokenid=secret) in the service's
-    environment — the box's /etc/watcher/env, never git; `PROXMOX_VERIFY=0` accepts the
-    lab's self-signed certificate. [] when unconfigured. Raises when configured and
+    (https://host:8006) and `PROXMOX_TOKEN` (user@realm!tokenid=secret) in the floor
+    service's own environment file — the box's /etc/watcher/floor.env, which only
+    watcher-floor.service reads (never /etc/watcher/env, every lane's), never git;
+    `PROXMOX_VERIFY=0` accepts the lab's self-signed certificate. [] when unconfigured. Raises when configured and
     unreachable; `build_state` logs that and shows the room without the other boxes."""
     url = url if url is not None else os.environ.get("PROXMOX_URL", "")
     token = token if token is not None else os.environ.get("PROXMOX_TOKEN", "")
@@ -2544,7 +2545,7 @@ function roomHTML(r, state) {
     const racks = Math.max(1, Math.min(4, Math.floor((r.w - 60) / 44)));
     props = Array.from({length: racks}, (_, i) => prop("rack", 18 + i * 44, 34)).join("")
       + prop("aircon", r.w - 42, r.h - 52)
-      + `<div class="hall-label" style="left:10px;top:${r.h - 20}px">hover for load, tokens, the lab</div>`;
+      + `<div class="hall-label" style="left:10px;top:${r.h - 20}px">hover: load · tokens · lab</div>`;
   } else {
     const c = r.counts;
     props = `<div class="whiteboard" title="The board right now">Ready ${c.ready ?? "?"} · Doing ${c.in_progress ?? "?"} · Backlog ${c.backlog ?? "?"}</div>`
@@ -2591,11 +2592,21 @@ function plateHTML(kind, project, away) {
 // the other door. A Web Animation along those waypoints, at a walking pace, with a bob
 // while it runs; `prefers-reduced-motion` makes it a jump cut.
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const inRoom = (p, r) => r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
 function routePath(from, fromRoom, to, toRoom) {
   const A = roomsByName[fromRoom], B = roomsByName[toRoom];
-  if (!A || !B || fromRoom === toRoom) return [from, to];
-  const pts = [from, A.door.inside, A.door.outside];
-  if (A.corrY !== B.corrY) pts.push({x: connectX, y: A.corrY}, {x: connectX, y: B.corrY});
+  if (!A || !B) return [from, to];
+  if (fromRoom === toRoom && inRoom(from, A)) return [from, to];
+  const pts = [from];
+  let corr;
+  if (inRoom(from, A)) { pts.push(A.door.inside, A.door.outside); corr = A.corrY; }
+  else {
+    // Already out in a hallway (a walk interrupted by a redraw): the nearest hallway line.
+    const lines = [...new Set(Object.values(roomsByName).map(r => r.corrY))];
+    corr = lines.reduce((best, y) => Math.abs(y - from.y) < Math.abs(best - from.y) ? y : best, lines[0]);
+    pts.push({x: from.x, y: corr});
+  }
+  if (corr !== B.corrY) pts.push({x: connectX, y: corr}, {x: connectX, y: B.corrY});
   pts.push(B.door.outside, B.door.inside, to);
   return pts;
 }
@@ -2608,7 +2619,8 @@ function moveCharacter(el, to, room) {
     return;
   }
   if (prev.x === to.x && prev.y === to.y && !el._anim) { el._room = room; return; }
-  // Mid-walk already: start from where it actually is, not where it was going.
+  // Mid-walk already: start from where it actually is, not where it was going — and
+  // from the hallway if that is where it is, never a straight line through a wall.
   const cs = getComputedStyle(el);
   const from = el._anim ? {x: parseFloat(cs.left), y: parseFloat(cs.top)} : prev;
   if (el._anim) el._anim.cancel();
@@ -2625,8 +2637,10 @@ function moveCharacter(el, to, room) {
   path.slice(1).forEach((p, i) => { acc += segs[i]; frames.push({left: p.x + "px", top: p.y + "px", offset: Math.min(1, acc / total)}); });
   el.classList.add("walking");
   const anim = el.animate(frames, {duration: Math.max(300, total / WALK_SPEED * 1000), easing: "linear", fill: "forwards"});
-  el._anim = anim; el._pos = to; el._room = room;
-  anim.onfinish = () => { place(el, to); if (el._anim === anim) el._anim = null; anim.cancel(); el.classList.remove("walking"); };
+  // `_room` stays the room it set out from until it arrives, so a redraw mid-walk routes
+  // the rest of the way along the hallways rather than straight at the new spot.
+  el._anim = anim; el._pos = to;
+  anim.onfinish = () => { place(el, to); el._room = room; if (el._anim === anim) el._anim = null; anim.cancel(); el.classList.remove("walking"); };
   anim.oncancel = () => { if (el._anim === anim) el._anim = null; el.classList.remove("walking"); };
 }
 
@@ -2748,12 +2762,16 @@ function fmtUptime(s) {
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
   return d ? `${d}d ${h}h` : `${h}h`;
 }
-function meterHTML(frac) {
+// A meter: red past 85% and amber past 60% when it measures use of a limit; a plain bar
+// when it measures a share (one board's tokens against the busiest board's — the busiest
+// is not an alarm).
+function meterHTML(frac, share) {
   const f = Math.max(0, Math.min(1, frac || 0));
-  return `<span class="meter${f > .85 ? " hot" : f > .6 ? " warm" : ""}"><i style="width:${Math.round(f * 100)}%"></i></span>`;
+  const cls = share ? "" : f > .85 ? " hot" : f > .6 ? " warm" : "";
+  return `<span class="meter${cls}"><i style="width:${Math.round(f * 100)}%"></i></span>`;
 }
 function tipRow(k, v, frac, cls) {
-  return `<div class="tip-row${cls ? " " + cls : ""}"><span class="k">${esc(k)}</span>${frac == null ? "" : meterHTML(frac)}<span class="v">${v}</span></div>`;
+  return `<div class="tip-row${cls ? " " + cls : ""}"><span class="k">${esc(k)}</span>${frac == null ? "" : meterHTML(frac, cls === "share")}<span class="v">${v}</span></div>`;
 }
 function renderServerTip(state) {
   const s = state.server || {};
@@ -2766,11 +2784,11 @@ function renderServerTip(state) {
   html += `<h4>Tokens, last ${tok.hours || 24}h</h4>`;
   html += tipRow("All lanes", `${fmtTokens(tok.total)} · ~${fmtTokens(tok.per_hour)}/h`);
   const maxTok = Math.max(1, ...(tok.per_project || []).map(p => p.tokens));
-  for (const p of tok.per_project || []) html += tipRow(p.name, fmtTokens(p.tokens), p.tokens / maxTok);
+  for (const p of tok.per_project || []) html += tipRow(p.name, fmtTokens(p.tokens), p.tokens / maxTok, "share");
   if (!(tok.per_project || []).length) html += `<div class="tip-row"><span class="v">Nothing moved yet today.</span></div>`;
   html += `<h4>The lab · Proxmox</h4>`;
   if (!pve.length) {
-    html += `<div class="tip-row"><span class="v">Not connected: PROXMOX_URL and PROXMOX_TOKEN in the box's /etc/watcher/env turn this on.</span></div>`;
+    html += `<div class="tip-row"><span class="v">Not connected: PROXMOX_URL and PROXMOX_TOKEN in the box's /etc/watcher/floor.env turn this on.</span></div>`;
   } else {
     for (const g of pve) {
       const label = g.type === "node" ? `${g.name} (host)` : `${g.name} · ${g.type} ${g.vmid}`;

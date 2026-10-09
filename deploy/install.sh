@@ -4,6 +4,8 @@
 #
 #   /opt/watcher                  this repo (git clone or pull)
 #   /etc/watcher/env              CLAUDE_CODE_OAUTH_TOKEN=…  (root:watcher 640; written by hand)
+#   /etc/watcher/floor.env        the floor page's own: PROXMOX_URL=… PROXMOX_TOKEN=… (optional;
+#                                 read by watcher-floor.service only, never by a lane)
 #   /home/watcher/.claude/        commands/ and agents/ symlinked from the repo, so every
 #                                 project on the box gets /watch and the reviewer
 #   /home/watcher/projects/<p>    each project's main checkout (cloned by `install.sh <p>`)
@@ -32,6 +34,10 @@ install -d -m 750 -o root -g watcher /etc/watcher
 # Discord is optional: an empty DISCORD_WEBHOOK_URL is the off switch. The line is added
 # once so the file documents itself; existing values are never touched.
 grep -q '^DISCORD_WEBHOOK_URL=' /etc/watcher/env || echo "DISCORD_WEBHOOK_URL=" >> /etc/watcher/env
+# The floor page's own file: the server room's Proxmox readout (optional). Its own file, not
+# `env`, because `env` is every lane's environment and a Proxmox token has no business in a
+# tick (watcher-floor.service says why).
+[ -f /etc/watcher/floor.env ] || { printf 'PROXMOX_URL=\nPROXMOX_TOKEN=\nPROXMOX_VERIFY=1\n' > /etc/watcher/floor.env; chown root:watcher /etc/watcher/floor.env; chmod 640 /etc/watcher/floor.env; }
 
 install -d -o watcher -g watcher /home/watcher/.claude /home/watcher/projects
 ln -sfn /opt/watcher/commands /home/watcher/.claude/commands

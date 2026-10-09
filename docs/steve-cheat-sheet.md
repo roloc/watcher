@@ -49,8 +49,8 @@ carousel as the floor's strip. Two boards hang on your wall, and both open when 
 and **Peek** on any of them shows the card itself — its text, labels and last comments — with
 a link to open it on GitHub; the **wins board** lists everything the teams shipped this week,
 by board, with the count on the board itself. Hover the **server room** for the box's load,
-memory and disk, the tokens the bots moved in the last day, and (once the box has a Proxmox
-token — ask for it) every box in the lab with its CPU and memory. Tap a bot for what it just
+memory and disk, the tokens the bots moved in the last day, and (once `/etc/watcher/floor.env` on the box has a
+Proxmox token — ask for it) every box in the lab with its CPU and memory. Tap a bot for what it just
 said; tap that for the full Peek. **Floor** takes you back. Still read-only, still just a
 look.
 

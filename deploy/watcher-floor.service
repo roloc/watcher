@@ -15,6 +15,13 @@ Group=watcher
 WorkingDirectory=/opt/watcher
 Environment=HOME=/home/watcher
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# The floor's own secrets, and only the floor's: the Proxmox API token for the server
+# room's lab readout (PROXMOX_URL, PROXMOX_TOKEN, PROXMOX_VERIFY). Never /etc/watcher/env —
+# that file is every lane's environment, which is to say every tick's, a Claude process
+# with no permission prompts; a token there reaches the one place it must not and never
+# the one process that needs it (review of roloc/watcher#107). Optional: the readout
+# says how to turn it on until the file has values. install.sh seeds it empty.
+EnvironmentFile=-/etc/watcher/floor.env
 ExecStart=/usr/bin/python3 /opt/watcher/bin/floor.py
 Restart=always
 RestartSec=10
