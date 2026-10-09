@@ -1173,6 +1173,19 @@ INDEX_HTML = """<!doctype html>
     gap: 4px; max-width: 46%; pointer-events: auto;
   }
   .row-stuck-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  /* In the office the same strip is the in-tray on Steve's desk: a paper tray in front of
+     it, chips grouped by board, the carousel inside. */
+  .row-stuck.in-tray {
+    right: auto; max-width: none; box-sizing: border-box; align-items: stretch; padding: 4px 6px;
+    border: 1.5px solid var(--line); border-radius: 4px;
+    background: color-mix(in srgb, var(--needs) 8%, var(--panel));
+  }
+  .row-stuck.in-tray .row-stuck-chips { justify-content: flex-start; align-items: center; }
+  .row-stuck.in-tray .carousel { align-self: center; width: min(100%, 150px); }
+  .tray-label, .tray-board {
+    font-size: 9px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .05em;
+  }
+  .tray-board { margin-left: 4px; text-transform: none; letter-spacing: 0; }
   .row-stuck-chip {
     font-size: 10px; font-weight: 600; color: var(--needs); background: color-mix(in srgb, var(--needs) 14%, transparent);
     border-radius: 999px; padding: 1px 6px; text-decoration: none;
@@ -1245,8 +1258,9 @@ INDEX_HTML = """<!doctype html>
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
-  /* ---- The studio: one room the lanes walk around in (card #88). The floor page above
-     is untouched; this is a second view of the same data, toggled by one button. ---- */
+  /* ---- The studio: an office the lanes walk around in (card #88; an office with rooms
+     since October 9, 2026). The floor page above is untouched; this is a second view of
+     the same data, toggled by one button. ---- */
   .view-toggle {
     font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px;
     border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
@@ -1256,50 +1270,67 @@ INDEX_HTML = """<!doctype html>
   #studio.open { display: block; }
   #studio-head { display: flex; justify-content: center; margin-bottom: 10px; }
   #room {
-    position: relative; width: 100%; max-width: 900px; margin: 0 auto;
-    aspect-ratio: 3 / 4; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 14px; overflow: hidden;
+    position: relative; width: 100%; max-width: 960px; margin: 0 auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    /* Carpet. The height is the script's: as tall as its rooms need, never a fixed shape. */
+    background-image: radial-gradient(color-mix(in srgb, var(--dim) 16%, transparent) 1px, transparent 1px);
+    background-size: 14px 14px;
   }
-  @media (min-width: 700px) { #room { aspect-ratio: 16 / 10; } }
-  /* The room is rows: one band per project, its name at the left edge, its stations
-     (dispatch counter, a desk per lane, the ship dock) spread across it. A lane stays in
-     its own project's row whatever it is doing — except on the couch (asleep after a
-     failure) and at the podium (needs Steve), the two places that are the room's, not a
-     project's. The first studio sent idle lanes to a shared lounge of five fixed spots;
-     on a box with six idle lanes the sixth stood on the first, and nothing said which
-     project any of them belonged to. */
-  .room-label {
-    position: absolute; font-size: 10px; color: var(--dim); font-weight: 600;
-    text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+  /* Rooms. Every board has one (a desk per lane, its counts on the whiteboard), and the
+     building has two of its own: the break room, where an idle lane wanders and a lane
+     asleep after a failure naps on the couch, and Steve's office, where a lane goes to wave
+     when it needs him. Each has a door onto the hallway, and the hallway has the bulletin
+     board. The first studio was rows, one per board, and read as the floor page drawn
+     smaller (October 9, 2026: "this should look like an office with workers wandering
+     around"). */
+  .office-room {
+    position: absolute; box-sizing: border-box; border: 2px solid var(--line);
+    border-radius: 6px; background: var(--panel);
   }
+  .office-room.team { background: color-mix(in srgb, var(--working) 5%, var(--panel)); }
+  .office-room.break { background: color-mix(in srgb, var(--paused) 8%, var(--panel)); }
+  .office-room.boss { background: color-mix(in srgb, var(--needs) 5%, var(--panel)); }
+  .room-name {
+    position: absolute; top: 3px; left: 8px; font-size: 11px; font-weight: 700;
+    color: var(--ink); text-decoration: none; white-space: nowrap;
+  }
+  a.room-name:hover { text-decoration: underline; }
   .room-door {
-    position: absolute; left: 50%; top: 2%; transform: translate(-50%, 0);
-    width: 60px; height: 8px; background: var(--line); border-radius: 2px;
+    /* A gap in the wall on the hallway side: a mat the color of the hall. */
+    position: absolute; width: 24px; height: 8px; border-radius: 2px;
+    background: color-mix(in srgb, var(--dim) 40%, var(--panel));
+  }
+  .prop { position: absolute; pointer-events: none; }
+  .prop svg { display: block; }
+  @keyframes steam { 0% { opacity: 0; transform: translateY(0); } 50% { opacity: .8; }
+                     100% { opacity: 0; transform: translateY(-5px); } }
+  .prop .steam { animation: steam 2s infinite; }
+  .whiteboard {
+    position: absolute; top: 4px; right: 6px; font-size: 9px; color: var(--dim); font-weight: 600;
+    background: var(--panel); border: 1.5px solid var(--line); border-radius: 2px; padding: 2px 5px;
+    white-space: nowrap; max-width: calc(100% - 90px); overflow: hidden; text-overflow: ellipsis;
+  }
+  .couch {
+    position: absolute; height: 22px; border-radius: 8px 8px 4px 4px;
+    background: color-mix(in srgb, var(--sleep) 30%, var(--panel)); border: 1.5px solid var(--line);
+  }
+  .couch::before {
+    content: ""; position: absolute; left: 8%; right: 8%; top: 6px; height: 0;
+    border-top: 1.5px dashed color-mix(in srgb, var(--line) 70%, transparent);
+  }
+  .hall-label {
+    position: absolute; font-size: 9px; color: var(--dim); font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
   }
   #beacon {
-    /* Inside #room's own box (which clips: `overflow: hidden`), not above it — a beacon
-       placed outside that box is a beacon nobody sees. */
-    position: absolute; left: 50%; top: 1%; transform: translate(-50%, 0);
+    /* The light over Steve's door, inside #room's own box (which clips: `overflow:
+       hidden`) — a light placed outside that box is a light nobody sees. */
+    position: absolute; transform: translate(-50%, -50%); z-index: 4;
     width: 12px; height: 12px; border-radius: 50%;
   }
-  .beacon-green { background: var(--working); }
-  .beacon-amber { background: var(--paused); }
-  .beacon-red { background: var(--needs); animation: blink 1.2s infinite; }
-  .podium {
-    position: absolute; left: 80%; top: 13%; transform: translate(-50%, -100%);
-    width: 22px; height: 14px; border-radius: 3px 3px 1px 1px;
-    background: color-mix(in srgb, var(--dim) 30%, transparent); border: 1px solid var(--line);
-  }
-  .zone {
-    position: absolute; left: 2%; right: 2%; border-radius: 8px;
-    border: 1px dashed var(--line); background: color-mix(in srgb, var(--dim) 4%, transparent);
-  }
-  .zone-name {
-    position: absolute; left: 3.5%; font-size: 12px; font-weight: 700; color: var(--ink);
-    white-space: nowrap; text-decoration: none;
-  }
-  .zone-name:hover { text-decoration: underline; }
-  #room-desks .zone-name { pointer-events: auto; }
+  .beacon-green { background: var(--working); box-shadow: 0 0 6px var(--working); }
+  .beacon-amber { background: var(--paused); box-shadow: 0 0 6px var(--paused); }
+  .beacon-red { background: var(--needs); box-shadow: 0 0 8px var(--needs); animation: blink 1.2s infinite; }
   .desk-furniture {
     position: absolute; width: 44px; height: 18px; transform: translate(-50%, -155%);
     border: 1px solid var(--line); border-radius: 3px;
@@ -1322,47 +1353,59 @@ INDEX_HTML = """<!doctype html>
   /* An idle screen is dark (card: "an idle screen is dark") — the line only exists, and
      only moves, while the desk is lit. */
   .desk-monitor.lit .scanline { opacity: .6; animation: scan 1.1s linear infinite; }
-  .couch {
-    position: absolute; left: 50%; top: 81%; transform: translate(-50%, -50%);
-    width: 30%; height: 7%; border-radius: 10px;
-    background: color-mix(in srgb, var(--dim) 14%, transparent); border: 1px solid var(--line);
+  /* An empty desk still says whose it is, so a room with everyone out still reads. */
+  .desk-tag {
+    position: absolute; transform: translate(-50%, 2px); font-size: 9px; font-weight: 600;
+    color: var(--dim); opacity: .75; white-space: nowrap; line-height: 1.2;
   }
-  .coffee {
-    position: absolute; left: 72%; top: 81%; transform: translate(-50%, -50%);
-    width: 14px; height: 16px; border-radius: 2px 2px 6px 6px; background: var(--dim);
-  }
-  /* The wall by the door: a strip along the bottom, every card whole. It scrolls
-     sideways on a narrow screen rather than clipping a card in half. */
+  /* The bulletin board in the hallway: cork, a pin in every card, every card whole. It
+     scrolls sideways on a narrow screen rather than clipping a card in half. */
   .pin-wall {
-    position: absolute; left: 2%; right: 2%; top: 87%; bottom: 2%;
-    display: flex; gap: 6px; align-items: flex-start; overflow-x: auto; overflow-y: hidden;
-    padding: 0 2px; scrollbar-width: none;
+    position: absolute; box-sizing: border-box; display: flex; gap: 8px; align-items: center;
+    overflow-x: auto; overflow-y: hidden; padding: 4px 8px; scrollbar-width: none;
+    background: color-mix(in srgb, var(--paused) 14%, var(--panel)); border-radius: 4px;
+    border: 2px solid color-mix(in srgb, var(--paused) 35%, var(--line));
   }
   .pin-wall::-webkit-scrollbar { display: none; }
   /* More cards than fit: the strip scrolls sideways, and its right edge fades to say so,
      instead of showing a card cut in half. */
   .pin-wall.scrolls { mask-image: linear-gradient(to right, #000 88%, transparent); -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); }
   .pin-card {
-    flex: 0 0 auto; font-size: 10px; line-height: 1.3; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; text-decoration: none;
-    color: inherit; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); display: block; white-space: nowrap;
+    position: relative; flex: 0 0 auto; font-size: 10px; line-height: 1.3; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 2px; padding: 4px 6px; text-decoration: none;
+    color: inherit; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); display: block; white-space: nowrap;
+    transform: rotate(-1.2deg);
   }
+  .pin-card:nth-child(even) { transform: rotate(1.4deg); }
+  .pin-card::before {
+    content: ""; position: absolute; top: -3px; left: 50%; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--needs); transform: translateX(-50%);
+    box-shadow: 0 1px 1px rgba(0, 0, 0, .3);
+  }
+  .pin-card:nth-child(3n)::before { background: #58a6ff; }
+  .pin-card:nth-child(3n+1)::before { background: var(--working); }
   .pin-card b { font-weight: 600; }
-  #room-desks, #room-characters, #room-stuck { position: absolute; inset: 0; pointer-events: none; }
+  #room-rooms, #room-desks, #room-characters, #room-stuck { position: absolute; inset: 0; pointer-events: none; }
+  #room-rooms .room-name { pointer-events: auto; }
   .character {
     /* As wide as its own plate (not a fixed 30px that the plate overflowed to the right),
-       so translate(-50%) centers the figure and the words together over the spot. */
-    position: absolute; width: max-content; transform: translate(-50%, -100%);
+       so translate(-50%) centers the figure and the words together over the spot. Never
+       wider than a standing spot, so two neighbours never touch. */
+    position: absolute; width: max-content; max-width: 70px; transform: translate(-50%, -100%);
     transition: left 1s ease, top 1s ease; cursor: pointer; text-align: center;
     pointer-events: auto;
   }
   @keyframes character-wave { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
   .character-wave { animation: character-wave .6s ease-in-out infinite; }
+  /* Walking: a bob for as long as the position transition runs. */
+  @keyframes walk-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  .character.walking svg { animation: walk-bob .32s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) {
     .character { transition: none; }
-    .character-wave { animation: none; }
+    .character-wave, .character.walking svg, .prop .steam { animation: none; }
   }
   .character svg { width: 30px; height: 34px; display: block; margin: 0 auto; }
+  .character.ship svg { width: 40px; }
   /* Held up over a waving character's head — the same mockup the floor's own desk shows
      (card #91), shrunk to fit the room. */
   .character-mockup { margin-bottom: 2px; }
@@ -1370,7 +1413,8 @@ INDEX_HTML = """<!doctype html>
     display: block; margin: 0 auto; max-width: 46px; max-height: 34px; border-radius: 3px;
   }
   .character .plate {
-    font-size: 9px; color: var(--ink); font-weight: 600; white-space: nowrap; margin-top: 2px; line-height: 1.2;
+    font-size: 9px; color: var(--ink); font-weight: 600; white-space: nowrap; margin-top: 2px;
+    line-height: 1.2; overflow: hidden; text-overflow: ellipsis;
   }
   .character .plate .where { color: var(--dim); font-weight: 500; }
   .bubble {
@@ -1416,13 +1460,9 @@ window.addEventListener("unhandledrejection", function () {
 <div id="studio">
   <div id="studio-head"><button class="view-toggle" id="floor-btn" type="button">Floor</button></div>
   <div id="room">
-    <div id="beacon" class="beacon-green"></div>
-    <div class="room-door"></div>
-    <div class="room-label" style="right:2%;top:2%">Podium</div>
-    <div class="podium"></div>
-    <div class="couch" id="couch"></div>
-    <div class="coffee" id="coffee"></div>
+    <div id="room-rooms"></div>
     <div class="pin-wall" id="pin-wall"></div>
+    <div id="beacon" class="beacon-green"></div>
     <div id="room-desks"></div>
     <div id="room-stuck"></div>
     <div id="room-characters"></div>
@@ -1882,15 +1922,27 @@ document.addEventListener("click", (e) => {
   openPeek({lane: btn.dataset.peekLane, ship: btn.dataset.peekShip}, btn.dataset.peekName);
 });
 
-// ---- The studio: one room the lanes walk around in (card #88) -----------------------
+// ---- The studio: an office the lanes walk around in (card #88) -----------------------
 // A second view of the same data `render()` already has: no new endpoint, no new field.
 // Toggled by one button; `render()` above is untouched, `refresh()` just hands it the
 // same state it was already given.
+//
+// Rooms, not rows. Every board has a room of its own: a desk per lane, a counter for its
+// triage lane, a shelf for its ship station, and its counts on the whiteboard. A lane that
+// is working or paused is at its desk. An idle lane leaves for the break room and mills
+// about there — every so often one gets up and walks to another spot. A lane asleep after
+// a failure naps on the break room couch. A lane that needs Steve walks to his office and
+// waves in front of his desk, mockup held up, and the light over his door turns red. The
+// hallway between has the bulletin board: the last cards worked. (The first studio was
+// rows, one per board, and read as the floor page drawn smaller — October 9, 2026: "this
+// should look like an office with workers wandering around".)
 
 function showStudio() {
   document.getElementById("floor-view").style.display = "none";
   document.getElementById("studio").classList.add("open");
   document.getElementById("studio-btn").style.display = "none";
+  // Drawn hidden, the room had no width to lay itself out by; draw it again now it has one.
+  if (lastState) renderStudio(lastState);
   markWallScroll();
 }
 function showFloor() {
@@ -1940,7 +1992,7 @@ function characterSVG(pill, look) {
       : armRRaised;
   const sleepy = pill === "sleeping"
     ? `<text x="17" y="3" style="font:700 7px sans-serif;fill:var(--dim)">z</text>` : "";
-  // Idle: standing by its own station with a mug, waiting for a card.
+  // Idle: in the break room with a mug, waiting for a card.
   const mug = pill === "idle"
     ? `<rect x="20.5" y="19" width="5" height="5.5" rx="1" style="fill:#f3f4f6;opacity:.9"/>` : "";
   const glasses = look.glasses
@@ -1955,85 +2007,273 @@ function characterSVG(pill, look) {
     ${sleepy}${mug}</svg>`;
 }
 
-// Where things stand. The room is rows: one band per project between ROWS_TOP and
-// ROWS_BOTTOM, the project's name at its left edge, its stations spread across it — the
-// dispatch counter (a triage lane), a desk per other lane, the ship dock last. A lane
-// stays in its own row whatever it is doing, so a row always shows its whole team: at its
-// desk working, by it with a mug when idle, hands up when paused. Only two places are the
-// room's rather than a project's — the couch (asleep after a failure) and the podium by
-// the door (needs Steve) — and a plate there says which project the lane came from. (The
-// first studio sent every idle lane to a shared lounge of five fixed spots: on a box with
-// six idle lanes the sixth stood on the first, and nothing said whose they were.)
-const ROWS_TOP = 17, ROWS_BOTTOM = 72, ROW_MAX = 20;
-const PODIUM = {x: 80, y: 16, span: 36};
-const COUCH = {x: 50, span: 24};
+// The furniture. Small inline pictures, each the size it is drawn at.
+const PROPS = {
+  coffee: `<svg width="26" height="30" viewBox="0 0 26 30"><rect x="3" y="2" width="20" height="26" rx="2" fill="var(--dim)"/>
+    <rect x="6" y="5" width="14" height="6" rx="1" fill="var(--panel)" opacity=".5"/>
+    <rect x="9" y="18" width="8" height="7" rx="1" fill="#f3f4f6"/>
+    <path class="steam" d="M13 16 q1.5 -2 0 -4" stroke="var(--ink)" fill="none" stroke-width="1"/></svg>`,
+  vending: `<svg width="22" height="34" viewBox="0 0 22 34"><rect x="1" y="1" width="20" height="32" rx="2" fill="var(--dim)"/>
+    <rect x="4" y="4" width="11" height="18" rx="1" fill="var(--panel)" opacity=".45"/>
+    <rect x="5" y="6" width="3" height="3" fill="#ff7b72"/><rect x="9" y="6" width="3" height="3" fill="#3fb950"/>
+    <rect x="5" y="11" width="3" height="3" fill="#d29922"/><rect x="9" y="11" width="3" height="3" fill="#a371f7"/>
+    <rect x="5" y="16" width="3" height="3" fill="#58a6ff"/><rect x="9" y="16" width="3" height="3" fill="#ff7b72"/>
+    <rect x="4" y="25" width="14" height="4" rx="1" fill="#1b1f24" opacity=".5"/></svg>`,
+  cooler: `<svg width="16" height="32" viewBox="0 0 16 32"><rect x="4" y="1" width="8" height="12" rx="3" fill="#9ecbff" opacity=".85"/>
+    <rect x="2" y="13" width="12" height="18" rx="2" fill="var(--dim)"/><rect x="5" y="19" width="2" height="4" fill="#58a6ff"/></svg>`,
+  plant: `<svg width="20" height="30" viewBox="0 0 20 30"><path d="M10 18 c-6 -2 -8 -8 -6 -12 c4 2 6 6 6 12 c0 -6 2 -10 6 -12 c2 4 0 10 -6 12z" fill="#3fb950"/>
+    <rect x="5" y="18" width="10" height="10" rx="2" fill="#b5651d"/></svg>`,
+  window: `<svg width="34" height="24" viewBox="0 0 34 24"><rect x="1" y="1" width="32" height="22" rx="2" fill="#9ecbff" opacity=".55" stroke="var(--line)" stroke-width="2"/>
+    <path d="M17 1 v22 M1 12 h32" stroke="var(--line)" stroke-width="2"/><circle cx="26" cy="7" r="3" fill="#ffd33d" opacity=".9"/></svg>`,
+  picture: `<svg width="18" height="14" viewBox="0 0 18 14"><rect x="1" y="1" width="16" height="12" fill="#f0c8a0" stroke="#8a5a2b" stroke-width="2"/>
+    <path d="M3 11 l4 -5 l3 3 l2 -2 l3 4z" fill="#3fb950"/></svg>`,
+  // Steve's desk: the chair behind it, a monitor, a mug, and the nameplate.
+  bossdesk: `<svg width="100" height="34" viewBox="0 0 100 34"><rect x="36" y="0" width="28" height="12" rx="4" fill="var(--dim)"/>
+    <rect x="0" y="12" width="100" height="18" rx="3" fill="#8a5a2b"/><rect x="0" y="12" width="100" height="4" rx="2" fill="#a86f3a"/>
+    <rect x="8" y="17" width="13" height="9" rx="1" fill="var(--line)"/><rect x="26" y="21" width="6" height="5" rx="1" fill="#f3f4f6"/>
+    <rect x="68" y="18" width="26" height="9" rx="1" fill="#f3f4f6"/>
+    <text x="81" y="25" text-anchor="middle" font-size="6.5" font-weight="700" fill="#1b1f24" font-family="sans-serif">STEVE</text></svg>`,
+};
+function prop(name, x, y) {
+  return `<div class="prop" style="left:${x}px;top:${y}px">${PROPS[name]}</div>`;
+}
 
-function rowBand(pIndex, pCount) {
-  const h = Math.min(ROW_MAX, (ROWS_BOTTOM - ROWS_TOP) / Math.max(pCount, 1));
-  return {top: ROWS_TOP + pIndex * h, height: h};
+// Where things stand. The whole office is laid out in pixels from the room's own width, so
+// a figure never shares a spot with another and a room is as tall as the people in it: a
+// break room with six idle lanes grows a second row rather than standing them on each
+// other (the first studio sent every idle lane to five fixed spots, and on a box with six
+// idle lanes the sixth stood on the first). Across is a percentage, down is pixels, and a
+// character's move between the two is one CSS transition — a walk.
+const CHAR_W = 72;                 // one standing spot: a figure and its plate never exceed it (.character max-width)
+const EDGE = 10, GAP = 8, HALL_H = 64, ROOM_PAD = 6;
+// padTop is the first row's feet, measured from the room's top: room name, props on the
+// back wall and the figure's own height (34px; plus a held-up mockup in Steve's office;
+// plus a desk and monitor in a team room) all fit above it. rowH is feet to feet.
+// padBottom is the plate under the last row's feet.
+const BREAK = {padTop: 86, rowH: 64, padBottom: 28};
+const BOSS = {padTop: 138, rowH: 100, padBottom: 28};
+const BOSS_EMPTY_H = 72;           // nobody waiting: just his desk
+const TRAY_CHIP_H = 34, TRAY_PIC_H = 146;   // the in-tray: chips alone, or chips and a compact carousel
+const TEAM = {padTop: 80, rowH: 68, padBottom: 20};
+const BREAK_EXTRA = 2;             // free spots in the break room, so a wanderer has somewhere to go
+
+function roomWidthPx() {
+  // Hidden (every 30s poll draws the studio while the floor is showing), the room has no
+  // width; use the one it will have, and `showStudio` draws again with the real one.
+  const el = document.getElementById("room");
+  return el.clientWidth || Math.min(960, Math.max(280, window.innerWidth - 34));
 }
-// Where the rows end: the couch sits just under the last one, the wall under that, so a
-// box with one project is not a room with everything in its top third.
-function rowsBottom(pCount) { return rowBand(Math.max(pCount, 1) - 1, pCount).top + rowBand(0, pCount).height; }
-// `n` spots spread evenly across a span centered on `cx` — never a fixed list that wraps
-// around and puts the (n+1)th on top of the first.
-function spread(i, n, cx, span) {
-  if (n <= 1) return cx;
-  return cx - span / 2 + i * (span / (n - 1));
+function perRowIn(w) { return Math.max(1, Math.floor((w - 2 * ROOM_PAD) / CHAR_W)); }
+function rowsFor(n, w) { return Math.max(1, Math.ceil(n / perRowIn(w))); }
+function roomHeight(n, w, spec) { return spec.padTop + (rowsFor(n, w) - 1) * spec.rowH + spec.padBottom; }
+// `n` spots in a grid inside the room, each row centered, in room pixels.
+function gridSpots(r, n, spec) {
+  const perRow = perRowIn(r.w), spots = [];
+  for (let i = 0; i < n; i++) {
+    const row = Math.floor(i / perRow), col = i % perRow;
+    const inRow = Math.min(perRow, n - row * perRow);
+    spots.push({x: r.x + r.w / 2 + (col - (inRow - 1) / 2) * CHAR_W, y: r.y + spec.padTop + row * spec.rowH});
+  }
+  return {spots, perRow, rows: rowsFor(n, r.w)};
 }
-function stationX(i, n) { return spread(i, n, 51, 74); }
+
+// The break room's seating is remembered across redraws, so a wander is one lane's walk
+// to a free spot and never a reshuffle of everyone. Spot indices, per lane.
+let breakSpot = {};
+let lastBreak = {n: 0, held: new Set()};
+let wanderStep = 0;
+function seatBreakRoom(breakers, sleepers, spots, perRow, rows) {
+  const n = spots.length, held = new Set();
+  // The couch is under the first row's first seats; the sleepers get those, and an idle
+  // lane may sit there too while they are free.
+  const couch = [];
+  for (let i = 0; i < n && couch.length < 3; i++) couch.push(i);
+  const seatOf = {};
+  for (const l of sleepers) {
+    let k = couch.find(i => !held.has(i));
+    if (k === undefined) { k = 0; while (held.has(k)) k++; }
+    held.add(k); seatOf[l.lane] = k;
+  }
+  // An idle lane keeps its seat while it is still there and still free; otherwise the
+  // first free one.
+  const names = breakers.map(l => l.lane);
+  for (const nm of Object.keys(breakSpot))
+    if (!names.includes(nm) || breakSpot[nm] >= n || held.has(breakSpot[nm])) delete breakSpot[nm];
+  for (const nm of Object.keys(breakSpot)) held.add(breakSpot[nm]);
+  for (const nm of names) {
+    if (nm in breakSpot) continue;
+    let k = 0; while (held.has(k)) k++;
+    breakSpot[nm] = k; held.add(k);
+  }
+  for (const nm of names) seatOf[nm] = breakSpot[nm];
+  lastBreak = {n, held: new Set(Object.values(seatOf))};
+  return {seatOf, couch};
+}
+// One idle lane gets up and walks to a free spot. On a timer while the studio is showing;
+// `window.__studioWander` for the suite. Which lane and which spot both follow the step
+// count, so the same floor always wanders the same way.
+function wander() {
+  const names = Object.keys(breakSpot).sort();
+  if (!names.length || !lastState) return;
+  const mover = names[wanderStep % names.length];
+  const free = [];
+  for (let i = 0; i < lastBreak.n; i++) if (!lastBreak.held.has(i)) free.push(i);
+  wanderStep++;
+  if (!free.length) return;
+  breakSpot[mover] = free[(wanderStep * 7) % free.length];
+  renderStudio(lastState);
+}
+window.__studioWander = wander;
 
 function computeStudio(state) {
+  const W = roomWidthPx(), inner = W - 2 * EDGE;
   const projects = state.projects || [];
-  const lanes = [], ships = [], rows = [];
-  projects.forEach((p, pIndex) => {
-    const band = rowBand(pIndex, projects.length);
-    const feetY = band.top + band.height * 0.9;
-    const ordered = [...(p.lanes || [])].sort(
-      (a, b) => (a.kind === "Triage" ? 0 : 1) - (b.kind === "Triage" ? 0 : 1));
-    const n = ordered.length + 1; // the ship dock is the last station
-    rows.push({name: p.name, board_url: p.board_url, top: band.top, height: band.height});
-    ordered.forEach((l, i) => lanes.push({...l, project: p.name, home: {x: stationX(i, n), y: feetY}}));
-    ships.push({name: p.name, ship: p.ship, pos: {x: stationX(n - 1, n), y: feetY}});
-  });
-  const sleeping = lanes.filter(l => l.pill === "sleeping");
+  const lanes = [];
+  projects.forEach(p => (p.lanes || []).forEach(l => lanes.push({...l, project: p.name})));
+  const breakers = lanes.filter(l => l.pill === "idle").sort((a, b) => a.lane.localeCompare(b.lane));
+  const sleepers = lanes.filter(l => l.pill === "sleeping");
   const needs = lanes.filter(l => l.pill === "needs_steve");
-  const couchY = rowsBottom(projects.length) + 9;
-  for (const l of lanes) { l.pos = l.home; l.away = false; }
-  sleeping.forEach((l, i) => {
-    l.pos = {x: spread(i, sleeping.length, COUCH.x, Math.min(COUCH.span, 10 * (sleeping.length - 1))), y: couchY};
-    l.away = true;
+  const rooms = [];
+
+  // The top band: the break room and Steve's office, side by side and as tall as the
+  // fuller — or, on a phone, the break room over the office, each its own height.
+  const narrow = inner < 420;
+  const breakW = narrow ? inner : Math.round(inner * 0.58) - GAP / 2;
+  const bossW = narrow ? inner : inner - breakW - GAP;
+  const nBreak = breakers.length + sleepers.length + BREAK_EXTRA;
+  const breakH = roomHeight(nBreak, breakW, BREAK);
+  // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
+  // row of chips, or the chips and the compact carousel when a card has a picture.
+  const stuck = projects.flatMap(p => p.stuck || []);
+  // Chips wrap on a narrow tray: one more line of height per extra row of them.
+  const chipRows = Math.max(1, Math.ceil((stuck.length * 46 + projects.filter(p => (p.stuck || []).length).length * 40 + 48)
+                                          / Math.max(80, bossW - 2 * ROOM_PAD - 16)));
+  const trayH = !stuck.length ? 0
+    : (stuck.some(s => stuckSlides(s).length) ? TRAY_PIC_H : TRAY_CHIP_H) + (chipRows - 1) * 18;
+  const bossSpec = {...BOSS, padTop: BOSS.padTop + trayH};
+  const bossH = needs.length ? roomHeight(needs.length, bossW, bossSpec) : BOSS_EMPTY_H + trayH + (trayH ? 14 : 0);
+  const bandH = Math.max(breakH, bossH);
+  const breakRoom = {kind: "break", name: "Break room", x: EDGE, y: EDGE, w: breakW,
+                     h: narrow ? breakH : bandH, door: narrow ? "left" : "bottom"};
+  const boss = {kind: "boss", name: "Steve's office", w: bossW, door: "bottom",
+                x: narrow ? EDGE : EDGE + breakW + GAP, y: narrow ? EDGE + breakH + GAP : EDGE,
+                h: narrow ? bossH : bandH, spec: bossSpec,
+                tray: trayH ? {x: ROOM_PAD + 2, y: BOSS_EMPTY_H - 8, w: bossW - 2 * ROOM_PAD - 4, h: trayH} : null};
+  rooms.push(breakRoom, boss);
+  const hall = {x: EDGE, y: boss.y + boss.h + GAP, w: inner, h: HALL_H};
+
+  // The team rooms: up to three across, one per board, each as tall as its own desks.
+  const cols = Math.max(1, Math.min(3, Math.floor(inner / 300), projects.length || 1));
+  const teamW = (inner - (cols - 1) * GAP) / cols;
+  let y = hall.y + HALL_H + GAP, rowH = 0;
+  const teams = projects.map((p, i) => {
+    const col = i % cols;
+    if (col === 0 && i > 0) { y += rowH + GAP; rowH = 0; }
+    const n = (p.lanes || []).length + 1;      // the ship shelf is the last station
+    const h = roomHeight(n, teamW, TEAM);
+    rowH = Math.max(rowH, h);
+    const r = {kind: "team", name: p.name, board_url: p.board_url, counts: p.counts || {},
+               x: EDGE + col * (teamW + GAP), y, w: teamW, h, project: p};
+    rooms.push(r);
+    return r;
   });
+  const total = (teams.length ? y + rowH : hall.y + HALL_H) + EDGE;
+
+  // Spots. A lane's home is its desk; where it stands now depends on its pill.
+  const ships = [];
+  const pct = x => x / W * 100;
+  for (const r of teams) {
+    const ordered = [...(r.project.lanes || [])].sort(
+      (a, b) => (a.kind === "Triage" ? 0 : 1) - (b.kind === "Triage" ? 0 : 1));
+    const {spots} = gridSpots(r, ordered.length + 1, TEAM);
+    ordered.forEach((l, i) => {
+      const me = lanes.find(x => x.lane === l.lane);
+      me.home = {x: pct(spots[i].x), y: spots[i].y};
+      me.pos = me.home; me.away = false; me.room = r.name;
+    });
+    const s = spots[ordered.length];
+    ships.push({name: r.name, ship: r.project.ship, pos: {x: pct(s.x), y: s.y}});
+  }
+  const bg = gridSpots(breakRoom, nBreak, BREAK);
+  const {seatOf, couch} = seatBreakRoom(breakers, sleepers, bg.spots, bg.perRow, bg.rows);
+  for (const l of [...breakers, ...sleepers]) {
+    const s = bg.spots[seatOf[l.lane]];
+    l.pos = {x: pct(s.x), y: s.y}; l.away = true; l.room = breakRoom.name;
+  }
+  if (couch.length) {
+    const first = bg.spots[couch[0]], last = bg.spots[couch[couch.length - 1]];
+    breakRoom.couch = {x: first.x - CHAR_W / 2 + 6 - breakRoom.x, w: last.x - first.x + CHAR_W - 12,
+                       y: first.y - 24 - breakRoom.y};
+  }
+  const vg = gridSpots(boss, needs.length, boss.spec);
   needs.forEach((l, i) => {
-    l.pos = {x: spread(i, needs.length, PODIUM.x, Math.min(PODIUM.span, 12 * (needs.length - 1))), y: PODIUM.y};
-    l.away = true;
+    const s = vg.spots[i];
+    l.pos = {x: pct(s.x), y: s.y}; l.away = true; l.room = boss.name;
   });
-  return {lanes, ships, rows, bottom: rowsBottom(projects.length)};
+  return {lanes, ships, rooms, hall, boss, total};
 }
 
-function renderRoomDesks(lanes, rows) {
-  const zones = rows.map(r => `
-    <div class="zone" style="top:${r.top}%;height:${r.height - 1.5}%"></div>
-    <a class="zone-name" style="top:${r.top + 1}%" href="${esc(r.board_url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`);
-  const furniture = lanes.map(l => l.kind === "Triage"
-    ? `<div class="dispatch-counter" style="left:${l.home.x}%;top:${l.home.y}%"></div>`
-    : `<div class="desk-furniture" style="left:${l.home.x}%;top:${l.home.y}%"></div>
+function roomHTML(r) {
+  const name = r.kind === "team"
+    ? `<a class="room-name" href="${esc(r.board_url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`
+    : `<span class="room-name">${esc(r.name)}</span>`;
+  // The door is a gap in the wall on the hallway side.
+  const door = r.kind === "team"
+    ? `<div class="room-door" style="left:${Math.round(r.w / 2 - 12)}px;top:-2px"></div>`
+    : r.door === "left"
+      ? `<div class="room-door" style="left:-2px;top:${Math.round(r.h - 40)}px;width:8px;height:24px"></div>`
+      : `<div class="room-door" style="left:${Math.round(r.w / 2 - 12)}px;bottom:-2px"></div>`;
+  let props = "";
+  if (r.kind === "break") {
+    props = prop("coffee", 84, 10) + prop("vending", 116, 6) + prop("cooler", 146, 8) + prop("plant", r.w - 30, 10)
+      + (r.w > 260 ? prop("window", r.w - 76, 8) : "")
+      + (r.couch ? `<div class="couch" style="left:${r.couch.x}px;top:${r.couch.y}px;width:${r.couch.w}px"></div>` : "");
+  } else if (r.kind === "boss") {
+    props = prop("bossdesk", Math.round(r.w / 2 - 50), 22) + prop("picture", r.w - 26, 6)
+      + (r.w > 220 ? prop("window", r.w - 70, 6) : "") + prop("plant", 8, 20);
+  } else {
+    const c = r.counts;
+    props = `<div class="whiteboard" title="The board right now">Ready ${c.ready ?? "?"} · Doing ${c.in_progress ?? "?"} · Backlog ${c.backlog ?? "?"}</div>`
+      + prop("plant", 6, 20);
+  }
+  return `<div class="office-room ${r.kind}" data-room="${esc(r.name)}"
+    style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px">${name}${props}${door}</div>`;
+}
+
+function renderRooms({rooms, hall, boss, total}) {
+  const room = document.getElementById("room");
+  room.style.height = total + "px";
+  document.getElementById("room-rooms").innerHTML = rooms.map(roomHTML).join("")
+    + `<div class="hall-label" style="left:${hall.x + 4}px;top:${hall.y + 2}px">Bulletin board — the last cards worked</div>`;
+  const wall = document.getElementById("pin-wall");
+  wall.style.left = hall.x + "px"; wall.style.top = (hall.y + 14) + "px";
+  wall.style.width = hall.w + "px"; wall.style.height = (hall.h - 16) + "px";
+  const beacon = document.getElementById("beacon");
+  beacon.style.left = (boss.x + boss.w / 2) + "px";
+  beacon.style.top = (boss.y + boss.h - 14) + "px";
+}
+
+function renderRoomDesks(lanes) {
+  const furniture = lanes.map(l => (l.kind === "Triage"
+    ? `<div class="dispatch-counter" style="left:${l.home.x}%;top:${l.home.y}px"></div>`
+    : `<div class="desk-furniture" style="left:${l.home.x}%;top:${l.home.y}px"></div>
        <div class="desk-monitor${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
-            style="left:${l.home.x}%;top:${l.home.y}%"><div class="scanline"></div></div>`);
-  document.getElementById("room-desks").innerHTML = zones.join("") + furniture.join("");
+            style="left:${l.home.x}%;top:${l.home.y}px"><div class="scanline"></div></div>`)
+    + (l.away ? `<div class="desk-tag" data-lane="${esc(l.lane)}" style="left:${l.home.x}%;top:${l.home.y}px">${esc(l.kind)} · out</div>` : ""));
+  document.getElementById("room-desks").innerHTML = furniture.join("");
 }
 
 // The plate under a character: what it is (Build, Design, Triage), and — only when it has
-// left its row for the couch or the podium — whose it is.
+// left its room for the break room or Steve's office — whose it is.
 function plateHTML(kind, project, away) {
-  return `<div class="plate">${esc(kind)}${away ? ` <span class="where">· ${esc(project)}</span>` : ""}</div>`;
+  return `<div class="plate">${esc(kind)}${away ? `<br><span class="where">${esc(project)}</span>` : ""}</div>`;
 }
 
 // Characters keep the same DOM node across renders, so moving `left`/`top` is a CSS
 // transition — a walk — rather than a jump cut (`prefers-reduced-motion` drops it to a
-// jump cut on purpose).
+// jump cut on purpose). While the walk runs the figure bobs.
 // The mockup held up over a waving character's head — the carousel's own current slide
-// when this card has one (card #96: so flipping it on the floor's strip flips it here
+// when this card has one (card #96: so flipping it in Steve's in-tray flips it here
 // too), the old single thumbnail otherwise (a demo fixture with no `rounds` of its own).
 function heldMockupHTML(l, stuckByCard) {
   const entry = l.card && stuckByCard && stuckByCard[l.card.number];
@@ -2049,6 +2289,15 @@ function heldMockupHTML(l, stuckByCard) {
 }
 
 const charEls = {};
+function newCharacter(container, cls) {
+  const el = document.createElement("div");
+  el.className = cls;
+  el.addEventListener("transitionrun", () => el.classList.add("walking"));
+  el.addEventListener("transitionend", () => el.classList.remove("walking"));
+  el.addEventListener("transitioncancel", () => el.classList.remove("walking"));
+  container.appendChild(el);
+  return el;
+}
 function renderCharacters(lanes, stuckByCard) {
   const container = document.getElementById("room-characters");
   const seen = new Set();
@@ -2056,21 +2305,20 @@ function renderCharacters(lanes, stuckByCard) {
     seen.add(l.lane);
     let el = charEls[l.lane];
     if (!el) {
-      el = document.createElement("div");
-      el.className = "character";
+      el = newCharacter(container, "character");
       el.dataset.lane = l.lane;
-      container.appendChild(el);
       charEls[l.lane] = el;
     }
     el.dataset.kind = l.kind;
     el.dataset.pill = l.pill;
     el.dataset.project = l.project;
+    el.dataset.room = l.room;
     // Held up over the waving character, the same mockup the floor's own desk shows — the
     // room Steve walks instead of the card he'd otherwise click through to (card #91).
     const held = l.pill === "needs_steve" ? heldMockupHTML(l, stuckByCard) : "";
     el.innerHTML = held + characterSVG(l.pill, laneLook(l.lane)) + plateHTML(l.kind, l.project, l.away);
     el.style.left = l.pos.x + "%";
-    el.style.top = l.pos.y + "%";
+    el.style.top = l.pos.y + "px";
   }
   for (const name of Object.keys(charEls)) if (!seen.has(name)) { charEls[name].remove(); delete charEls[name]; }
 }
@@ -2083,22 +2331,20 @@ function renderShipDock(ships) {
     seen.add(s.name);
     let el = shipEls[s.name];
     if (!el) {
-      el = document.createElement("div");
-      el.className = "character";
+      el = newCharacter(container, "character ship");
       el.dataset.ship = s.name;
-      container.appendChild(el);
       shipEls[s.name] = el;
     }
     const st = shipState(s.ship);
     el.innerHTML = shipSVG(st.mode, st.pill) + plateHTML("Ship", s.name, false);
     el.style.left = s.pos.x + "%";
-    el.style.top = s.pos.y + "%";
+    el.style.top = s.pos.y + "px";
   }
   for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }
 }
 
 function renderPinWall(recent) {
-  // Newest first: `state.recent` already sorts newest-first, and the strip runs left to
+  // Newest first: `state.recent` already sorts newest-first, and the board runs left to
   // right in that same order. Each card names the issue and the project it is on.
   const wall = document.getElementById("pin-wall");
   wall.innerHTML = (recent || []).slice(0, 8).map(r => `
@@ -2106,35 +2352,36 @@ function renderPinWall(recent) {
       · ${esc(r.project)}<br>${relTime(r.when)}</a>`).join("");
   markWallScroll();
 }
-// Whether the wall overflows is only measurable while the studio is showing (a hidden
+// Whether the board overflows is only measurable while the studio is showing (a hidden
 // strip is 0 wide), so this runs again the moment it opens, not just on each redraw.
 function markWallScroll() {
   const wall = document.getElementById("pin-wall");
   wall.classList.toggle("scrolls", wall.scrollWidth > wall.clientWidth + 1);
 }
 
-// A board's own row gets the same strip in miniature (card #96: "in each board's row, on
-// the floor page and in the studio") — every Stuck card's chip, always, and the row's own
-// carousel for whichever one of them actually has a picture to show (a direction linked
-// only as a `.html` mockup has none yet, and still gets its chip with no frame beside it).
-function renderRoomStuck(projects, rows) {
-  const byName = {};
-  for (const p of projects || []) byName[p.name] = p;
-  document.getElementById("room-stuck").innerHTML = rows.map(r => {
-    const stuck = (byName[r.name] && byName[r.name].stuck) || [];
-    if (!stuck.length) return "";
-    const chips = stuck.map(s =>
-      `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}</a>`
-    ).join("");
-    const withPics = stuck.filter(s => stuckSlides(s).length);
-    const pic = withPics.length ? carouselHTML(withPics[0], true) : "";
-    return `<div class="row-stuck" style="top:${r.top + 1}%">
-      <div class="row-stuck-chips">${chips}</div>
-      ${pic}
-    </div>`;
-  }).join("");
+// The in-tray on Steve's desk (card #96: "in each board's row, on the floor page and in
+// the studio" — in the office, the cards waiting on him are on his desk): every Stuck
+// card's chip, always, grouped by board, and one carousel for whichever of them actually
+// has a picture to show (a direction linked only as a `.html` mockup has none yet, and
+// still gets its chip with no frame beside it).
+function renderRoomStuck(projects, boss) {
+  const groups = [];
+  for (const p of projects || []) if ((p.stuck || []).length) groups.push(p);
+  if (!groups.length || !boss.tray) { document.getElementById("room-stuck").innerHTML = ""; return; }
+  const chips = groups.map(p => `<span class="tray-board">${esc(p.name)}</span>` + p.stuck.map(s =>
+    `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}</a>`
+  ).join("")).join("");
+  const withPics = groups.flatMap(p => p.stuck).filter(s => stuckSlides(s).length);
+  const pic = withPics.length ? carouselHTML(withPics[0], true) : "";
+  document.getElementById("room-stuck").innerHTML = `<div class="row-stuck in-tray"
+      style="left:${boss.x + boss.tray.x}px;top:${boss.y + boss.tray.y}px;width:${boss.tray.w}px">
+    <div class="row-stuck-chips"><span class="tray-label">In-tray</span>${chips}</div>
+    ${pic}
+  </div>`;
 }
 
+// The light over Steve's door: red while anyone is waiting in his office or a card sits in
+// his in-tray, amber when a lane is paused or asleep or a build is blocked, green otherwise.
 function renderBeacon(state) {
   let color = "green";
   if ((state.header.needs_steve_total || 0) > 0) {
@@ -2151,18 +2398,25 @@ function renderBeacon(state) {
 }
 
 function renderStudio(state) {
-  const {lanes, ships, rows, bottom} = computeStudio(state);
-  for (const id of ["couch", "coffee"]) document.getElementById(id).style.top = (bottom + 9) + "%";
-  document.getElementById("pin-wall").style.top = (bottom + 15) + "%";
+  lastState = state;
+  const office = computeStudio(state);
+  renderRooms(office);
   const stuckByCard = {};
   for (const p of state.projects || []) for (const s of p.stuck || []) stuckByCard[s.card.number] = s;
-  renderRoomDesks(lanes, rows);
-  renderRoomStuck(state.projects, rows);
-  renderCharacters(lanes, stuckByCard);
-  renderShipDock(ships);
+  renderRoomDesks(office.lanes);
+  renderRoomStuck(state.projects, office.boss);
+  renderCharacters(office.lanes, stuckByCard);
+  renderShipDock(office.ships);
   renderPinWall(state.recent);
   renderBeacon(state);
 }
+// The office is laid out from its own width, so a turned phone or a resized window lays
+// it out again.
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (lastState) renderStudio(lastState); }, 150);
+});
 
 // Tap a character for a speech bubble with the last line of what it is doing (the same
 // line Peek shows); tap the bubble to open the full Peek. It polls only while open, same
@@ -2317,6 +2571,12 @@ if (new URLSearchParams(location.search).get("demo")) {
   // Refresh the moment it is looked at again, rather than waiting on the interval.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 }
+// Someone in the break room gets up and walks to another spot every so often — only
+// while the office is being looked at; a hidden room has nobody watching it wander.
+// (`window.__studioWanderTimer` so the suite can stop it and measure a still room.)
+window.__studioWanderTimer = setInterval(() => {
+  if (!document.hidden && document.getElementById("studio").classList.contains("open")) wander();
+}, 9000);
 </script>
 </body>
 </html>

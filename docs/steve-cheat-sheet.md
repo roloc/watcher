@@ -32,16 +32,19 @@ refresh. Close it with the ×, or tap outside
 it — nothing there can change a card either. If the page ever shows a red line saying its own code hit an error,
 that is the page telling you it is broken: file a card.
 
-**Studio**, top of the floor page, is the same thing as a room: one row per board, with the
-board's name on it, and each bot a little person in its own row — at its desk when it is
-working, standing by it with a mug when it is idle, hands up when it is paused. It leaves
-the row for two places only: the couch under the rows when it is asleep, and the podium by
-the door when it needs you, holding up the same picture the strip is showing, with a light
-over the door that turns red the moment anyone does; its row also carries the strip itself,
-so a card waiting on you shows up there even before any bot walks to the podium for it. The
-strip along the bottom is the last cards worked, newest first; it slides sideways
-on a phone. Tap a bot for what it just said; tap that for the full Peek. **Floor** takes you
-back. Still read-only, still just a look.
+**Studio**, top of the floor page, is the same thing as an office. Every board has a room
+with its name on the door (tap it for the board), a desk per bot, and the board's counts on
+the whiteboard. A bot at its desk is working; hands up at its desk is paused. An idle bot
+leaves for the **break room** — coffee machine, vending machine, couch — and wanders about
+there with a mug until a card comes; its empty desk says whose it is. A bot that fell asleep
+after a failure naps on the couch. Every card waiting on you sits in the **in-tray** on your desk in **your office**, with the
+same picture carousel as the floor's strip, whether or not a bot is standing there for it; a
+bot that needs you walks in and waves in front of the desk, holding up the carousel's current
+picture, and the light over your
+door turns red the moment anyone does (amber when something is paused, asleep or blocked;
+green when all is well). The **bulletin board** in the hallway is the last cards worked,
+newest first; it slides sideways on a phone. Tap a bot for what it just said; tap that for
+the full Peek. **Floor** takes you back. Still read-only, still just a look.
 
 ## The columns
 
