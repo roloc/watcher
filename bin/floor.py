@@ -1630,6 +1630,14 @@ function stuckStripHTML(stuck, compact) {
 function stepCarousel(cardNum, dir) {
   carouselSlide[cardNum] = (carouselSlide[cardNum] || 0) + dir;
   if (lastState) { render(lastState); renderStudio(lastState); }
+  // render()/renderStudio() replace the carousel's own DOM node (a fresh innerHTML each
+  // time), so a re-render drops focus to <body> and every arrow key after the first one
+  // stops doing anything — the strip exists twice (floor and studio), and only the
+  // currently-visible copy can actually take focus back.
+  for (const el of document.querySelectorAll(`[data-carousel="${cardNum}"]`)) {
+    el.focus({preventScroll: true});
+    if (document.activeElement === el) break;
+  }
 }
 
 document.addEventListener("click", (e) => {

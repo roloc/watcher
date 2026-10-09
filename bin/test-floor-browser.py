@@ -359,6 +359,40 @@ try:
               and b.eval(f"{slide}.querySelector('.car-caption').textContent") == "desktop"
               and b.eval(f"{slide}.querySelector('.car-counter').textContent") == "2 of 4")
         check("no uncaught exception after flipping through the carousel", b.errors == [], b.errors)
+
+        # Arrow keys, pressed more than once in a row: a re-render replaces the carousel's
+        # own DOM node on every step, which used to drop focus to <body> after the first
+        # key — so the first ArrowRight worked and every one after it silently did nothing.
+        b.eval(f"{slide}.focus()")
+        check("the carousel can take keyboard focus", b.eval(f"document.activeElement === {slide}"))
+        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
+               "{key: 'ArrowRight', bubbles: true}))")
+        check("first ArrowRight: direction B's phone shot, 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
+               "{key: 'ArrowRight', bubbles: true}))")
+        check("second ArrowRight in a row still moves it: direction B's desktop shot, 4 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "4 of 4")
+        b.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
+               "{key: 'ArrowLeft', bubbles: true}))")
+        check("ArrowLeft steps back: 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+
+        # A swipe: the same prev/next, from a touch gesture rather than a tap on an arrow.
+        swipe = """((dx) => {
+          const el = document.querySelector('.carousel[data-carousel="778"]');
+          const r = el.getBoundingClientRect(), y = r.top + r.height / 2, x = r.left + r.width / 2;
+          const touch = (cx) => new Touch({identifier: 1, target: el, clientX: cx, clientY: y});
+          el.dispatchEvent(new TouchEvent('touchstart', {touches: [touch(x)], changedTouches: [touch(x)], bubbles: true}));
+          el.dispatchEvent(new TouchEvent('touchend', {touches: [], changedTouches: [touch(x + dx)], bubbles: true}));
+        })"""
+        b.eval(f"{swipe}(-80)")  # a swipe left: forward, same as next
+        check("a swipe left moves forward: direction B's desktop shot, 4 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "4 of 4")
+        b.eval(f"{swipe}(80)")  # a swipe right: back
+        check("a swipe right moves back: 3 of 4",
+              b.eval(f"{slide}.querySelector('.car-counter').textContent") == "3 of 4")
+        check("no uncaught exception after the keyboard and swipe round trip", b.errors == [], b.errors)
         shot(b, "floor-needs-strip.png")
 
         print("3. Peek is on every lane's desk, whatever the lane is doing (card #63)")
