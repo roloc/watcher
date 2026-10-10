@@ -103,6 +103,13 @@ WATCHER_POINTER_BIN="$(dirname "${BASH_SOURCE[0]}")"
 case "$WATCHER_POINTER_BIN" in /*) ;; *) WATCHER_POINTER_BIN="$PWD/$WATCHER_POINTER_BIN" ;; esac
 WATCHER_HERE="$(cd -P "$WATCHER_POINTER_BIN" && pwd)"
 export WATCHER_HOME="${WATCHER_HOME:-$(dirname "$WATCHER_HERE")}"
+# Card #115: stand IN the release this process is pinned to, not wherever the caller (the
+# systemd unit, or a test) happened to be. Without this, a deploy's sweep of the OLD
+# release (once this process has followed the pointer onward, below) leaves it running
+# with its cwd pointing at a directory that no longer exists — every call it makes uses an
+# absolute path already, so nothing breaks, but `getcwd`/`chdir` fail on every shell this
+# process spawns and the journal fills with noise that looks like a fault.
+cd "$WATCHER_HOME"
 if [ -n "${WATCHER_PROJECT:-}" ]; then
   # shellcheck disable=SC1090
   . "$WATCHER_PROJECT"
@@ -1653,13 +1660,20 @@ follow_pointer() {
   pointer_moved || return 0
   local new="$WATCHER_POINTER_BIN/spawn.sh"
   [ -x "$new" ] || return 0
-  log "the pointer moved to $(cd -P "$WATCHER_POINTER_BIN" && pwd); re-launching from there"
+  local new_here
+  new_here="$(cd -P "$WATCHER_POINTER_BIN" && pwd)"
+  log "the pointer moved to $new_here; re-launching from there"
   # Unset, never carried into the new process: WATCHER_HOME is already exported into THIS
   # process's own environment (right at the top of the file), and `export FOO="${FOO:-x}"`
   # in the re-exec'd copy would see it already set and keep the OLD value forever — exactly
   # the trap the LANE_CHANNEL=canary shim's own `unset WATCHER_HOME` (above) already avoids,
   # for the same reason: `exec` hands the whole environment to the new process, not just argv.
   unset WATCHER_HOME
+  # Card #115: move into the new release's folder before handing off, the same reason the
+  # process-start `cd` above exists — so this long-running process is never left standing
+  # in the OLD release once a later deploy sweeps it. $new_here is .../bin; the release
+  # folder is its parent, same as WATCHER_HOME's own derivation from WATCHER_HERE above.
+  cd "$(dirname "$new_here")"
   exec "$new" "${WATCHER_ARGV[@]}"
 }
 

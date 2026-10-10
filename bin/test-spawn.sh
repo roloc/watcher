@@ -18,6 +18,9 @@ unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS 
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPAWN="$HERE/spawn.sh"
+# Card #115: spawn.sh now cd's into WATCHER_HOME at process start — dirname($HERE), the
+# repo root — so any assertion that greps a stub's logged cwd needs this to compare against.
+REPO_ROOT="$(dirname "$HERE")"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 BIN="$TMP/bin"
@@ -385,7 +388,7 @@ advance_origin() {
 # the real script's own checks.
 cat > "$BIN/doctor.sh" <<'STUB'
 #!/usr/bin/env bash
-echo "doctor.sh [PROJECT_REPO=${PROJECT_REPO:-} PROJECT_ROOT=${PROJECT_ROOT:-} BOARD_OWNER=${BOARD_OWNER:-} BOARD_NUMBER=${BOARD_NUMBER:-}]" >> "$TEST_LOG"
+echo "doctor.sh [PROJECT_REPO=${PROJECT_REPO:-} PROJECT_ROOT=${PROJECT_ROOT:-} BOARD_OWNER=${BOARD_OWNER:-} BOARD_NUMBER=${BOARD_NUMBER:-} CWD=$PWD]" >> "$TEST_LOG"
 if [ "${DOCTOR_FAIL:-0}" = 1 ]; then
   echo "doctor: ${DOCTOR_FAIL_REASON:-the board has no Stage field}" >&2
   exit 1
@@ -705,7 +708,7 @@ board_list $'75\tP1\tbuilder\t-\tCard seventy-five'
 run --once >/dev/null 2>"$TMP/doctor.err"; RC=$?
 DOCTOR_FAIL=0 DOCTOR_FAIL_REASON=""
 if [ "$RC" != 0 ]; then pass "a failing doctor is a non-success exit"; else flunk "expected non-zero exit" "rc=$RC"; fi
-if grepped "doctor.sh [PROJECT_REPO=owner/proj PROJECT_ROOT=$FAKE_ROOT BOARD_OWNER=test-owner BOARD_NUMBER=7]"; then pass "doctor runs with the project's repo, root, board owner and board number"; else flunk "doctor call missing or wrong env" "$(cat "$TESTLOG")"; fi
+if grepped "doctor.sh [PROJECT_REPO=owner/proj PROJECT_ROOT=$FAKE_ROOT BOARD_OWNER=test-owner BOARD_NUMBER=7 CWD=$REPO_ROOT]"; then pass "doctor runs with the project's repo, root, board owner and board number"; else flunk "doctor call missing or wrong env" "$(cat "$TESTLOG")"; fi
 if not_grepped "board.py list" && not_grepped "claude " && not_grepped "worktree.sh new"; then
   pass "board is never polled and no tick launches when doctor fails"
 else
@@ -2107,6 +2110,16 @@ if [ "$(grep -c 'claude -p' "$TESTLOG")" -ge 2 ]; then
   pass "more than one tick ran across the two polls (v1, then v2)"
 else
   flunk "expected at least two tick launches" "$(grep -c 'claude -p' "$TESTLOG")"
+fi
+# Card #115: doctor.sh is called directly (no subshell `cd`), so its own logged cwd is the
+# spawn.sh process's actual working directory, not a tick's worktree — the re-launched
+# process's own DOCTOR_OK cache resets on exec, so it calls doctor.sh again right after
+# following the pointer, and that call's cwd is the proof a later sweep of v1 would have
+# left this process standing in a folder that no longer exists.
+if grep -q "doctor.sh \[.*CWD=$POINTER_ROOT/v2\]" "$TESTLOG"; then
+  pass "the re-launched process stands in v2, not the v1 folder a later sweep removes"
+else
+  flunk "the re-launched process never showed v2 as its own cwd" "$(grep '^doctor.sh ' "$TESTLOG")"
 fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
