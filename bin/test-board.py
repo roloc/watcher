@@ -216,6 +216,20 @@ check("letter B, read off \"-b-\" in the URL, not the bullet's own words",
       imgs20 == [{"url": "https://example.com/shots/idea-b-desktop.png", "label": "Screenshot",
                   "letter": "B", "recommended": False}], imgs20)
 
+print("12b. plan_posted_at (card #103): the tick's plan comment, first act of watch.md §2")
+COMMENTS[30] = ["🤖 **FYI:** plan for this card.\n- You get: a thing.\n- Test: a check.\n- Risk: none."]
+check("the plan comment's own timestamp, not the newest comment overall",
+      board.plan_posted_at(30) == "2026-01-01T00:00:00Z", board.plan_posted_at(30))
+
+COMMENTS[31] = ["just a regular comment", "🤖 FYI: routine update, nothing needed"]
+check("no plan comment at all: ''", board.plan_posted_at(31) == "")
+
+COMMENTS[32] = ["🤖 **FYI:** plan for this card.\n- You get: a thing.",
+                "a reply in between",
+                "🤖 **FYI:** plan for this card.\n- You get: a different thing, after a resume."]
+check("two plan comments (a card resumed after Stuck or a crash): the NEWEST wins",
+      board.plan_posted_at(32) == "2026-01-01T00:00:02Z", board.plan_posted_at(32))
+
 print("13. the board cache (card #98): a file per board, so two reads inside the TTL "
       "share one real gh() call")
 # These cases stub `subprocess.run`, not `board.gh` itself, so the real `gh()` runs for

@@ -301,9 +301,18 @@ def stub_ratelimit():
     return {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000}
 
 
+PLAN_CALLS = []
+
+
+def stub_plan(issue, project_repo):
+    PLAN_CALLS.append((issue, project_repo))
+    return ""  # nobody has posted one in this fixture — riffmap's working lane (17m) is late
+
+
 print("5. lane_desk: each of the five pills, from its own fixture")
 state = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
                            ask_fn=stub_ask, images_fn=stub_images, rounds_fn=stub_rounds,
+                           plan_fn=stub_plan,
                            now=NOW, box_name="test-box", ratelimit_fn=stub_ratelimit)
 lanes_by_name = {(p["name"], l["lane"]): l for p in state["projects"] for l in p["lanes"]}
 
@@ -322,6 +331,10 @@ check("card #110: a PAUSE file beside a held card never flips the pill — still
       d["pill"] == "working" and d.get("pausing") is True, d)
 check("card #110: the pausing reason is the PAUSE file's own first line",
       d.get("pausing_reason") == "deploy abc1234", d)
+check("card #103: 17 minutes in, no plan comment on file — plan_posted False, plan_late True",
+      d.get("plan_posted") is False and d.get("plan_late") is True, d)
+check("the plan lookup was resolved against riffmap's OWN repo, not whatever repo this "
+      "process happens to run in", (501, "roloc/riffmap") in PLAN_CALLS, PLAN_CALLS)
 
 d = lanes_by_name[("watcher", "watcher")]
 check("card #110: a PAUSE file with no card held is still a plain paused desk, no pausing flag",
@@ -373,6 +386,60 @@ with open(multi, "w") as f:
 check("only the first line, trimmed", floor._pause_reason(multi) == "deploy c920516")
 check("a path that does not exist: '', never a crash",
       floor._pause_reason(os.path.join(reason_dir, "MISSING")) == "")
+
+print("5c. lane_desk: plan_posted/plan_late directly (card #103)")
+plan_dir = lane_dir("plan-fixture")
+plan_current = os.path.join(plan_dir, "current")
+with open(plan_current, "w") as f:
+    f.write("600\n")
+set_mtime(plan_current, 17)  # past PLAN_LATE_MIN
+plan_lane = {"lane": "x", "unit": "watcher@x", "project_repo": "roloc/x",
+             "state_dir": plan_dir, "lane_agents": "", "lane_command": "/watch"}
+plan_items = {600: {"url": "https://github.com/roloc/x/issues/600", "stage": "Building"}}
+
+
+def plan_present(issue, project_repo):
+    return "2026-09-28T11:50:00Z"
+
+
+def plan_absent(issue, project_repo):
+    return ""
+
+
+def plan_stale(issue, project_repo):
+    return "2026-09-28T11:30:00Z"  # before this lane's own launch (11:43) — a prior tick's
+
+
+d = floor.lane_desk(plan_lane, plan_items, "https://board", NOW, plan=plan_present)
+check("a posted plan: plan_posted True, never late, however many minutes have passed",
+      d.get("plan_posted") is True and d.get("plan_late") is False, d)
+
+d = floor.lane_desk(plan_lane, plan_items, "https://board", NOW, plan=plan_stale)
+check("a plan comment that predates this lane's own launch (a card a second tick resumed, "
+      "still carrying the first tick's plan): reads as not yet posted, not borrowed from "
+      "a tick that isn't this one (reviewer finding)",
+      d.get("plan_posted") is False and d.get("plan_late") is True, d)
+
+d = floor.lane_desk(plan_lane, plan_items, "https://board", NOW, plan=plan_absent)
+check("no plan after 10+ minutes: plan_posted False, plan_late True — the lane's own warning",
+      d.get("plan_posted") is False and d.get("plan_late") is True, d)
+
+young_dir = lane_dir("plan-fixture-young")
+young_current = os.path.join(young_dir, "current")
+with open(young_current, "w") as f:
+    f.write("601\n")
+set_mtime(young_current, 4)  # inside the grace window
+young_lane = {"lane": "y", "unit": "watcher@y", "project_repo": "roloc/y",
+              "state_dir": young_dir, "lane_agents": "", "lane_command": "/watch"}
+young_items = {601: {"url": "https://github.com/roloc/y/issues/601", "stage": "Claimed"}}
+d = floor.lane_desk(young_lane, young_items, "https://board", NOW, plan=plan_absent)
+check("no plan yet but still inside the grace window: plan_posted False, not late",
+      d.get("plan_posted") is False and d.get("plan_late") is False, d)
+
+d = floor.lane_desk(plan_lane, plan_items, "https://board", NOW)
+check("no plan callable at all (an older caller): neither field present, never a guessed "
+      "'no plan' on a lane this was never asked about",
+      "plan_posted" not in d and "plan_late" not in d, d)
 
 print("6. header and counts")
 check("needs_steve_total counts every Stuck CARD on every board (riffmap: #777 and #778; "

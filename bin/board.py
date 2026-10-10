@@ -16,6 +16,7 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
     python3 scripts/board.py images <issue>          # direct image links under its "Look:" section, one per line
     python3 scripts/board.py images <issue> --all-rounds  # every Needs Steve round, as JSON (bin/floor.py's carousel)
+    python3 scripts/board.py plan <issue>            # timestamp of the card's plan comment, or "" if none yet
     python3 scripts/board.py ratelimit               # cached GraphQL remaining/resetAt/limit, as JSON (never a call of its own)
     python3 scripts/board.py ledger                  # this hour's GraphQL spend by caller, as JSON (reads ledger.jsonl, no call of its own)
 
@@ -667,6 +668,21 @@ def needs_steve_ask(issue):
     return body.strip().splitlines()[0].replace("🤖", "", 1).strip()
 
 
+def plan_posted_at(issue):
+    """The `createdAt` timestamp of the card's newest plan comment (watch.md §2's `🤖
+    **FYI:** plan for this card.`, posted as the tick's first act, before any file is
+    touched), or "" if the tick working this card has not posted one yet. bin/floor.py's
+    Working desk reads this to tell a hung lane from one that simply has not gotten to the
+    comment yet (card #103, watcher#98)."""
+    for c in reversed(_comments(issue)):
+        body = c.get("body") or ""
+        first = body.strip().splitlines()
+        first = first[0].strip() if first else ""
+        if "plan for this card" in first.lower():
+            return c.get("createdAt") or ""
+    return ""
+
+
 # --- the `**Look:**` section: every direct image link under it, lettered by direction ---
 #
 # The section sits between the `**Look:**` heading and the next bold heading line
@@ -1066,6 +1082,14 @@ def cmd_ask(issue):
     return 0
 
 
+def cmd_plan(issue):
+    """The timestamp of the card's plan comment, or "" if none yet — `plan_posted_at` on
+    its own, for a caller that only wants it (bin/floor.py's Working desk, card #103)
+    without moving the card."""
+    print(plan_posted_at(issue))
+    return 0
+
+
 def cmd_ratelimit():
     """The account's GraphQL budget, from the last real query that happened to carry it —
     never a call of its own: `remaining`, `resetAt`, `limit`, or `{}` if nothing has been
@@ -1102,7 +1126,7 @@ def cmd_images(issue, *rest):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
-                            "dump", "ask", "images", "ratelimit", "ledger"):
+                            "dump", "ask", "images", "plan", "ratelimit", "ledger"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
@@ -1117,7 +1141,8 @@ if __name__ == "__main__":
                   "ledger": lambda: cmd_ledger(),
                   "dump": lambda: cmd_dump(),
                   "ask": lambda: cmd_ask(a[1]),
-                  "images": lambda: cmd_images(a[1], *a[2:])}[a[0]]())
+                  "images": lambda: cmd_images(a[1], *a[2:]),
+                  "plan": lambda: cmd_plan(a[1])}[a[0]]())
     except IndexError:
         sys.exit(__doc__)
     except RateLimitError as e:

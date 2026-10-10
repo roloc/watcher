@@ -7,7 +7,9 @@ ssh or journalctl (card #40 — mocked up with Steve on September 28, 2026).
 
 One page for the whole box, not one per project: it groups every lane in `projects/*.env`
 by the board it works, and for each lane shows one of exactly five states — **working**
-(a card, its Stage, minutes since launch), **idle** (why), **needs Steve** (the card, the
+(a card, its Stage, minutes since launch, and whether its plan comment is up yet — amber,
+the same as Ship reads when something is blocked, once it has worked past
+`PLAN_LATE_MIN` minutes with none; card #103), **idle** (why), **needs Steve** (the card, the
 first line of its ask, and — when its Stuck comment points at a mockup or a screenshot —
 a Review button that opens it full-window, zoomable and flippable, on the floor and in
 the studio alike, so approving it never means clicking through to the card first; card
@@ -86,6 +88,9 @@ STUCK_STATUS = "Stuck - Needs help"  # board.py's own constant; kept as a litera
                                       # BOARD_OWNER/BOARD_NUMBER as module-level globals —
                                       # wrong for a page that talks to several boards).
 SLEEP_AFTER_FAILURE_MIN = 10  # spawn.sh: `wsleep 600` after any non-success exit
+PLAN_LATE_MIN = 10  # watch.md §2: the plan comment is the tick's first act — a working
+                     # desk still with none past this many minutes reads as the lane's own
+                     # warning, not a hung lane with no sign to tell the two apart (card #103)
 RECENT_PER_LANE = 20   # ticks kept per lane before the global list is trimmed
 RECENT_TOTAL = 15      # ticks shown on the page, across every project
 
@@ -101,6 +106,9 @@ ALLOWED_FIELDS = {
     "lanes", "board_error",
     "lane", "kind", "unit", "unit_active", "pill", "link", "card", "stage", "minutes",
     "reason", "ask", "images", "number", "url",
+    # card #103: whether the tick's plan comment is up yet, and whether it has gone past
+    # PLAN_LATE_MIN with none
+    "plan_posted", "plan_late",
     "recent", "project", "when", "quota",
     # the ship station (after the lanes): CI on main, and the box's own deployer
     "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
@@ -455,8 +463,28 @@ def _pause_reason(path):
     return text.splitlines()[0].strip()
 
 
+def _plan_posted_since(stamp, launched):
+    """True only when a plan comment's own timestamp (`board.py plan`'s answer — "" for
+    none) is at or after `launched`, this lane's own pick-up of its current card. Without
+    this, a card a second tick resumes (Stuck, or a crash) still carries the FIRST tick's
+    plan comment, and the resuming tick — which has not posted its own yet — reads as
+    already covered by one that is not its own (card #103, reviewer finding). `launched`
+    of `None` (the state directory's own `current` file was unreadable) or a stamp this
+    cannot parse both trust the plan at face value, rather than turning a read error into
+    a false "no plan"."""
+    if not stamp:
+        return False
+    if launched is None:
+        return True
+    try:
+        ts = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return ts >= launched
+
+
 def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None,
-              images=None):
+              images=None, plan=None):
     """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
     `last_tick` is the lane's own newest log entry (a `metrics.Tick`, or None — loaded
     once by the caller, not re-read here: a lane's own `Cache` refresh used to parse every
@@ -465,7 +493,11 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
     touch the network); `images` is the same shape for `needs_steve_images` — a mockup or
     a screenshot to show right on the desk (card #91), never required to be called for a
     pill other than needs_steve; `unit_active` is `systemctl is-active`'s answer, already
-    looked up by the caller (None when it could not be checked).
+    looked up by the caller (None when it could not be checked). `plan` is the same shape
+    for `board.py plan` (card #103): called only for a working desk, and only when given —
+    a caller with nothing to inject (an older demo fixture, a test of something else) gets
+    the old shape back, no `plan_posted`/`plan_late` fields at all, rather than a guessed
+    "no plan" on a lane this was never asked about.
 
     A held card always wins the pill (card #110): a `PAUSE` file beside a held card never
     means idle — it means the lane will not pick up anything new once this tick ends. So
@@ -484,6 +516,7 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
     current_path = os.path.join(state_dir, "current")
     n = _read_current(current_path)
     if n is not None:
+        launched = None
         try:
             launched = datetime.fromtimestamp(os.path.getmtime(current_path), tz=timezone.utc)
             minutes = _minutes_since(launched, now)
@@ -493,6 +526,10 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
         url = it.get("url") or board_url
         desk = {**base, "pill": "working", "link": url, "card": {"number": n, "url": url},
                 "stage": it.get("stage") or "", "minutes": minutes}
+        if plan is not None:
+            posted = _plan_posted_since(plan(n, lane["project_repo"]), launched)
+            desk["plan_posted"] = posted
+            desk["plan_late"] = (not posted) and minutes >= PLAN_LATE_MIN
         if paused:
             desk["pausing"] = True
             desk["pausing_reason"] = _pause_reason(pause_path)
@@ -1053,7 +1090,7 @@ def make_card_lookup(repos_fn, fetcher=fetch_card, cache_sec=60, clock=time.time
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
                  images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
                  deploy_fn=None, deploy_repo=None, ratelimit_fn=None, box_stats_fn=None,
-                 proxmox_fn=None, ledger_fn=None):
+                 proxmox_fn=None, ledger_fn=None, plan_fn=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -1087,7 +1124,7 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
             active = unit_active_fn(lane["unit"]) if unit_active_fn else None
             desk = lane_desk(lane, items_by_number, p["board_url"], now,
                               last_tick=ticks[-1] if ticks else None,
-                              unit_active=active, ask=ask_fn, images=images_fn)
+                              unit_active=active, ask=ask_fn, images=images_fn, plan=plan_fn)
             lane_out.append(desk)
 
             for t in ticks[-RECENT_PER_LANE:]:
@@ -1282,6 +1319,21 @@ def board_rounds(issue, project_repo, board_py=None, timeout=20):
         return []
 
 
+def board_plan(issue, project_repo, board_py=None, timeout=20):
+    """The timestamp of the card's plan comment, or "" if none yet (`board.py plan`,
+    which wraps `plan_posted_at` — a plain `gh issue view`, no board/GraphQL involved):
+    the Working desk's "plan posted" / "no plan yet" line (card #103). Same `GH_REPO`
+    pinning as `board_ask`, for the same reason — several projects share this one box."""
+    board_py = board_py or os.path.join(HERE, "board.py")
+    env = dict(os.environ, GH_REPO=project_repo)
+    try:
+        r = subprocess.run([sys.executable, board_py, "plan", str(issue)],
+                            capture_output=True, text=True, env=env, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return (r.stdout or "").strip() if r.returncode == 0 else ""
+
+
 def board_ratelimit(board_py=None, timeout=10):
     """The account's GraphQL budget, remaining/reset/limit — `board.py ratelimit`, which
     only ever reads the last real query's own rateLimit field back out of board.py's cache
@@ -1372,6 +1424,10 @@ INDEX_HTML = """<!doctype html>
     border-radius: 999px; margin-top: 6px;
   }
   .pill.working { background: color-mix(in srgb, var(--working) 18%, transparent); color: var(--working); }
+  /* card #103: a working desk still with no plan comment past PLAN_LATE_MIN minutes —
+     the lane's own warning, amber like the pausing line above, so a hung lane and one
+     that simply has not posted yet read differently from a phone. */
+  .pill.working.plan-late { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
   .pill.idle { background: color-mix(in srgb, var(--idle) 18%, transparent); color: var(--idle); }
   .pill.needs_steve { background: color-mix(in srgb, var(--needs) 18%, transparent); color: var(--needs); }
   .pill.paused { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
@@ -2140,9 +2196,19 @@ document.addEventListener("click", (e) => {
   openReviewFromEl(btn);
 });
 
+// card #103: a working desk whose plan comment has not landed yet — "no plan yet" once
+// `plan_posted` has been injected at all (older callers that never pass a `plan` into
+// lane_desk get neither field, and neither this suffix nor the amber warning below).
+// `plan_late` (the lane's own warning, amber like Ship reads when something is blocked
+// once it has gone PLAN_LATE_MIN minutes with none) is computed server-side, in Python.
+function planSuffix(d) {
+  if (d.plan_posted === undefined) return "";
+  return d.plan_posted ? " · plan posted" : " · no plan yet";
+}
 function deskHTML(d) {
   let detail = "";
-  if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
+  const planLate = d.pill === "working" && d.plan_late === true;
+  if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m${planSuffix(d)}`;
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${d.ask ? renderAsk(d.ask) : "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   const dispatcher = d.kind === "Triage";
@@ -2154,7 +2220,7 @@ function deskHTML(d) {
       ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
       <div class="name">${esc(d.kind)}</div>
       <div class="unit">${esc(d.unit)}</div>
-      <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
+      <span class="pill ${esc(d.pill)}${planLate ? " plan-late" : ""}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
       <div class="detail">${detail}</div>
       ${pausingLine(d)}
       ${d.pill === "needs_steve" ? mockupThumbsHTML(d.images) : ""}
@@ -3133,7 +3199,8 @@ function renderBeacon(state) {
   } else {
     let amber = false;
     for (const p of state.projects || []) {
-      for (const l of p.lanes || []) if (l.pill === "paused" || l.pill === "sleeping") amber = true;
+      for (const l of p.lanes || [])
+        if (l.pill === "paused" || l.pill === "sleeping" || l.plan_late === true) amber = true;
       if (shipState(p.ship).pill === "blocked") amber = true;
     }
     color = amber ? "amber" : "green";
@@ -3262,7 +3329,7 @@ function bulletinHTML(state) {
   for (const p of state.projects || []) for (const l of p.lanes || []) {
     if (!l.card) continue;
     if (l.pill !== "working" && l.pill !== "needs_steve") continue;
-    const what = l.pill === "working" ? `${esc(l.stage || "—")} · ${l.minutes}m` : `needs Steve: ${esc(l.ask || "a decision")}`;
+    const what = l.pill === "working" ? `${esc(l.stage || "—")} · ${l.minutes}m${planSuffix(l)}` : `needs Steve: ${esc(l.ask || "a decision")}`;
     now.push(`<div class="board-row">${cardNum(l.card)}<span class="what">${esc(p.name)} · ${esc(l.kind)} · ${what}</span>
       <span class="pill ${esc(l.pill)}">${PILL_LABEL[l.pill]}</span>${peekBtn(p.name, l.card.number)}</div>`);
   }
@@ -3690,7 +3757,7 @@ def main(argv):
     def build():
         return build_state(projects_dir, state_root, fetch_board,
                             unit_active_fn=systemctl_is_active, ask_fn=board_ask,
-                            images_fn=board_images, rounds_fn=board_rounds,
+                            images_fn=board_images, rounds_fn=board_rounds, plan_fn=board_plan,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
                             ratelimit_fn=board_ratelimit, ledger_fn=board_ledger, box_stats_fn=box_stats,

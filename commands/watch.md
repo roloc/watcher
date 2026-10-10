@@ -72,7 +72,14 @@ person who asked ends up with, and where; the files that will change, in order; 
 or check that proves the card is done (for a symptom card, the artifact you will re-fetch,
 §3); and the one risk you expect. Tell Steve you're starting — plain words, no paths above
 the fold (`docs/talking-to-steve.md` rule 8), and three bullets, which is all an `FYI:`
-gets (rule 1). The file list is for the PR body and for `reviewer`, not for him:
+gets (rule 1). **Post that comment before anything else in this section — before you touch
+a file, and before the Stage moves past `Claimed`.** The card is the one copy Steve can
+see, so a plan written only for the PR body and `reviewer`, with Steve told afterwards,
+leaves the card looking hung for however long the build takes (watcher
+[#98](https://github.com/roloc/watcher/issues/98), October 9, 2026: the card showed only
+"picked this up" for 57 minutes while a tick built, tested and ran the replay suite, and
+the plan comment landed at 20:26 UTC — after the work was done). The file list is for the
+PR body and for `reviewer`, not for him:
 
 ```
 🤖 **FYI:** plan for this card.

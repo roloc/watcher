@@ -375,6 +375,21 @@ LIVE_SHAPED = """(() => {
                    tick('riffmap', 'riffmap', 624, 70), tick('riffmap', 'riffmap', 623, 90)]};
 })()"""
 
+# card #103: one working desk, 17 minutes in, with and without its plan comment — the same
+# shape, used at both desktop and phone width.
+LATE_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs_steve_total: 0},
+  projects: [{name: 'gamma', board_url: '#', counts: {ready: 0, in_progress: 1, backlog: 0},
+    lanes: [{lane: 'gamma', kind: 'Build', unit: 'watcher@gamma', pill: 'working', link: '#',
+             card: {number: 42, url: 'https://example.test/42'}, stage: 'Building',
+             minutes: 17, plan_posted: false, plan_late: true}],
+    ship: {ci: {state: 'passing', sha: 'abc1234', url: '#'}}}], recent: []}"""
+POSTED_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs_steve_total: 0},
+  projects: [{name: 'gamma', board_url: '#', counts: {ready: 0, in_progress: 1, backlog: 0},
+    lanes: [{lane: 'gamma', kind: 'Build', unit: 'watcher@gamma', pill: 'working', link: '#',
+             card: {number: 42, url: 'https://example.test/42'}, stage: 'Building',
+             minutes: 17, plan_posted: true, plan_late: false}],
+    ship: {ci: {state: 'passing', sha: 'abc1234', url: '#'}}}], recent: []}"""
+
 
 try:
     with browse.Browser(width=1280, height=900) as b:
@@ -1104,6 +1119,46 @@ try:
         b.key("Escape")
         shot(b, "floor-demo-mockup.png")
         check("still no errors after cycling demo states", b.errors == [], b.errors)
+
+        print("19. card #103: a working desk past 10 minutes with no plan comment reads amber, "
+              "the same way Ship reads when something is blocked")
+        b.eval(f"render({LATE_STATE}); renderStudio({LATE_STATE}); true")
+        settled(b)
+        check("the desk line says 'no plan yet'", "no plan yet" in b.text(), b.text())
+        check("the Working pill itself carries the late class, not just the detail text",
+              b.eval("document.querySelector('.desk .pill.working')?.className") == "pill working plan-late")
+        check("the light over Steve's door goes amber from this alone — nothing else is "
+              "paused, asleep or blocked", b.eval("document.getElementById('beacon').className") == "beacon-amber")
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "floor-plan-late.png")
+
+        b.eval(f"render({POSTED_STATE}); renderStudio({POSTED_STATE}); true")
+        settled(b)
+        check("a posted plan says so instead, past the same 17 minutes",
+              "plan posted" in b.text() and "no plan yet" not in b.text(), b.text())
+        check("the pill carries no late class", b.eval("document.querySelector('.desk .pill.working')?.className")
+              == "pill working")
+        check("...and the light goes back to green", b.eval("document.getElementById('beacon').className") == "beacon-green")
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "floor-plan-posted.png")
+
+    print("19b. card #103, on a phone: the amber pill and the words both still read at 390px")
+    with browse.Browser(width=390, height=844) as b:
+        b.goto(URL)
+        b.wait_for(DESKS_DRAWN)
+        b.eval(f"render({LATE_STATE}); true")
+        check("still fits a phone, no horizontal scroll",
+              b.eval("document.documentElement.scrollWidth <= window.innerWidth"))
+        check("'no plan yet' reads at phone width too", "no plan yet" in b.text(), b.text())
+        check("the pill is still amber at this width",
+              b.eval("document.querySelector('.desk .pill.working')?.className") == "pill working plan-late")
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "floor-plan-late-phone.png")
+
+        b.eval(f"render({POSTED_STATE}); true")
+        check("'plan posted' reads at phone width too", "plan posted" in b.text(), b.text())
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "floor-plan-posted-phone.png")
 except browse.BrowseError as e:
     print(e, file=sys.stderr)
     fails = 1
