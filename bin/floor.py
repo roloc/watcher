@@ -11,8 +11,11 @@ by the board it works, and for each lane shows one of exactly five states — **
 first line of its ask, and — when its Stuck comment points at a mockup or a screenshot —
 a Review button that opens it full-window, zoomable and flippable, on the floor and in
 the studio alike, so approving it never means clicking through to the card first; card
-#91, reshaped by card #100), **paused** (a `PAUSE` file), or **sleeping** (a died tick,
-inside the spawner's own ten-minute retry sleep — `how-it-works.md`, "step 8"). A "Recent
+#91, reshaped by card #100), **paused** (a `PAUSE` file, and no card held), or **sleeping**
+(a died tick, inside the spawner's own ten-minute retry sleep — `how-it-works.md`,
+"step 8"). A lane holding a card still reads **working** even with a `PAUSE` file beside
+it — paused means it takes nothing new, never that it is idle — and carries a short
+"pausing" line saying why (card #110). A "Recent
 ticks" list, across every project, closes the loop: project, lane, card, when, quota. A
 **Peek** button on **every** lane's desk opens a panel decoded from that lane's own Claude
 Code session transcript, the same way `bin/tail.sh` decodes it on the command line (card
@@ -109,6 +112,8 @@ ALLOWED_FIELDS = {
     # the account's GraphQL budget (card #98), read from board.py's own cache — never a
     # call of its own
     "github_remaining", "github_reset", "github_limit",
+    # card #110: a working lane that is also pausing (a PAUSE file sits beside a held card)
+    "pausing", "pausing_reason",
 }
 
 
@@ -424,6 +429,16 @@ def _idle_reason(lane, items_by_number, last_tick):
     return "Nothing to pick up right now."
 
 
+def _pause_reason(path):
+    """The first line of a `PAUSE` file, or `""` for an empty (hand-touched) one — never
+    more than that line, so a multi-line file can never leak past it (there is no reason
+    one would have more than one line; this is a floor not a parser)."""
+    text = _read(path)
+    if not text:
+        return ""
+    return text.splitlines()[0].strip()
+
+
 def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None,
               images=None):
     """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
@@ -434,14 +449,21 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
     touch the network); `images` is the same shape for `needs_steve_images` — a mockup or
     a screenshot to show right on the desk (card #91), never required to be called for a
     pill other than needs_steve; `unit_active` is `systemctl is-active`'s answer, already
-    looked up by the caller (None when it could not be checked)."""
+    looked up by the caller (None when it could not be checked).
+
+    A held card always wins the pill (card #110): a `PAUSE` file beside a held card never
+    means idle — it means the lane will not pick up anything new once this tick ends. So
+    `current` is read before `PAUSE`, and a lane holding a card gets `pill: working`
+    whether or not `PAUSE` sits beside it; `PAUSE` only adds `pausing: true` and
+    `pausing_reason` (the file's own first line — "deploy <sha>" for the deployer and the
+    canary stage, "" for a hand-touched one) for the page script to turn into plain
+    words. Only a lane holding nothing reads as `paused`."""
     base = {"lane": lane["lane"], "kind": lane_kind(lane), "unit": lane["unit"]}
     if unit_active is not None:
         base["unit_active"] = unit_active
     state_dir = lane["state_dir"]
-
-    if os.path.exists(os.path.join(state_dir, "PAUSE")):
-        return {**base, "pill": "paused", "link": board_url}
+    pause_path = os.path.join(state_dir, "PAUSE")
+    paused = os.path.exists(pause_path)
 
     current_path = os.path.join(state_dir, "current")
     n = _read_current(current_path)
@@ -453,8 +475,15 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             minutes = 0
         it = items_by_number.get(n) or {}
         url = it.get("url") or board_url
-        return {**base, "pill": "working", "link": url, "card": {"number": n, "url": url},
+        desk = {**base, "pill": "working", "link": url, "card": {"number": n, "url": url},
                 "stage": it.get("stage") or "", "minutes": minutes}
+        if paused:
+            desk["pausing"] = True
+            desk["pausing_reason"] = _pause_reason(pause_path)
+        return desk
+
+    if paused:
+        return {**base, "pill": "paused", "link": board_url}
 
     # The board is authoritative over the lane's own log: a card the SPAWNER parked (two
     # died ticks, no Stuck-shaped comment from the tick itself) is just as much "needs
@@ -1138,6 +1167,9 @@ INDEX_HTML = """<!doctype html>
   .pill.paused { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
   .pill.sleeping { background: color-mix(in srgb, var(--sleep) 18%, transparent); color: var(--sleep); }
   .detail { font-size: 13px; margin-top: 6px; color: var(--dim); }
+  /* card #110: a working desk that is also pausing — a second fact, not a replacement
+     for the Working pill, so it reads small and amber beside the detail line. */
+  .pausing { font-size: 12px; margin-top: 2px; color: var(--paused); }
   /* A mockup or a screenshot a Needs Steve comment pointed at, shown right on the desk
      instead of making Steve click through to the card to find it (card #91). */
   .mockups { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -1538,6 +1570,16 @@ window.addEventListener("unhandledrejection", function () {
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
                      paused: "Paused", sleeping: "Sleeping"};
 
+// Card #110: a working lane can also be pausing (a PAUSE file sits beside its held card).
+// The backend hands back the file's own first line as `pausing_reason` — "deploy <sha>"
+// for the deployer and the canary stage, "" for a hand-touched one — and this turns it
+// into plain words, never the sha or the file's path (`talking-to-steve.md`, rule 8).
+function pausingLine(d) {
+  if (!d.pausing) return "";
+  const forDeploy = (d.pausing_reason || "").startsWith("deploy");
+  return `<div class="pausing">pausing after this card${forDeploy ? " for a deploy" : ""}</div>`;
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -1847,6 +1889,7 @@ function deskHTML(d) {
       <div class="unit">${esc(d.unit)}</div>
       <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
       <div class="detail">${detail}</div>
+      ${pausingLine(d)}
       ${d.pill === "needs_steve" ? mockupThumbsHTML(d.images) : ""}
       ${d.pill === "needs_steve" ? reviewButtonHTML(d.card.number, d.images) : ""}
     </a>

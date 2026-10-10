@@ -192,12 +192,15 @@ def write_log(state_dir, issue, minutes_ago, **kw):
 watcher_dir = lane_dir("watcher")
 open(os.path.join(watcher_dir, "PAUSE"), "w").close()
 
-# riffmap: a card checked out right now -> working
+# riffmap: a card checked out right now -> working, AND a PAUSE file beside it (card #110:
+# a deploy or a hand pause mid-tick never means idle) -> still working, plus a pausing flag
 riffmap_dir = lane_dir("riffmap")
 current_path = os.path.join(riffmap_dir, "current")
 with open(current_path, "w") as f:
     f.write("501\n")
 set_mtime(current_path, 17)
+with open(os.path.join(riffmap_dir, "PAUSE"), "w") as f:
+    f.write("deploy abc1234\n")
 
 # riffmap-design: died 2 minutes ago -> sleeping (inside the 10-minute retry window)
 design_dir = lane_dir("riffmap-design")
@@ -315,6 +318,14 @@ check("riffmap: card #501, its board Stage, ~17 minutes", d["card"]["number"] ==
       and d["stage"] == "Building" and 16 <= d["minutes"] <= 18, d)
 check("riffmap: links straight to the card", d["link"] == "https://github.com/roloc/riffmap/issues/501")
 check("riffmap: unit_active reported True", d.get("unit_active") is True)
+check("card #110: a PAUSE file beside a held card never flips the pill — still working",
+      d["pill"] == "working" and d.get("pausing") is True, d)
+check("card #110: the pausing reason is the PAUSE file's own first line",
+      d.get("pausing_reason") == "deploy abc1234", d)
+
+d = lanes_by_name[("watcher", "watcher")]
+check("card #110: a PAUSE file with no card held is still a plain paused desk, no pausing flag",
+      "pausing" not in d and "pausing_reason" not in d, d)
 
 d = lanes_by_name[("riffmap", "riffmap-design")]
 check("riffmap-design: sleeping (died 2 minutes ago, inside the 10-minute retry window)",
@@ -350,6 +361,18 @@ check("fourth: needs_steve, not sleeping — the board (a spawner park, no Stuck
       d["pill"] == "needs_steve" and d["card"]["number"] == 99, d)
 check("fourth: no mockup in its comment — an empty list, never a missing field",
       d["images"] == [], d)
+
+print("5b. _pause_reason: the PAUSE file's own first line, never more, '' for a hand-touch")
+reason_dir = tempfile.mkdtemp(prefix="watcher-floor-pause-")
+hand = os.path.join(reason_dir, "HAND")
+open(hand, "w").close()
+check("a hand-touched (empty) PAUSE file: ''", floor._pause_reason(hand) == "")
+multi = os.path.join(reason_dir, "MULTI")
+with open(multi, "w") as f:
+    f.write("deploy c920516\nsome second line that must never surface\n")
+check("only the first line, trimmed", floor._pause_reason(multi) == "deploy c920516")
+check("a path that does not exist: '', never a crash",
+      floor._pause_reason(os.path.join(reason_dir, "MISSING")) == "")
 
 print("6. header and counts")
 check("needs_steve_total counts every Stuck CARD on every board (riffmap: #777 and #778; "

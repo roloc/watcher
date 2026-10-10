@@ -160,9 +160,12 @@ def tick_log(lane, card, stamp):
                    "result": f"- Card: #{card} x\n- Outcome: merged\n- Ended in: Done\n"}, f)
 
 
-# alpha (Build): working on #7 right now, with a session being written.
+# alpha (Build): working on #7 right now, with a session being written — AND a PAUSE file
+# beside it (card #110: a deploy mid-tick never means idle, so this still reads working).
 with open(os.path.join(STATE, "alpha", "current"), "w") as f:
     f.write("7\n")
+with open(os.path.join(STATE, "alpha", "PAUSE"), "w") as f:
+    f.write("deploy c920516\n")
 LIVE = transcript(f"{ROOT}/alpha-worktrees", 7,
                   [say("Reading the card before touching anything."), run("Run the spawner suite")])
 # alpha-design: idle. Its last tick was #5, and that session is still on disk.
@@ -359,6 +362,15 @@ try:
         check("the working lane says what it is on: card, stage, minutes",
               "#7 · Building · " in text, text[:400])
         check("each pill is there in words", all(w in text for w in ("Working", "Idle", "Paused")))
+        check("card #110: alpha is holding #7 WITH a PAUSE file beside it, and still reads "
+              "Working, not Paused — paused means it takes nothing new, not that it is idle",
+              b.eval("document.querySelector('.desk-link[href*=\"/issues/7\"] .pill')"
+                     ".className") == "pill working",
+              b.eval("document.querySelector('.desk-link[href*=\"/issues/7\"] .pill')?.outerHTML"))
+        check("card #110: a short pausing line sits under the card, in plain words — never "
+              "the PAUSE file's path or its sha",
+              b.eval("document.querySelector('.desk-link[href*=\"/issues/7\"] .pausing')"
+                     ".textContent") == "pausing after this card for a deploy")
         check("neither warning line is showing",
               b.eval("getComputedStyle(document.getElementById('load-error')).display") == "none"
               and b.eval("getComputedStyle(document.getElementById('script-error')).display") == "none")
