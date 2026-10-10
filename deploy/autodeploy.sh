@@ -55,6 +55,13 @@
 # ships it (and skips both the suite and the canary stage). Nothing here ever signals a
 # tick, force-pushes, or posts to Discord except through that card's move (board.py posts
 # the Stuck alert, as it does for every card).
+#
+# Card #105: every step above that can actually block a run writes `$DSTATE/step` on
+# entering it (write_step, clear_step — a fact, not a log line, so it is still true for as
+# long as the step lasts, even the replay suite's own several minutes inside one run) —
+# cleared once the target is live or held. It is the floor page's Ship desk's only source
+# for "which step, out of how many" and, together with the canary stage's own PAUSE files,
+# "which lane(s) it is waiting on and by when" (bin/floor.py, deploy_status).
 set -uo pipefail
 
 WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
@@ -112,6 +119,20 @@ say_once() {
   [ "$(cat "$DSTATE/said" 2>/dev/null)" = "$key" ] && return 0
   echo "$key" > "$DSTATE/said"; say "$*"
 }
+
+# write_step/clear_step: $DSTATE/step, a fact for the floor page's Ship desk (card #105) —
+# four lines (step number, of how many, its plain-words name, one line of detail) so the
+# page reads what the deployer is doing rather than re-deriving its own branching. Written
+# each time a run enters a step, so a step that blocks THIS SAME invocation for minutes (the
+# replay suite) still reads correctly for as long as it runs; cleared once the target is
+# live or held, so a reader never sees a step left over from a different commit. Best
+# effort, like every other write under $DSTATE: a failure here must never fail a deploy.
+write_step() {
+  local n="$1" total="$2" name="$3"; shift 3
+  { printf '%s\n%s\n%s\n%s\n' "$n" "$total" "$name" "$*" > "$DSTATE/step.tmp" \
+      && mv "$DSTATE/step.tmp" "$DSTATE/step"; } 2>/dev/null || true
+}
+clear_step() { rm -f "$DSTATE/step" "$DSTATE/step.tmp" 2>/dev/null || true; }
 
 # --- the lanes ------------------------------------------------------------------------------
 
@@ -463,6 +484,7 @@ canary_stage() {
     canary_pause "$tgt"
     if [ -n "$(canary_busy)" ]; then
       say "canary: waiting for the canary lane(s) to go idle before moving to ${tgt:0:7}"
+      CANARY_STEP_DETAIL="waiting for the canary lane(s) to go idle before moving to ${tgt:0:7}"
       return 1
     fi
     # $tgt is only ever a commit $WATCHER_DIR already fetched (main's own fetch, at the top
@@ -485,6 +507,7 @@ canary_stage() {
     printf '%s %s\n' "$tgt" "$since" > "$rec"
     echo "$prev" > "$DSTATE/canary-prev"
     say "canary: ${tgt:0:7} is live for ${lanes% }; soaking"
+    CANARY_STEP_DETAIL="soaking: 0 of $CANARY_SOAK_TICKS clean tick(s) so far"
     return 1
   fi
 
@@ -512,6 +535,7 @@ canary_stage() {
     say "canary: ${tgt:0:7} has been quiet on the canary lane(s) for over $CANARY_QUIET_MIN min; promoting anyway"
     return 0
   fi
+  CANARY_STEP_DETAIL="soaking: $ticks of $CANARY_SOAK_TICKS clean tick(s) so far"
   return 1
 }
 
@@ -675,23 +699,36 @@ main() {
   # this `config core.fileMode false` existed).
   wgit "config core.fileMode false" || true
   wgit "fetch -q origin $BRANCH" || { say_once fetch "fetch failed; trying again next run"; return 0; }
-  local cur tgt force=""
+  local cur tgt force="" total=4 anyway=0 needs_canary=0
   cur="$(wgit 'rev-parse HEAD')"; tgt="$(wgit "rev-parse origin/$BRANCH")"
-  if [ "$cur" = "$tgt" ]; then say_once "live $cur" "live at ${cur:0:7}; nothing to deploy"; return 0; fi
+  if [ "$cur" = "$tgt" ]; then say_once "live $cur" "live at ${cur:0:7}; nothing to deploy"; clear_step; return 0; fi
 
   # Card #106 removed the old "box's checkout must be clean and able to fast-forward" gate:
   # a release is always a FRESH clone (release_new, above), never the live pointer's own
   # checkout edited in place, so there is nothing left that can ever be dirty or diverged.
 
+  # Card #105: read `overridden` (a real `gh` call) and `canary_needed` (local git/systemctl
+  # only) each exactly once per run, into `anyway`/`needs_canary` — both gate more than one
+  # step below, and re-reading either mid-run risks reading a different answer the second
+  # time for no benefit. `total` is the step file's own total: 5 when the canary stage will
+  # actually run for this target, 4 when it will be skipped, 1 for a deploy-anyway that
+  # skips every gate — so the floor page's Ship desk never lists a step that is not coming.
+  overridden "$tgt" && anyway=1
+  [ "$anyway" = 0 ] && canary_needed "$cur" "$tgt" && needs_canary=1
+  if [ "$anyway" = 1 ]; then total=1; elif [ "$needs_canary" = 1 ]; then total=5; fi
+
   # 2. CI, and 3. the replay suite — both skipped for a commit Steve said to ship.
-  if ! overridden "$tgt"; then
+  if [ "$anyway" = 0 ]; then
+    write_step 2 "$total" "Wait for CI to pass" "waiting for $CHECK on ${tgt:0:7}"
     case "$(check_state "$tgt")" in
       pending) say_once "ci $tgt" "waiting for $CHECK on ${tgt:0:7}"; return 0 ;;
-      failure) hold "$tgt" "its $CHECK check failed" "The required check \`$CHECK\` did not pass on \`$tgt\`."; return 0 ;;
+      failure) clear_step; hold "$tgt" "its $CHECK check failed" "The required check \`$CHECK\` did not pass on \`$tgt\`."; return 0 ;;
     esac
+    write_step 3 "$total" "Run the replay suite" "checking ${tgt:0:7}"
     case "$(evals_state "$cur" "$tgt")" in
       pending|retry) return 0 ;;
-      fail) hold "$tgt" "the replay suite failed on it twice" \
+      fail) clear_step
+            hold "$tgt" "the replay suite failed on it twice" \
               "\`bin/eval.sh\` failed twice on \`$tgt\`. The last run's result lines:
 \`\`\`
 $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -20)
@@ -706,19 +743,22 @@ $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -
   # 3b. The canary stage — skipped for a commit Steve said to ship, exactly like CI and the
   # suite above, and for a commit/project canary_needed finds nothing to do for. Unchanged
   # by card #106: it still pauses and restarts only its own lane(s), directly.
-  if ! overridden "$tgt" && canary_needed "$cur" "$tgt"; then
+  if [ "$needs_canary" = 1 ]; then
+    CANARY_STEP_DETAIL=""
     canary_stage "$tgt"
     case $? in
-      1) return 0 ;;
-      2) hold "$tgt" "$CANARY_HOLD_WHY" "$CANARY_HOLD_DETAILS"; return 0 ;;
+      1) write_step 4 "$total" "Soak on the canary lane(s)" "$CANARY_STEP_DETAIL"; return 0 ;;
+      2) clear_step; hold "$tgt" "$CANARY_HOLD_WHY" "$CANARY_HOLD_DETAILS"; return 0 ;;
     esac
   fi
 
   # 4. Release it: clone, install, flip the pointer. No pause, no drain, no wait.
+  write_step "$total" "$total" "Install and flip the pointer" "installing ${tgt:0:7}"
   if ! swap "$tgt" "$cur" "$force"; then
     say "could not release ${tgt:0:7}; trying again next run"
     return 0
   fi
+  clear_step
   echo "$tgt" > "$DSTATE/deployed"
   close_held_except "$tgt"
   # A canary soak record for the commit that just promoted has done its job; the next

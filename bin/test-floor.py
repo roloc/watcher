@@ -722,6 +722,141 @@ check("a deployer read that blows up leaves the page up, with no deploy block",
       all("deploy" not in p["ship"] for p in state17c["projects"]))
 check("a checkout that is not a repo shows no deployer", floor.deploy_status("/x", DS, "r/w", git=lambda d, *a: "") is None)
 
+print("17a0. card #105: deploy_service_running reads a oneshot unit's real states — a review")
+print("      finding: systemctl_is_active's 'is-active --quiet' only succeeds for 'active',")
+print("      which a Type=oneshot unit with no RemainAfterExit never reaches while running.")
+FAKE_BIN = os.path.join(ROOT, "fake-systemctl-bin")
+os.makedirs(FAKE_BIN, exist_ok=True)
+def fake_systemctl(state):
+    # Real `systemctl is-active` exits 0 for exactly "active" and non-zero for every other
+    # state (reviewer, round 2: a fixture that always exits 0 never covers the actual
+    # production shape — `activating` on stdout with a non-zero exit code, found live on
+    # the box). `deploy_service_running` must read `activating` as running from stdout
+    # alone, the exit code notwithstanding.
+    path = os.path.join(FAKE_BIN, "systemctl")
+    rc = 0 if state == "active" else 3
+    with open(path, "w") as f:
+        f.write(f"#!/bin/sh\necho {state}\nexit {rc}\n")
+    os.chmod(path, 0o755)
+_old_path = os.environ.get("PATH", "")
+os.environ["PATH"] = FAKE_BIN + os.pathsep + _old_path
+try:
+    fake_systemctl("activating")
+    check("a oneshot unit's whole run reads as running — not just an instant of 'active'",
+          floor.deploy_service_running("watcher-deploy.service") is True)
+    fake_systemctl("active")
+    check("'active' counts too (a long-lived unit, or the brief instant a oneshot can reach it)",
+          floor.deploy_service_running("watcher-deploy.service") is True)
+    fake_systemctl("reloading")
+    check("'reloading' counts as running", floor.deploy_service_running("watcher-deploy.service") is True)
+    fake_systemctl("inactive")
+    check("between runs ('inactive'): not running", floor.deploy_service_running("watcher-deploy.service") is False)
+    fake_systemctl("failed")
+    check("a run systemd gave up on ('failed'): not running, never stuck 'running' forever",
+          floor.deploy_service_running("watcher-deploy.service") is False)
+finally:
+    os.environ["PATH"] = _old_path
+
+print("17a. card #105: which step, how fresh, who it's waiting on, and lands-by — the Ship")
+print("     desk's own facts, from the deployer's step/lock files and a busy canary lane's")
+print("     own PAUSE/current/project files. Today's incident (the card's own 'How'): two")
+print("     lanes mid-tick holding a deploy, with no sign on the floor page of either.")
+reset()
+
+def deploy_now():
+    return floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(L, T), lanes=WAIT_LANES,
+                                now=NOW, running_fn=lambda: RUNNING)
+
+RUNNING = False
+WAIT_LANES = []
+# No lock file at all yet: this box has never run the deployer.
+check("never having run at all: no alive line, not a crash", deploy_now()["alive"] is None)
+open(os.path.join(DS, "lock"), "w").close()
+os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 120, NOW.timestamp() - 120))
+check("between runs: checked 2m ago (the lock file's own mtime), not from the history",
+      deploy_now()["alive"] == {"running": False, "since_sec": 120, "next_in_sec": 180, "stale": False},
+      deploy_now()["alive"])
+# RUNNING here stands for deploy_service_running()'s own answer, true for the WHOLE length
+# of a run: watcher-deploy.service is Type=oneshot with no RemainAfterExit, so systemd
+# calls it "activating", never "active", for as long as autodeploy.sh is executing (found
+# in review, against the live box) — deploy_service_running (not systemctl_is_active) is
+# what tells "mid-run" from "between runs", a fact that section 17b below checks directly.
+RUNNING = True
+check("mid-run (the oneshot unit is activating): running now, no next-check countdown",
+      deploy_now()["alive"] == {"running": True, "since_sec": 120})
+RUNNING = False
+os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 900, NOW.timestamp() - 900))
+check("older than two timer periods: stale",
+      deploy_now()["alive"] == {"running": False, "since_sec": 900, "next_in_sec": 0, "stale": True})
+os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 120, NOW.timestamp() - 120))
+
+check("no step file yet: no step, not a crash", deploy_now()["step"] is None)
+with open(os.path.join(DS, "step"), "w") as f:
+    f.write("4\n5\nSoak on the canary lane(s)\nsoaking: 1 of 3 clean tick(s) so far\n")
+check("the step file's own four lines, read as the Ship desk's one fact",
+      deploy_now()["step"] == {"number": 4, "total": 5, "name": "Soak on the canary lane(s)",
+                               "detail": "soaking: 1 of 3 clean tick(s) so far"})
+
+WAIT_LANES = []
+check("nobody paused for this deploy: waiting_for is empty, lands_by is None (landing on the next check)",
+      deploy_now()["waiting_for"] == [] and deploy_now()["lands_by"] is None)
+
+WAITDIR = os.path.join(ROOT, "deploy-wait-lanes")
+def wait_lane(name, project_repo, tick_timeout, launched_minutes_ago, card):
+    d = os.path.join(WAITDIR, name); os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "PAUSE"), "w") as f:
+        f.write(f"deploy {T}\n")
+    cpath = os.path.join(d, "current")
+    with open(cpath, "w") as f:
+        f.write(str(card))
+    t = (NOW - timedelta(minutes=launched_minutes_ago)).timestamp()
+    os.utime(cpath, (t, t))
+    return {"lane": name, "project_repo": project_repo, "state_dir": d, "tick_timeout": tick_timeout}
+
+# The Azeroth Rewind shape from the card's own incident: two lanes mid-tick, one launched
+# well before the other, each with its own watchdog ceiling — the Ship desk's "lands by"
+# is the LATER of the two deadlines, plus one timer period, never the first one it finds.
+WAIT_LANES = [
+    wait_lane("watcher", "roloc/watcher", 150, 30, 42),    # deadline: NOW + 120m
+    wait_lane("riffmap", "roloc/riffmap", 60, 10, 777),    # deadline: NOW +  50m — not the latest
+]
+waiting = deploy_now()["waiting_for"]
+check("every busy, paused-for-deploy lane is listed, project and card included",
+      {(w["project"], w["lane"], w["card"]["number"]) for w in waiting}
+      == {("watcher", "watcher", 42), ("riffmap", "riffmap", 777)}, waiting)
+check("each one links straight to its own card",
+      {w["card"]["url"] for w in waiting}
+      == {"https://github.com/roloc/watcher/issues/42", "https://github.com/roloc/riffmap/issues/777"})
+w42 = next(w for w in waiting if w["card"]["number"] == 42)
+check("its own watchdog deadline: launched + that lane's own TICK_TIMEOUT, not a shared default",
+      w42["deadline_at"] == (NOW + timedelta(minutes=120)).isoformat(), w42)
+check("lands_by is the LATEST deadline, plus one timer period — never the first lane found",
+      deploy_now()["lands_by"] == (NOW + timedelta(minutes=120, seconds=floor.DEPLOY_TIMER_SEC)).isoformat(),
+      deploy_now()["lands_by"])
+
+# A lane with a PAUSE file Steve made by hand (never "deploy <sha>") is not this — only the
+# canary stage's own pause ever blames a deploy, card #106.
+WAIT_LANES = [wait_lane("hand-paused", "roloc/watcher", 150, 5, 99)]
+with open(os.path.join(WAITDIR, "hand-paused", "PAUSE"), "w") as f:
+    f.write("")  # overwrite wait_lane's default: Steve's own empty, hand-made PAUSE
+check("a hand-made PAUSE is never read as the deployer waiting on it",
+      deploy_now()["waiting_for"] == [])
+
+# Once the deploy is actually live, none of this applies — only the alive line does.
+check("live: no step, nobody waited on, no lands-by — only the alive line, so the desk never looks frozen",
+      floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(L, L), lanes=WAIT_LANES, now=NOW,
+                          running_fn=lambda: False)
+      == {"live": L[:7], "target": L[:7], "state": "live",
+          "alive": {"running": False, "since_sec": 120, "next_in_sec": 180, "stale": False},
+          "step": None, "waiting_for": [], "lands_by": None})
+# Leave DS exactly as section 17 above left it (held/T="58", evals/T="fail 1") for the
+# `dstate()`/`state17` code below, which this block's own `reset()` and lock/step files
+# must not disturb.
+reset()
+os.remove(os.path.join(DS, "lock")); os.remove(os.path.join(DS, "step"))
+open(os.path.join(DS, "evals", T), "w").write("fail 1")
+open(os.path.join(DS, "held", T), "w").write("58")
+
 # Card #106: a lane's own $WATCHER_STATE/release (bin/spawn.sh writes it at process start)
 # is read for the Ship desk's per-lane view, box-wide — "riffmap" is on the live release,
 # "riffmap-design" is still on the one before it, "watcher" has never polled since one was

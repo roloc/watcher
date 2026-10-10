@@ -73,7 +73,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -95,7 +95,11 @@ RECENT_PER_LANE = 20   # ticks kept per lane before the global list is trimmed
 RECENT_TOTAL = 15      # ticks shown on the page, across every project
 
 ENV_VARS = ("PROJECT_NAME", "PROJECT_ROOT", "BOARD_OWNER", "PROJECT_REPO", "BOARD_NUMBER",
-            "LANE_AGENTS", "LANE_COMMAND", "WATCHER_STATE", "LANE_WORKDIR")
+            "LANE_AGENTS", "LANE_COMMAND", "WATCHER_STATE", "LANE_WORKDIR",
+            # card #105: bin/spawn.sh's own watchdog ceiling, in minutes — read so the Ship
+            # desk's "lands by" can compute a busy canary lane's own deadline the same way
+            # the spawner would, rather than assuming every lane uses the 150-minute default.
+            "TICK_TIMEOUT")
 
 # Every key the JSON endpoint may ever emit. `test-floor.py` walks a real response and
 # fails if it finds one outside this set — the rule from the card ("serves only the fields
@@ -114,6 +118,11 @@ ALLOWED_FIELDS = {
     "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
     # card #106: which release each lane on the box is pinned to, box-wide
     "release",
+    # card #105: which step a deploy is on, how fresh the deployer's last check was, which
+    # canary lane(s) it is waiting on (with a real link to each one's card), and when it
+    # lands at the latest
+    "step", "detail", "alive", "running", "since_sec", "next_in_sec", "stale",
+    "waiting_for", "launched_at", "deadline_at", "lands_by",
     # the Needs Steve strip (card #96): every Stuck card on the board, whichever lane last
     # touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
@@ -200,6 +209,10 @@ def discover_lanes(projects_dir, state_root):
         else:
             worktree_base = os.path.join(os.path.dirname(project_root),
                                           os.path.basename(project_root) + "-worktrees")
+        try:
+            tick_timeout = int(env.get("TICK_TIMEOUT") or 150)
+        except ValueError:
+            tick_timeout = 150
         lanes.append({
             "lane": name,
             "unit": f"watcher@{name}",
@@ -211,6 +224,7 @@ def discover_lanes(projects_dir, state_root):
             "state_dir": env.get("WATCHER_STATE") or os.path.join(state_root, name),
             "workdir_mode": workdir_mode,
             "worktree_base": worktree_base,
+            "tick_timeout": tick_timeout,
         })
     return lanes
 
@@ -378,13 +392,89 @@ def _read(path):
         return None
 
 
-def deploy_status(repo_dir, deploy_state, repo, git=_git):
+# Card #105: deploy/watcher-deploy.service is a Type=oneshot unit with no RemainAfterExit,
+# so for the whole length of a run `systemctl is-active` reports "activating", never
+# "active" (found in review, checked against the live box mid-run: `ActiveState=activating`
+# for the entire replay suite) — `systemctl_is_active`'s `is-active --quiet` succeeds only
+# for "active" and so is always False here, the opposite of what the Ship desk needs.
+# `deploy_service_running`, below, is the dedicated check: "activating" (or "reloading")
+# counts as running, same as "active" would for a long-lived unit. The lock file's own
+# mtime (`exec 9> "$DSTATE/lock"` touches it at the START of every run, whether or not that
+# run finds anything new to do) is "when it was last checked" either way.
+DEPLOY_SERVICE_UNIT = "watcher-deploy.service"
+# deploy/watcher-deploy.timer's own OnUnitInactiveSec. A constant, not a live systemd read:
+# the timer's own schedule only changes with a commit to that file, which this mirrors.
+DEPLOY_TIMER_SEC = int(os.environ.get("DEPLOY_TIMER_SEC") or 300)
+
+
+def deploy_service_running(unit=DEPLOY_SERVICE_UNIT, timeout=5):
+    """Whether deploy/autodeploy.sh's own oneshot unit is actually executing right now.
+    Never `systemctl_is_active` (below): that one's `is-active --quiet` only succeeds for
+    the single state "active", which a Type=oneshot unit with no RemainAfterExit reaches
+    only for an instant, if ever — it reports "activating" for the whole length of a run
+    (found in review, against the live box). `systemctl is-active <unit>`, without
+    `--quiet`, prints that state word to stdout regardless of its exit code; "activating"
+    and "reloading" both count as running, same as a long-lived unit's own "active"."""
+    try:
+        r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (r.stdout or "").strip() in ("active", "activating", "reloading")
+
+
+def deploy_alive(deploy_state, now, running_fn, period_sec=DEPLOY_TIMER_SEC):
+    """live | between runs, for the Ship desk's freshness line — None when the deployer has
+    never run on this box at all (no lock file yet). `since_sec` is always how long ago the
+    lock file was last touched; `next_in_sec`/`stale` only mean anything between runs (mid-
+    run, there is no "next" to count down to — the desk reads "running now" instead).
+    `running_fn` is `() -> bool|None` — `deploy_service_running`, above, in production."""
+    try:
+        mtime = os.path.getmtime(os.path.join(deploy_state, "lock"))
+    except OSError:
+        return None
+    running = bool(running_fn()) if running_fn else False
+    since = max(now.timestamp() - mtime, 0)
+    out = {"running": running, "since_sec": int(since)}
+    if not running:
+        out["next_in_sec"] = max(int(period_sec - since), 0)
+        out["stale"] = since > 2 * period_sec
+    return out
+
+
+def read_deploy_step(deploy_state):
+    """What deploy/autodeploy.sh last wrote to `$DSTATE/step` on entering it — card #105's
+    one fact for "which step, out of how many" — or None between deploys (cleared once the
+    target is live or held) and for a write caught mid-rename (the next read sees the
+    finished one; `write_step` renames into place so there is nothing else to catch)."""
+    try:
+        with open(os.path.join(deploy_state, "step")) as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return None
+    if len(lines) < 4:
+        return None
+    try:
+        number, total = int(lines[0]), int(lines[1])
+    except ValueError:
+        return None
+    return {"number": number, "total": total, "name": lines[2], "detail": lines[3]}
+
+
+def deploy_status(repo_dir, deploy_state, repo, git=_git, lanes=(), now=None, running_fn=None):
     """What deploy/autodeploy.sh is doing, from the files it keeps (read-only):
-    live | checking | testing | held. Card #106: a deploy never pauses or waits for a lane
-    any more — it clones the target, installs it, and flips the pointer inside one run — so
-    there is no separate "waiting for idle lanes"/"swapping" state left to show; `live` and
-    `target` already say the rest, and `lane_release`/the page's per-lane lines (below) say
-    which lanes have already followed the pointer there."""
+    live | checking | testing | held. Card #106 means an ordinary release never pauses or
+    waits for a lane — it clones the target, installs it, and flips the pointer inside one
+    run — so `live`/`target` already say most of it, and `lane_release`/the page's per-lane
+    lines (below) say which lanes have already followed the pointer there.
+
+    Card #105 adds the rest of the Ship desk's Peek: `step` (`read_deploy_step`, above —
+    None when `live`), `alive` (`deploy_alive`, above — always present, even when `live`,
+    so the desk never looks frozen between deploys), `waiting_for` (every lane a PAUSE file
+    blames on "deploy <sha>" that is still mid-tick — only ever the canary stage's own
+    pause, card #46, since card #106; an ordinary release waits on nothing), and `lands_by`
+    (the latest such lane's own watchdog deadline, plus one timer period — None when
+    nothing is being waited on, which reads as "landing on the next check")."""
+    now = now or datetime.now(timezone.utc)
     live = git(repo_dir, "rev-parse", "HEAD")
     target = git(repo_dir, "rev-parse", "origin/main")
     if not live:
@@ -405,6 +495,34 @@ def deploy_status(repo_dir, deploy_state, repo, git=_git):
         out["state"] = "testing"
     else:
         out["state"] = "checking"
+
+    out["alive"] = deploy_alive(deploy_state, now, running_fn)
+    out["step"] = read_deploy_step(deploy_state) if out["state"] != "live" else None
+    waiting = []
+    if out["state"] != "live":
+        for lane in lanes:
+            reason = _pause_reason(os.path.join(lane["state_dir"], "PAUSE"))
+            if not reason.startswith("deploy "):
+                continue
+            current_path = os.path.join(lane["state_dir"], "current")
+            n = _read_current(current_path)
+            if n is None:
+                continue
+            try:
+                launched = datetime.fromtimestamp(os.path.getmtime(current_path), tz=timezone.utc)
+            except OSError:
+                continue
+            deadline = launched + timedelta(minutes=lane.get("tick_timeout") or 150)
+            waiting.append({
+                "project": lane["project_repo"].split("/")[-1], "lane": lane["lane"],
+                "card": {"number": n, "url": f"https://github.com/{lane['project_repo']}/issues/{n}"},
+                "launched_at": launched.isoformat(), "deadline_at": deadline.isoformat(),
+            })
+    out["waiting_for"] = waiting
+    out["lands_by"] = (
+        (max(datetime.fromisoformat(w["deadline_at"]) for w in waiting)
+         + timedelta(seconds=DEPLOY_TIMER_SEC)).isoformat()
+        if waiting else None)
     return out
 
 
@@ -904,6 +1022,12 @@ def ship_lines(runs, now, deploy=None, history=None, has_deployer=False):
                 card = deploy.get("card")
                 lines.append("  now: " + words.format(live=deploy.get("live", ""), target=deploy.get("target", ""))
                              + (f" (#{card['number']})" if card and deploy.get("state") == "held" else ""))
+            # Card #105's step/alive/waiting-for/lands-by fields are NOT rendered into these
+            # plain-text lines: the page's own script renders them once, richly — with a
+            # real link to a waiting lane's card, and local-time clocks — in `#peek-deploy`
+            # (`renderDeployDetail`, below `INDEX_HTML`). A second, UTC, text-only copy of
+            # the same facts right here read as two different deadlines on the same panel
+            # (caught in the usability pass).
         if history:
             for when, text in reversed(history):
                 lines.append(f"  {_ago(when, now):>8}  {text}")
@@ -944,7 +1068,11 @@ def make_ship_lookup(repos_fn, runs_fetcher, deploy_repo=None, deploy_fn=None, h
             except Exception as e:
                 print(f"floor: deployer state unreadable: {e}", file=sys.stderr, flush=True)
         now = now_fn() if now_fn else datetime.now(timezone.utc)
-        result = {"status": "ok", **ship_lines(runs, now, deploy, history, has_deployer=deploys)}
+        # Card #105: `deploy` verbatim, alongside `ship_lines`'s own plain-text rendering of
+        # the same fields — the page's script wants real links (a waiting lane's card) that
+        # a `<pre>`'s `textContent` can never carry (bin/floor.py's `renderDeployDetail`).
+        result = {"status": "ok", "deploy": deploy if deploys else None,
+                  **ship_lines(runs, now, deploy, history, has_deployer=deploys)}
         with lock:
             cache[name] = (time.monotonic(), result)
         return result
@@ -1562,6 +1690,19 @@ INDEX_HTML = """<!doctype html>
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
+  /* The ship station's own structured detail (card #105) — step, freshness, the canary
+     lane(s) it is waiting on with real links to their cards, and the lands-by time. Empty
+     (and so invisible) for a lane's own Peek, which never sets this div at all. */
+  #peek-deploy { padding: 10px 14px 0; font-size: 13px; }
+  #peek-deploy:empty { padding: 0; }
+  #peek-deploy .deploy-step { font-weight: 600; margin-bottom: 2px; }
+  #peek-deploy .deploy-detail { color: var(--dim); margin-bottom: 6px; }
+  #peek-deploy .deploy-fresh { margin-bottom: 6px; }
+  #peek-deploy .deploy-fresh.stale { color: var(--needs); font-weight: 600; }
+  #peek-deploy ul.deploy-waiting { list-style: none; margin: 0 0 6px; padding: 0; }
+  #peek-deploy ul.deploy-waiting li { margin-bottom: 2px; }
+  #peek-deploy .deploy-lands { color: var(--dim); margin-bottom: 8px; }
+  #peek-deploy a { color: inherit; text-decoration: underline; }
   /* Review (card #100): a card's pictures, full-window, over everything else — zoom,
      flip, and a way out to the browser's own zoom via a new tab. The stage is sized in
      viewport units so even a tiny fixture image fills it (`object-fit: contain` only
@@ -1893,6 +2034,7 @@ window.addEventListener("unhandledrejection", function () {
       <div><strong id="peek-title"></strong> <span id="peek-sub"></span></div>
       <button id="peek-close" aria-label="Close">&times;</button>
     </div>
+    <div id="peek-deploy"></div>
     <pre id="peek-lines"></pre>
   </div>
 </div>
@@ -2377,6 +2519,52 @@ async function pollPeek() {
   pre.scrollTop = pre.scrollHeight;
 }
 
+// A phone-friendly local time ("3:48 PM") for an ISO timestamp the server sent — never the
+// raw UTC string, which is what `ship_lines`'s own plain-text fallback (for a reader with
+// no browser) has to use instead.
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+}
+
+// The Ship desk's own structured detail (card #105): which step, how fresh the last check
+// was, which canary lane(s) it is waiting on — with a real, one-tap link to each card — and
+// when it lands at the latest. Built from `data.deploy` (the raw dict `deploy_status`
+// returns), never from `ship_lines`'s own text lines: a `<pre>`'s `textContent` cannot
+// carry a link. `esc()` throughout, since `#peek-deploy` is set via `innerHTML`.
+function renderDeployDetail(dep) {
+  if (!dep) return "";
+  const parts = [];
+  if (dep.step) {
+    parts.push(`<div class="deploy-step">Step ${dep.step.number} of ${dep.step.total}: ${esc(dep.step.name)}</div>`);
+    if (dep.step.detail) parts.push(`<div class="deploy-detail">${esc(dep.step.detail)}</div>`);
+  }
+  if (dep.alive) {
+    let text, stale = false;
+    if (dep.alive.running) {
+      text = `Running now (started ${Math.floor(dep.alive.since_sec / 60)}m ago)`;
+    } else {
+      stale = !!dep.alive.stale;
+      text = `Checked ${Math.floor(dep.alive.since_sec / 60)}m ago, checks again in `
+           + `${Math.floor((dep.alive.next_in_sec || 0) / 60)}m`
+           + (stale ? " — overdue, the timer may have stopped" : "");
+    }
+    parts.push(`<div class="deploy-fresh${stale ? " stale" : ""}">${esc(text)}</div>`);
+  }
+  const waiting = dep.waiting_for || [];
+  if (waiting.length) {
+    parts.push(`<ul class="deploy-waiting">${waiting.map(w => `<li>Waiting on `
+      + `<a href="${esc(w.card.url)}" target="_blank" rel="noopener">#${w.card.number}</a> `
+      + `(${esc(w.project)}/${esc(w.lane)}) — its watchdog ends it by ${esc(fmtTime(w.deadline_at))}</li>`)
+      .join("")}</ul>`);
+  }
+  if (dep.state !== "live") {
+    parts.push(`<div class="deploy-lands">${dep.lands_by
+      ? `Lands by ${esc(fmtTime(dep.lands_by))} at the latest` : "Landing on the next check"}</div>`);
+  }
+  return parts.join("");
+}
+
 // The ship station's Peek: what CI did on the newest commit, step by step, the commits
 // before it, and (on the board this box deploys) the deployer's last lines. The server
 // sends finished lines of text; this only shows them. Newest is at the top, so unlike a
@@ -2395,6 +2583,7 @@ async function pollShip() {
   }
   if (peekShip !== project) return; // closed, or switched, mid-fetch
   peekSub(data.sub, data.live);
+  document.getElementById("peek-deploy").innerHTML = renderDeployDetail(data.deploy);
   const pre = document.getElementById("peek-lines");
   const text = data.lines.join("\\n");
   if (pre.textContent !== text) pre.textContent = text; // unchanged: leave the scroll alone
@@ -2405,6 +2594,7 @@ function openPeek(target, name) {
   peekCard = null; peekFile = null; peekPos = null;
   document.getElementById("peek-title").textContent = name || peekLane || peekShip;
   peekSub("", false);
+  document.getElementById("peek-deploy").innerHTML = "";
   document.getElementById("peek-lines").textContent = "";
   document.getElementById("peek-overlay").classList.add("open");
   if (peekTimer) clearInterval(peekTimer);
@@ -3856,15 +4046,6 @@ def main(argv):
 
     claude_projects_dir = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
 
-    def build():
-        return build_state(projects_dir, state_root, fetch_board,
-                            unit_active_fn=systemctl_is_active, ask_fn=board_ask,
-                            images_fn=board_images, rounds_fn=board_rounds, plan_fn=board_plan,
-                            ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
-                            deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
-                            ratelimit_fn=board_ratelimit, ledger_fn=board_ledger, box_stats_fn=box_stats,
-                            proxmox_fn=fetch_proxmox)
-
     def build_lanes():
         # Peek's own lookup, kept separate from `build()`'s state so a lane's worktree
         # layout is never one of the fields `/api/state.json` serves (ALLOWED_FIELDS).
@@ -3873,10 +4054,27 @@ def main(argv):
     # idle_after_sec: once nobody has loaded the page for this long, the background loop
     # stops spending `fetch_board`'s GraphQL reads on a floor nobody is watching (card
     # #98) — `lane_cache` reads only the local filesystem, nothing GraphQL, so it keeps
-    # refreshing on a plain timer.
+    # refreshing on a plain timer. Built before `cache`: `Cache.__init__` calls `build()`
+    # eagerly, and `build()` (below) reads `lane_cache` — card #105, the deployer's own
+    # `waiting_for` needs every lane's state, not only this project's own.
+    lane_cache = Cache(build_lanes, refresh_sec)
+
+    def deploy_lookup():
+        return deploy_status(REPO_ROOT, deploy_state, deploy_repo,
+                              lanes=list(lane_cache.get().values()),
+                              running_fn=deploy_service_running)
+
+    def build():
+        return build_state(projects_dir, state_root, fetch_board,
+                            unit_active_fn=systemctl_is_active, ask_fn=board_ask,
+                            images_fn=board_images, rounds_fn=board_rounds, plan_fn=board_plan,
+                            ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
+                            deploy_fn=deploy_lookup,
+                            ratelimit_fn=board_ratelimit, ledger_fn=board_ledger, box_stats_fn=box_stats,
+                            proxmox_fn=fetch_proxmox)
+
     idle_after_sec = max(refresh_sec * 5, 300)
     cache = Cache(build, refresh_sec, idle_after_sec=idle_after_sec)
-    lane_cache = Cache(build_lanes, refresh_sec)
     stop_event = threading.Event()
     t = threading.Thread(target=cache.loop, args=(stop_event,), daemon=True)
     t.start()
@@ -3891,8 +4089,7 @@ def main(argv):
 
     ship_lookup = make_ship_lookup(
         lambda: {l["project_repo"].split("/")[-1]: l["project_repo"] for l in lane_cache.get().values()},
-        fetch_ci_runs, deploy_repo,
-        lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
+        fetch_ci_runs, deploy_repo, deploy_lookup,
         lambda: read_deploy_history(deploy_state))
 
     card_lookup = make_card_lookup(

@@ -288,9 +288,14 @@ CI_RUNS = {
                      "conclusion": "success", "started": "2026-10-01T15:00:00Z", "updated": "x"}],
     "roloc/beta": [ci_run("c", "Broke the build", [ci_step("Run npm test", "failure", sec=19)], "failure")],
 }
+# Card #105: a plain dict a case can swap out (7d, below) to show a deploy mid-flight,
+# the same way CI_RUNS["roloc/alpha"] is swapped above — restored afterward so every other
+# case still sees the box simply "live".
+SHIP_DEPLOY = {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa", "alive": None,
+               "step": None, "waiting_for": [], "lands_by": None}
 ship_lookup = floor.make_ship_lookup(
     lambda: {"alpha": "roloc/alpha", "beta": "roloc/beta"}, lambda repo: CI_RUNS[repo],
-    deploy_repo="roloc/alpha", deploy_fn=lambda: {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa"},
+    deploy_repo="roloc/alpha", deploy_fn=lambda: SHIP_DEPLOY,
     history_fn=lambda: [(floor.datetime(2026, 10, 1, 17, 59, tzinfo=floor.timezone.utc),
                          "deployed aaaaaaa; every lane un-paused")],
     cache_sec=0)
@@ -304,6 +309,7 @@ DESKS_DRAWN = "document.querySelectorAll('.desk').length > 0"
 PANEL_OPEN = "document.getElementById('peek-overlay').classList.contains('open')"
 PANEL_TEXT = "document.getElementById('peek-lines').textContent"
 PANEL_SUB = "document.getElementById('peek-sub').textContent"
+PANEL_DEPLOY = "document.getElementById('peek-deploy').textContent"
 PAGE_URL = "location.href"
 
 
@@ -650,6 +656,50 @@ try:
         shot(b, "ship-peek-pr-live.png", full_page=False)
         b.key("Escape")
         CI_RUNS["roloc/alpha"] = alpha_shipped
+        check("still no errors", b.errors == [], b.errors)
+
+        print("7d. card #105: a deploy mid-flight — which step, how fresh, who it's waiting on, lands by")
+        SHIP_DEPLOY.update({
+            "state": "checking",
+            "step": {"number": 4, "total": 5, "name": "Soak on the canary lane(s)",
+                      "detail": "soaking: 1 of 3 clean tick(s) so far"},
+            "alive": {"running": False, "since_sec": 120, "next_in_sec": 180, "stale": False},
+            "waiting_for": [{"project": "watcher", "lane": "watcher",
+                              "card": {"number": 42, "url": "https://github.com/roloc/watcher/issues/42"},
+                              "launched_at": "2026-10-09T21:18:00+00:00",
+                              "deadline_at": "2026-10-09T23:48:00+00:00"}],
+            "lands_by": "2026-10-09T23:53:00+00:00",
+        })
+        b.click('.peek-btn[data-peek-ship="alpha"]')
+        check("the step shows, plain words, out of how many",
+              b.wait_for(PANEL_DEPLOY + ".includes('Step 4 of 5: Soak on the canary lane(s)')"))
+        check("...with its detail underneath", "1 of 3 clean tick" in b.eval(PANEL_DEPLOY))
+        check("the freshness line (not running, between runs)",
+              "Checked 2m ago, checks again in 3m" in b.eval(PANEL_DEPLOY), b.eval(PANEL_DEPLOY))
+        check("the lane it's waiting on is a real, one-tap link to its card — not plain text",
+              b.eval("document.querySelector('#peek-deploy a[href=\"https://github.com/roloc/watcher/issues/42\"]')"
+                     ".textContent") == "#42")
+        check("...named by its project and lane, with its watchdog deadline",
+              "watcher/watcher" in b.eval(PANEL_DEPLOY) and "watchdog ends it" in b.eval(PANEL_DEPLOY))
+        check("the lands-by time shows, at the latest",
+              "Lands by" in b.eval(PANEL_DEPLOY) and "at the latest" in b.eval(PANEL_DEPLOY))
+        check("the link opens a new tab, not the panel's own navigation",
+              b.eval("document.querySelector('#peek-deploy a').target") == "_blank")
+        shot(b, "ship-peek-deploying.png", full_page=False)
+        b.resize(390, 844)
+        check("the same panel fits a phone, step and waiting-on-#42 link both readable",
+              b.eval("""(() => { const r = document.getElementById('peek-panel').getBoundingClientRect();
+                      return r.left >= 0 && r.right <= window.innerWidth; })()"""))
+        shot(b, "ship-peek-deploying-phone.png", full_page=False)
+        b.resize(1280, 900)
+        b.key("Escape")
+        b.click(peek_button("alpha"))
+        check("opening a lane's own Peek next clears the deploy detail — it never shows there",
+              b.wait_for(PANEL_TEXT + ".length > 0") and b.eval(PANEL_DEPLOY) == "")
+        b.key("Escape")
+        SHIP_DEPLOY.clear()
+        SHIP_DEPLOY.update({"state": "live", "live": "aaaaaaa", "target": "aaaaaaa", "alive": None,
+                            "step": None, "waiting_for": [], "lands_by": None})
         check("still no errors", b.errors == [], b.errors)
 
         print("8. on a phone: nothing runs off the side, and Peek still works")

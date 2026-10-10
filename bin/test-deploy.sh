@@ -156,6 +156,12 @@ check "CI pending: the box stays where it was"         [ "$(head_)" != "$T" ]
 check "CI pending: the suite does not run yet"         not_called "eval at"
 check "CI pending: no lane is paused"                  [ ! -f "$STATE/riffmap/PAUSE" ]
 
+# 2a. Card #105: the step file is the floor page's only source for "which step" — written
+# while CI is still the thing blocking this target, with the total steps a plain 4 (no
+# canary lane configured in this fixture yet).
+check "CI pending: the step file says step 2 of 4"     [ "$(sed -n '1p;2p' "$TMP/dstate/step")" = "$(printf '2\n4')" ]
+check "...named in plain words"                        [ "$(sed -n 3p "$TMP/dstate/step")" = "Wait for CI to pass" ]
+
 # 3. The happy path: a fresh release folder, installed, then the pointer flips. No lane is
 # ever paused or restarted — each follows the pointer on its own, later, out of this
 # script's sight (bin/spawn.sh's own job; see its test suite).
@@ -174,6 +180,7 @@ check "install.sh got each project once"               called "install riffmap w
 check "no lane is ever restarted by an ordinary deploy" not_called "systemctl restart"
 check "no PAUSE is ever written by an ordinary deploy"  [ ! -e "$STATE/riffmap/PAUSE" ] && [ ! -e "$STATE/watcher/PAUSE" ]
 check "the deployed commit is recorded"                [ "$(cat "$TMP/dstate/deployed")" = "$T" ]
+check "a deploy that landed clears the step file"      [ ! -e "$TMP/dstate/step" ]
 
 # 4. Steve's own PAUSE is never touched by a deploy — nothing here writes or removes a
 # PAUSE file for a stable lane any more, hand-made or not.
@@ -196,18 +203,21 @@ check "a busy lane: it is never restarted"                    not_called_exact "
 fresh; touch "$TMP/eval-fails"; T="$(commit commands/watch.md v6)"
 run
 check "first fail: retried later, no card yet"         not_called "issue create"
+check "first fail: the step file says step 3 (the replay suite)" [ "$(sed -n 1p "$TMP/dstate/step")" = 3 ]
 run
 check "second fail: one card filed"                    [ "$(count 'gh issue create')" = 1 ]
 check "…in the talking-to-steve shape (the ask first)" called "Deploy held: ${T:0:7} is not live"
 check "…put on the watcher board"                      called "gh project item-add 2 --owner roloc"
 check "…and moved to Stuck"                            called "board move 77 Stuck - Needs help owner=roloc number=2"
 check "…and the box did not move"                      [ "$(head_)" != "$T" ]
+check "held: the step file is cleared, not left on the failed step" [ ! -e "$TMP/dstate/step" ]
 run
 check "a third run files no second card"               not_called "issue create"
 
 # 7. deploy-anyway ships a held commit
 echo deploy-anyway > "$TMP/labels"; run
 check "deploy-anyway: the held commit ships"           [ "$(head_)" = "$T" ]
+check "deploy-anyway: the step file is cleared once it lands" [ ! -e "$TMP/dstate/step" ]
 
 # 8. Nothing a model reads changed: no suite
 fresh; touch "$TMP/eval-fails"; T="$(commit README.md docs-only)"
@@ -220,6 +230,7 @@ fresh; T="$(commit commands/watch.md v9)"; echo "completed failure" > "$TMP/ci"
 run
 check "a red check: held, with one card"               [ "$(count 'gh issue create')" = 1 ]
 check "…and the suite never ran"                       not_called "eval at"
+check "…and the step file is cleared, not left on step 2" [ ! -e "$TMP/dstate/step" ]
 
 # 10. A lane this commit adds starts right away — never waiting for a sibling lane, which
 # (unlike before this card) may still be mid-tick on an older commit for a while yet.
@@ -326,6 +337,9 @@ check "canary A: the canary lane restarts"                called_exact "systemct
 check "canary A: riffmap's lane does not"                 not_called_exact "systemctl restart watcher@riffmap"
 check "canary A: riffmap-design's lane does not"          not_called_exact "systemctl restart watcher@riffmap-design"
 check "canary A: the stable checkout has not moved yet"   [ "$(head_)" != "$T" ]
+check "canary A: the step file says step 4 of 5 (canary applies, so the total is 5)" \
+      [ "$(sed -n '1p;2p' "$TMP/dstate/step")" = "$(printf '4\n5')" ]
+check "canary A: ...soaking, zero clean ticks so far"      [ "$(sed -n 4p "$TMP/dstate/step")" = "soaking: 0 of 2 clean tick(s) so far" ]
 
 # B. A clean soak (DEPLOY_CANARY_SOAK_TICKS=2 in this fixture) promotes the rest — onto the
 # ordinary release path, which (card #106) never restarts a stable lane either.
@@ -393,6 +407,8 @@ run
 check "canary H: a busy canary lane is not moved onto the commit yet" [ "$(canary_head)" = "$OLD" ]
 check "canary H: …and is not restarted"                                not_called_exact "systemctl restart watcher@watcher"
 check "canary H: …but is paused so it takes no new work meanwhile"    grep -q "^deploy $T" "$STATE/watcher/PAUSE"
+check "canary H: the step file says it's waiting for the canary lane(s) to go idle" \
+      [ "$(sed -n 4p "$TMP/dstate/step")" = "waiting for the canary lane(s) to go idle before moving to ${T:0:7}" ]
 rm -f "$STATE/watcher/current"
 run
 check "canary H: once idle, the swap and restart go ahead"            [ "$(canary_head)" = "$T" ]
