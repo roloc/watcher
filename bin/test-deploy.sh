@@ -469,6 +469,57 @@ echo '{"subtype":"success"}' > "$STATE/watcher/logs/still-running.json"; rm -f "
 run
 check "canary K: once that tick finishes, the soak clears"            [ "$(head_)" = "$T" ]
 
+# L. A canary lane opted in but the checkout itself does not exist (install.sh never made
+# it, or it was removed by hand) used to read exactly like no canary lane configured at all
+# — silent, nothing in the history or the floor page's Ship desk. Card #120: the stage is
+# still skipped (there is nothing to run it in) but it now says so, loudly.
+canary_fresh
+rm -rf "$CANARY"
+T="$(commit commands/watch.md canary-l)"
+run
+check "canary L: promotes directly, same as no canary lane at all" [ "$(head_)" = "$T" ]
+check "canary L: …but says the checkout is missing, not silence"   grep -q "canary: watcher opted in but $CANARY is missing" "$TMP/out"
+git clone -q "$ORIGIN" "$CANARY"   # restore: nothing later depends on it being gone
+
+# ============================================================================
+echo "install.sh's canary checkout (card #120): cloned locally from the box's own"
+echo "checkout, never over HTTPS as root — a private repo needs no login for it"
+# ============================================================================
+# deploy/install.sh's canary_clone is sourced directly (INSTALL_LIB_ONLY=1 stops the file
+# right after defining it, before anything that needs root, a watcher user or systemd) so
+# this exercises the real function, not a description of it.
+INSTALL="$HERE/../deploy/install.sh"
+IWATCHER="$TMP/install-watcher"; ICANARY="$TMP/install-watcher-canary"
+rm -rf "$IWATCHER" "$ICANARY"
+git clone -q "$ORIGIN" "$IWATCHER"
+git -C "$IWATCHER" remote set-url origin "https://github.com/roloc/watcher.git"
+
+# A `git clone` of anything that looks like a network URL fails exactly the way root hitting
+# a private repo with no login does (the card's own evidence: "fatal: could not read
+# Username for 'https://github.com'"). A local path still goes to the real git.
+IBIN="$TMP/install-bin"; mkdir -p "$IBIN"
+REAL_GIT="$(command -v git)"
+cat > "$IBIN/git" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = clone ]; then
+  for a in "\$@"; do
+    case "\$a" in http*) echo "fatal: could not read Username for '\$a': terminal prompts disabled" >&2; exit 128 ;; esac
+  done
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$IBIN/git"
+
+WATCHER_DIR="$IWATCHER" WATCHER_CANARY_DIR="$ICANARY" WATCHER_REPO="https://github.com/roloc/watcher.git" \
+  INSTALL_LIB_ONLY=1 PATH="$IBIN:$PATH" bash -c "source '$INSTALL'; canary_clone" > "$TMP/install-out" 2>&1
+
+check "install canary: the checkout exists after the clone" [ -d "$ICANARY/.git" ]
+check "install canary: its origin is the TRUE upstream, not the local source path" \
+      [ "$(git -C "$ICANARY" remote get-url origin 2>/dev/null)" = "https://github.com/roloc/watcher.git" ]
+not_grep() { ! grep -q -- "$1" "$2"; }
+check "install canary: never attempted an HTTPS clone (the stub would have failed it)" \
+      not_grep "could not read Username" "$TMP/install-out"
+
 # The history file: what the deployer said, where the floor page can read it (the page's
 # user cannot read the journal).
 fresh; T="$(commit bin/spawn.sh history-1)"

@@ -298,6 +298,16 @@ decides when the soak is done, restarting only the canary lane(s) until it clear
 project with no canary lane is entirely unaffected. `projects/watcher.env` is the first
 one to opt in (see "The watcher's own board", below).
 
+**`/opt/watcher-canary` is cloned locally from `/opt/watcher`, never from GitHub over
+HTTPS** (card #120): `deploy/install.sh` makes it the same way `deploy/autodeploy.sh`'s own
+`release_new` makes a release folder — a fast, no-network clone of the box's own checkout,
+with `origin` then set explicitly to the real upstream read from that checkout's own
+remote. Root never needs a GitHub login for it, which a straight HTTPS clone of a private
+repo always would have. A lane opted into the canary channel while the checkout is missing
+or unusable is not a silent skip: `deploy/autodeploy.sh` says so (`say_once`) in its history
+(the floor page's Ship desk reads that file, below) the first run it notices, until the
+next install makes the checkout and the stage starts running for real.
+
 **Every stable lane gets its own version of that pinning** (card #106), with no second
 checkout and no re-exec into a different directory: `bin/spawn.sh` resolves its own
 `WATCHER_HERE` (and so `WATCHER_HOME`) through whatever `/opt/watcher` — the pointer —

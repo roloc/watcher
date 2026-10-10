@@ -18,6 +18,41 @@ REPO_URL="${WATCHER_REPO:-https://github.com/roloc/watcher.git}"
 # self-reference below reads $WATCHER_DIR, never the literal path). An ordinary by-hand run
 # (no override) still means /opt/watcher, exactly as always.
 WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
+# Same default deploy/autodeploy.sh's own DEPLOY_CANARY_DIR and bin/spawn.sh's own
+# WATCHER_CANARY_DIR already use (card #46).
+WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
+
+# canary_clone: makes $WATCHER_CANARY_DIR a clone of $WATCHER_DIR — fast, local, no network
+# and so no login root never has — with its own `origin` set to the TRUE upstream, read from
+# $WATCHER_DIR's own remote before the clone touches anything (same shape
+# deploy/autodeploy.sh's `release_new` already clones a release folder in). Card #120: the
+# previous code cloned $REPO_URL straight over HTTPS as root, which fails every time for a
+# private repo (no login), leaving the canary checkout permanently missing.
+#
+# Every git call on $WATCHER_DIR runs as the watcher user, same as every other git call on
+# it elsewhere in this file (the pull above): git itself refuses to even read a repo owned
+# by a different user than the one running it ("dubious ownership"), and by this point
+# $WATCHER_DIR is watcher's. Root's own part is only making $WATCHER_CANARY_DIR exist and
+# watcher-owned first — watcher cannot mkdir directly under root-owned /opt — with a plain
+# mkdir fallback for when there is no watcher account at all (bin/test-deploy.sh's offline
+# run, no root). A failed clone or origin fix removes the directory rather than leaving a
+# half-made one the `-d` guard below would mistake for done.
+canary_clone() {
+  local real_origin
+  real_origin="$(su - watcher -c "git -C '$WATCHER_DIR' remote get-url origin")" || return 1
+  install -d -o watcher -g watcher "$WATCHER_CANARY_DIR" 2>/dev/null || mkdir -p "$WATCHER_CANARY_DIR"
+  if su - watcher -c "git clone -q '$WATCHER_DIR' '$WATCHER_CANARY_DIR'" \
+       && su - watcher -c "git -C '$WATCHER_CANARY_DIR' remote set-url origin '$real_origin'"; then
+    return 0
+  fi
+  rm -rf "$WATCHER_CANARY_DIR"
+  return 1
+}
+
+# bin/test-deploy.sh sources this file with INSTALL_LIB_ONLY=1 to call canary_clone directly,
+# with no root, no watcher user and no network — stopping here is what makes that possible.
+if [ "${INSTALL_LIB_ONLY:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
+
 id watcher >/dev/null 2>&1 || useradd -m -s /bin/bash watcher
 
 if [ -d "$WATCHER_DIR/.git" ] && [ "${INSTALL_NO_PULL:-0}" = 1 ]; then
@@ -66,17 +101,15 @@ install -d -o watcher -g watcher /var/cache/watcher
 # own job (the canary stage), exactly as /opt/watcher itself is never pulled here again
 # after its first clone (INSTALL_NO_PULL, above).
 if grep -qsx 'LANE_CHANNEL=canary' "$WATCHER_DIR"/projects/*.env 2>/dev/null; then
-  # As root, same as /opt/watcher's own first clone above: the watcher user may not have a
-  # working gh/git login yet at first boot, and a public HTTPS clone needs none.
-  [ -d /opt/watcher-canary ] || git clone -q "$REPO_URL" /opt/watcher-canary \
-    || echo "warning: could not clone the canary checkout to /opt/watcher-canary" >&2
-  if [ -d /opt/watcher-canary/.git ]; then
-    chown -R watcher:watcher /opt/watcher-canary
-    chmod +x /opt/watcher-canary/bin/*.sh /opt/watcher-canary/bin/shim/* /opt/watcher-canary/deploy/*.sh 2>/dev/null || true
-    su - watcher -c "git -C /opt/watcher-canary config core.fileMode false" 2>/dev/null || true
+  [ -d "$WATCHER_CANARY_DIR/.git" ] || canary_clone \
+    || echo "warning: could not clone the canary checkout to $WATCHER_CANARY_DIR" >&2
+  if [ -d "$WATCHER_CANARY_DIR/.git" ]; then
+    chown -R watcher:watcher "$WATCHER_CANARY_DIR"
+    chmod +x "$WATCHER_CANARY_DIR"/bin/*.sh "$WATCHER_CANARY_DIR"/bin/shim/* "$WATCHER_CANARY_DIR"/deploy/*.sh 2>/dev/null || true
+    su - watcher -c "git -C '$WATCHER_CANARY_DIR' config core.fileMode false" 2>/dev/null || true
     install -d -o watcher -g watcher /home/watcher/.claude-canary
-    ln -sfn /opt/watcher-canary/commands /home/watcher/.claude-canary/commands
-    ln -sfn /opt/watcher-canary/agents   /home/watcher/.claude-canary/agents
+    ln -sfn "$WATCHER_CANARY_DIR/commands" /home/watcher/.claude-canary/commands
+    ln -sfn "$WATCHER_CANARY_DIR/agents"   /home/watcher/.claude-canary/agents
     chown -h watcher:watcher /home/watcher/.claude-canary/commands /home/watcher/.claude-canary/agents
   fi
 fi

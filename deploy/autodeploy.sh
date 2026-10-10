@@ -723,7 +723,16 @@ main() {
   # actually run for this target, 4 when it will be skipped, 1 for a deploy-anyway that
   # skips every gate — so the floor page's Ship desk never lists a step that is not coming.
   overridden "$tgt" && anyway=1
-  [ "$anyway" = 0 ] && canary_needed "$cur" "$tgt" && needs_canary=1
+  if [ "$anyway" = 0 ]; then
+    if canary_needed "$cur" "$tgt"; then
+      needs_canary=1
+    # Card #120: a lane opted into the canary channel but the checkout itself is missing
+    # (install.sh never made it, or it was removed) used to read exactly like "no canary
+    # lane configured" — silent, with nothing in the history or the Ship desk. Say so.
+    elif ! has_canary && [ -n "$(canary_lanes)" ]; then
+      say_once "canary-missing" "canary: watcher opted in but $CANARY_DIR is missing; skipping the canary stage until the next install makes it"
+    fi
+  fi
   if [ "$anyway" = 1 ]; then total=1; elif [ "$needs_canary" = 1 ]; then total=5; fi
 
   # 2. CI, and 3. the replay suite — both skipped for a commit Steve said to ship.
