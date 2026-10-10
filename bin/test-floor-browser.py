@@ -370,7 +370,8 @@ try:
         check("card #110: a short pausing line sits under the card, in plain words — never "
               "the PAUSE file's path or its sha",
               b.eval("document.querySelector('.desk-link[href*=\"/issues/7\"] .pausing')"
-                     ".textContent") == "pausing after this card for a deploy")
+                     ".textContent") == "pausing after this card for a deploy",
+              b.eval("document.querySelector('.desk-link[href*=\"/issues/7\"] .pausing')?.textContent"))
         check("neither warning line is showing",
               b.eval("getComputedStyle(document.getElementById('load-error')).display") == "none"
               and b.eval("getComputedStyle(document.getElementById('script-error')).display") == "none")
