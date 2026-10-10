@@ -86,6 +86,12 @@ script you only read is a guess — say plausible, never confirmed.
 whose `<script>` block did not parse passed this review with three nits fixed, and shipped
 drawing nothing.)
 
+**A screen change with no `usability` verdict is blocking, the same category as one you
+find was never rendered.** The tick's invocation tells you whether it ran `usability` on
+this change and what it found; a screen change where it did not, or cannot say, is
+blocking — check it yourself only to confirm the change is a screen change, never to
+substitute for the pass itself.
+
 Then the project's own standing traps, which its `CLAUDE.md` lists.
 
 ## Output

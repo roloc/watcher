@@ -12,6 +12,7 @@ short version.
 | **Tick** | `commands/watch.md` (`/watch`) | `claude -p`, permissions skipped, in the card's worktree | claims one card, does the work, opens the PR, merges it or parks the card |
 | **Triage tick** | `commands/triage.md` (`/triage`) | `claude -p`, permissions skipped, in the main checkout | puts the one `agent:` label on a card that has none and records what it waits on; never does the work |
 | **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the one review a change gets; blocking findings only |
+| **Usability** | `agents/usability.md` | a subagent the tick calls once, on a screen change only, before `reviewer` | a second read-only pass that never sees the code: only the card's ask and the PR's pictures, blocking when the person the card names could not do the thing from a phone shot |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
 | **Discord** | `bin/notify.py` | imported by the board CLI | posts to Steve's channel when a card is stuck or something broke, and for nothing else — when a webhook is configured |
@@ -588,6 +589,9 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   question, and then it is asked before building, not after.
 - **A screen is run before it ships, and looked at in a browser when it is reported
   broken.** A fetch is not a look: the server answering says nothing about what was drawn.
+- **A screen change gets `usability`'s look too, before `reviewer`'s** — the one pass
+  that never sees the diff, only the card's ask and the pictures. A screen change with no
+  `usability` verdict is blocking, the same as one nobody ever rendered.
 - Report the run's quota use, and never call it cost or spend (see "The dollar figure is
   quota, not a bill").
 

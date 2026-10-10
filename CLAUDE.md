@@ -193,7 +193,7 @@ above:
 - **Merge your own PR on green and a clean review — including a change to the gate.**
   Steve never merges here, the same as riffmap (September 28, 2026: "I don't want to review
   all of these merges since I am only involved at the card / feature level"). The gate is
-  `.github/workflows/`, `agents/reviewer.md`, the ship-and-merge rules in
+  `.github/workflows/`, `agents/reviewer.md`, `agents/usability.md`, the ship-and-merge rules in
   `commands/watch.md` §3, "Hard rules for every agent" in `docs/how-it-works.md`,
   everything under `deploy/`, and the replay suite (`bin/eval.sh`, `evals/`). A change to
   any of it **always gets the reviewer**, even when it looks like prose or config, and

@@ -41,9 +41,9 @@ is enough — the spawner moves it to In progress and launches you; you never pi
 Waiting yourself.
 `in-flight` says a tick owns the card, Stage says what it is doing. Set it the moment you
 cross into each step, not afterwards — `board stage <n> Designing` (a decision or spec
-before code), `Building`, `Testing` (build and tests running), `Reviewing` (the reviewer
-pass), `PR open` (pushed, waiting on CI), `Merging`, and `Parked` when you send it to
-Stuck. One command each; never skip one because the step was short.
+before code), `Building`, `Testing` (build and tests running), `Reviewing` (the `usability`
+and `reviewer` passes), `PR open` (pushed, waiting on CI), `Merging`, and `Parked` when you
+send it to Stuck. One command each; never skip one because the step was short.
 
 **`in-flight` is a courtesy flag, not a lock.** Reading the board and adding the label are
 two calls with no compare-and-set, and `--add-label` succeeds silently on a label that is
@@ -116,10 +116,11 @@ produces no diff to review — a docs-only or relabel-only tick, a decision card
 output is the doc itself.
 
 Build and test locally before opening the PR. Run `reviewer` once on the branch when the
-change touches source or scripts — hand it the plan when you wrote one — fix what it marks
-blocking, take or leave the nits. Docs-only changes get no review, unless they touch the
-merge gate (the CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names
-as its gate) — those always get `reviewer`.
+change touches source or scripts — hand it the plan when you wrote one, and whether
+`usability` ran on this change and what it found (below) — fix what it marks blocking,
+take or leave the nits. Docs-only changes get no review, unless they touch the merge gate
+(the CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names as its
+gate) — those always get `reviewer`.
 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
@@ -303,6 +304,18 @@ browser has run. (watcher
 not parse merged with every check green, because every check read the source and none ran
 it. The page drew nothing.)
 
+**That picture gets a second pair of eyes before `reviewer`'s.** Once the shots exist for
+a PR that must ship with its picture (above), call `usability` — hand it only the card's
+first line, its `You get` line, the shots (phone first, both themes), and the live URL
+when there is one. Never the diff, the plan, or the test results: that is the whole point
+of the pass, so it cannot nod along with what you think you built. Fix a blocking finding
+the way you fix a blocking `reviewer` finding; disagree with one and it is Stuck (§4), the
+same as `reviewer`'s. Then, when you call `reviewer` on the same change, tell it whether
+`usability` ran and what it found — `reviewer` treats a screen change with no `usability`
+verdict as blocking, the same as one nobody ever rendered. A docs-only PR, or one that
+touches no screen, never gets `usability` — same gate as `reviewer`'s own screen rule,
+immediately above.
+
 **Route a design card before building it.** In a project with a **triage lane**
 (`LANE_COMMAND=/triage` — see `how-it-works.md`, "Lanes"; riffmap has one) an unlabeled
 card is labeled within a minute of the hand-off and never reaches you, so the rest of
@@ -440,9 +453,9 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   gone — and the spawner has to release the card and spend a second tick merging a PR that
   was already green (riffmap#305, September 14, 2026). Run the wait in the foreground and
   keep the turn. Subagents run in the foreground only. `main` requires 0
-  approvals; CI is the required check; `reviewer` is the only other gate and runs once. If
-  you changed code after its pass and the change is more than the fix it asked for, run it
-  once more on that fix only.
+  approvals; CI is the required check; `reviewer`, and `usability` for a screen change,
+  are the only other gates and each runs once. If you changed code after a pass and the
+  change is more than the fix it asked for, run that one pass once more on that fix only.
 - **`main` may move under you** while you work — the other lane merges its own PRs, and so
   does Steve. Before merging, and again if the merge is refused as not mergeable:
   `git fetch origin && git -c merge.conflictStyle=diff3 merge origin/main`. If git merges
@@ -482,18 +495,20 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   body closes the card, never by reopening the first one. A project whose own `CLAUDE.md`
   says otherwise keeps its own rule.
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
-  is refused. The box is the boundary; the PR, CI and one review pass are the gate. Never
+  is refused. The box is the boundary; the PR, CI and the review passes are the gate. Never
   force-push, never merge red, never push `main` directly, never touch a project's secrets.
 - **In review means exactly one thing: the work is finished and only the merge is missing.**
-  The PR is green, `reviewer` ran (or the change is docs-only), every item in the card's
-  Verification is met, and the merge itself did not go through. Then: move the card to
-  **In review**, comment `🤖 FYI: PR #<pr> is green and waiting on a merge.`, and finish the
-  tick cleanly. The spawner sends it back to In progress after two hours for one more try
-  and parks it in Stuck after that, so it does not rest there.
+  The PR is green, `reviewer` ran (or the change is docs-only), `usability` ran if the
+  change touched a screen, every item in the card's Verification is met, and the merge
+  itself did not go through. Then: move the card to **In review**, comment
+  `🤖 FYI: PR #<pr> is green and waiting on a merge.`, and finish the tick cleanly. The
+  spawner sends it back to In progress after two hours for one more try and parks it in
+  Stuck after that, so it does not rest there.
 - **Anything less than finished is Stuck (§4), never In review** — nobody reads In review
   as a queue, and "next tick needs to…" written on an In review card is a note to no one.
-  That covers: CI red twice; a blocking `reviewer` finding you disagree with; **`reviewer`
-  has not run**; **a Verification item you cannot do from this box** (a file that is not
+  That covers: CI red twice; a blocking `reviewer` or `usability` finding you disagree
+  with; **`reviewer` has not run, or `usability` has not run on a screen change**;
+  **a Verification item you cannot do from this box** (a file that is not
   here, a machine you cannot reach) — say which, and ask whether to merge without it; and
   **running low on turns or budget**. Past roughly three quarters of either cap, stop
   starting new work: what is left is for leaving the board true — the Stuck comment and
@@ -512,7 +527,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 - **A card that arrives with its PR already open** (the branch has commits, `gh pr list`
   shows it) came back from In review or from Stuck. Read the last comments on the card and
   the PR, then finish that PR — merge `origin/main`, fix what the comments name, run
-  `reviewer` if it never ran, merge. Do not start over and do not open a second PR.
+  `reviewer` if it never ran (and `usability` too, if the change touches a screen and it
+  never ran), merge. Do not start over and do not open a second PR.
 
 ## 4. Stuck — the important half
 
@@ -552,9 +568,9 @@ gh issue edit <n> --remove-label in-flight
 
 Go to Stuck when: the card needs a product decision; it is `steve-decision`; its `agent:`
 label is `reviewer`, whose deliverable is a verdict on somebody else's change rather than
-an artifact of its own — route those by hand; the card carries `blocked`; **`reviewer`
-finds something blocking that you disagree with** — you do not get to overrule the only
-review there is; the work would touch a documented contract the project's `CLAUDE.md`
+an artifact of its own — route those by hand; the card carries `blocked`; **`reviewer` or
+`usability` finds something blocking that you disagree with** — you do not get to overrule
+either of the only reviews there are; the work would touch a documented contract the project's `CLAUDE.md`
 says is not a builder's call; the required CI check fails twice for a reason you cannot
 explain; **the change is built and merged and the card's symptom survives** (§3); or you
 have tried the same failing thing twice.
@@ -583,9 +599,10 @@ now run in the tick:
 If the offline harness itself is red before you change anything, that is **Stuck** — you
 are measuring a broken tree and the number would be a lie.
 
-**Never wait on an external reviewer** — there isn't one. `reviewer` runs in this session
-and returns; if it does not, the tick failed and the card gets unclaimed, not parked. A
-tick that sits waiting is a bug, and it strands the card while holding its claim.
+**Never wait on an external reviewer** — there isn't one. `reviewer` and `usability` both
+run in this session and return; if either does not, the tick failed and the card gets
+unclaimed, not parked. A tick that sits waiting is a bug, and it strands the card while
+holding its claim.
 
 **The comment is the deliverable, and Steve is the reader.** Steve is dyslexic and reads
 cards on his phone. He needs the ask on the first line, bullets, one question, and lettered
@@ -642,7 +659,8 @@ The rules behind the shape (full version in `talking-to-steve.md`):
   is a link Steve never sees (riffmap cards #342 and #349, September 16, 2026: two design
   approvals stalled because the mockup links were under the fold).
 - **Say how to answer.** The last line above the fold is always the reply-and-move line.
-- A reviewer finding headed to Steve arrives with its own `For Steve` block; paste it in.
+- A `reviewer` or `usability` finding headed to Steve arrives with its own `For Steve`
+  block; paste it in.
 
 **Discord is not your job.** When the box has a webhook configured, a move to Stuck posts
 the alert to Steve's channel by itself, quoting your ask and linking the card; nothing

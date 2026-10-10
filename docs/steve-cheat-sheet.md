@@ -90,6 +90,13 @@ the full Peek. **Floor** takes you back. Still read-only, still just a look.
   if you disagree; the card moves lanes with it.
 - A card in one lane never waits on the other. It never touches the other's branch either.
 
+## Every screen change gets a second look
+
+- Before a bot ships anything with a picture, a second check looks only at that picture —
+  the way you would on your phone — and blocks if the thing the card asked for can't
+  actually be done from it.
+- You see it the same way as any other block: a Stuck card, the ask on the first line.
+
 ## Cards that wait on other cards
 
 - Stock Ready with several at once; the bots work the prerequisite first.
