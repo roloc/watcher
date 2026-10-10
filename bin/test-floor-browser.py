@@ -880,6 +880,42 @@ try:
         check("a working lane never wanders (riffmap-site-design is where it was)",
               before["riffmap-site-design"] == after["riffmap-site-design"])
 
+        print("12cc. cookie time: click the vending machine and everyone in the break room runs over for a cookie")
+        b.eval("render(" + LIVE_SHAPED + "); renderStudio(" + LIVE_SHAPED + "); window.__cookiePartyMs = 6000; true")
+        settled(b)
+        seats = b.eval("Object.fromEntries([...document.querySelectorAll('.character[data-room=\"Break room\"]')].map(e => [e.dataset.lane, e.style.left + ' ' + e.style.top]))")
+        b.click(".office-room.break [data-cookies]")
+        check("cookies spew out of the machine onto the floor, and the machine shouts",
+              b.wait_for("document.querySelectorAll('#room-cookies .cookie').length === 12")
+              and b.eval("document.querySelector('.cookie-shout')?.textContent") == "Cookies!")
+        settled(b)
+        check("every one of the six idle lanes is now eating: cookie in hand, nibbling, in a crowd by the machine",
+              b.eval("""(() => { const m = document.querySelector('.office-room.break [data-cookies]').getBoundingClientRect();
+                      const es = [...document.querySelectorAll('.character[data-room="Break room"]')];
+                      return es.length === 6 && es.every(e => e.classList.contains('eating') && e.querySelector('svg').innerHTML.includes('#c9915a')
+                          && Math.abs((e.getBoundingClientRect().left + e.getBoundingClientRect().right) / 2 - (m.left + m.right) / 2) < 200); })()"""))
+        check("it is a huddle, not the seat row: the six stand in two rows, and the three who sat far from the machine walked over",
+              b.eval("""(() => { const ys = new Set([...document.querySelectorAll('.character[data-room="Break room"]')].map(e => Math.round(e.getBoundingClientRect().bottom)));
+                      return ys.size === 2; })()""")
+              and b.eval("Object.entries(" + json.dumps(seats) + ").filter(([k, v]) => document.querySelector('.character[data-lane=\"' + k + '\"]').style.left + ' ' + document.querySelector('.character[data-lane=\"' + k + '\"]').style.top !== v).length") >= 5)
+        check("a crowd, but nobody stands on anybody and every plate is readable (review of #119)",
+              overlaps(b) == [], overlaps(b))
+        check("the cookies landed on the break room floor, none outside the room",
+              b.eval("""(() => { const r = document.querySelector('.office-room.break').getBoundingClientRect();
+                      return [...document.querySelectorAll('.cookie')].every(c => { const q = c.getBoundingClientRect();
+                        return q.left >= r.left && q.right <= r.right && q.top >= r.top && q.bottom <= r.bottom; }); })()"""))
+        check("the working lane at its desk did not come (it is not in the break room)",
+              not b.eval("document.querySelector('.character[data-lane=\"riffmap-site-design\"]').classList.contains('eating')"))
+        shot(b, "studio-cookies.png")
+        check("a redraw during the party keeps everyone at it",
+              b.eval("renderStudio(lastState); [...document.querySelectorAll('.character[data-room=\"Break room\"]')].every(e => e.classList.contains('eating'))"))
+        check("when the party ends the cookies are gone and everyone is back in their seat, mug in hand",
+              b.wait_for("document.querySelectorAll('#room-cookies .cookie').length === 0", timeout=12)
+              and settled(b)
+              and b.eval("Object.fromEntries([...document.querySelectorAll('.character[data-room=\"Break room\"]')].map(e => [e.dataset.lane, e.style.left + ' ' + e.style.top]))") == seats
+              and b.eval("[...document.querySelectorAll('.character[data-room=\"Break room\"]')].every(e => !e.classList.contains('eating'))"))
+        check("no errors from the party", b.errors == [], b.errors)
+
         print("12d. a lane walks the hallways between rooms, never through a wall")
         # riffmap-site-design was working at its desk; now it is idle, so it leaves for the
         # break room: out of its door, along the main hallway, in at the break room's door.
