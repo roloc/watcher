@@ -1644,7 +1644,8 @@ INDEX_HTML = """<!doctype html>
   .character.walking svg { animation: walk-bob .32s ease-in-out infinite; }
   .character.walking .plate { opacity: .6; }
   @media (prefers-reduced-motion: reduce) {
-    .character-wave, .character.walking svg, .prop .steam, .prop .led { animation: none; }
+    .character-wave, .character.walking svg, .prop .steam, .prop .led,
+    .character.ship .ship-push, .character.ship .dot { animation: none; }
   }
   .character svg { width: 30px; height: 34px; display: block; margin: 0 auto; }
   .character.ship svg { width: 40px; }
