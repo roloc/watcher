@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: The one review a change gets before it merges. Read-only. Blocks only on correctness, data loss, secrets, or a broken gate — never on prose. One round by default.
+description: The last review a change gets before it merges — usability ran first on a screen change. Read-only. Blocks only on correctness, data loss, secrets, or a broken gate — never on prose. One round by default.
 tools: Read, Glob, Grep, Bash
 disallowedTools: Write, Edit
 model: opus

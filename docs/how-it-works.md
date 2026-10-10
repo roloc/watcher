@@ -11,7 +11,7 @@ short version.
 | **Spawner** | `bin/spawn.sh` | a systemd unit, plain bash, no Claude session | polls the board once a minute, starts one tick at a time in its lane, sweeps stale claims, parks cards that fail twice |
 | **Tick** | `commands/watch.md` (`/watch`) | `claude -p`, permissions skipped, in the card's worktree | claims one card, does the work, opens the PR, merges it or parks the card |
 | **Triage tick** | `commands/triage.md` (`/triage`) | `claude -p`, permissions skipped, in the main checkout | puts the one `agent:` label on a card that has none and records what it waits on; never does the work |
-| **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the one review a change gets; blocking findings only |
+| **Reviewer** | `agents/reviewer.md` | a subagent the tick calls once | the last review a change gets; blocking findings only |
 | **Usability** | `agents/usability.md` | a subagent the tick calls once, on a screen change only, before `reviewer` | a second read-only pass that never sees the code: only the card's ask and the PR's pictures, blocking when the person the card names could not do the thing from a phone shot |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |

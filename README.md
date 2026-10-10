@@ -9,7 +9,8 @@ so the loop can start a card nobody handed it. When
 a card is claimable it creates a git worktree for it and runs one tick:
 `claude -p "/watch <n>" --dangerously-skip-permissions --max-turns 400 --max-budget-usd 15`.
 The tick claims the card, does the work in the worktree, opens a PR, waits for CI, runs
-one review pass, merges, and moves the card to **Done**; anything it cannot decide goes to
+the review passes (`usability` first on a screen change, then `reviewer`), merges, and
+moves the card to **Done**; anything it cannot decide goes to
 **Stuck - Needs help** with the options written on the card. Two failed attempts park the
 card. The spawner is also the stale-claim sweeper.
 
@@ -39,7 +40,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
-    agents/reviewer.md    the one review pass: blocking findings only, one round
+    agents/reviewer.md    the last review pass: blocking findings only, one round
+    agents/usability.md   a second, earlier pass on a screen change: the ask and the pictures only
     docs/how-it-works.md  the map, written for the agents: pieces, board, life of a card, state
     docs/talking-to-steve.md  the format for anything a human reads (see below)
     docs/steve-cheat-sheet.md one page for Steve: columns, answering a Stuck card, pause, logs
