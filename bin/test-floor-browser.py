@@ -878,7 +878,9 @@ try:
               b.eval("""(() => { const m = document.querySelector('.office-room.break [data-cookies]').getBoundingClientRect();
                       const es = [...document.querySelectorAll('.character[data-room="Break room"]')];
                       return es.length === 6 && es.every(e => e.classList.contains('eating') && e.querySelector('svg').innerHTML.includes('#c9915a')
-                          && Math.abs((e.getBoundingClientRect().left + e.getBoundingClientRect().right) / 2 - (m.left + m.right) / 2) < 190); })()"""))
+                          && Math.abs((e.getBoundingClientRect().left + e.getBoundingClientRect().right) / 2 - (m.left + m.right) / 2) < 300); })()"""))
+        check("a crowd, but nobody stands on anybody and every plate is readable (review of #119)",
+              overlaps(b) == [], overlaps(b))
         check("the cookies landed on the break room floor, none outside the room",
               b.eval("""(() => { const r = document.querySelector('.office-room.break').getBoundingClientRect();
                       return [...document.querySelectorAll('.cookie')].every(c => { const q = c.getBoundingClientRect();

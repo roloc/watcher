@@ -1701,6 +1701,7 @@ INDEX_HTML = """<!doctype html>
   @keyframes cookie-shout { 0% { transform: translate(-50%, -60%) scale(.4); opacity: 0; } 100% { transform: translate(-50%, -100%) scale(1); opacity: 1; } }
   @keyframes nom { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-4deg) translateY(-1px); } 75% { transform: rotate(4deg); } }
   .character.eating svg { animation: nom .5s ease-in-out infinite; }
+  .character.eating.walking svg { animation: walk-bob .32s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { .character.eating svg, .cookie-shout { animation: none; } }
   .character.ship .ship-push { animation: push .9s infinite; }
   .character.ship .dot { animation: blink 1.2s infinite; }
@@ -1815,8 +1816,8 @@ window.addEventListener("unhandledrejection", function () {
     <div id="beacon" class="beacon-green"></div>
     <div id="room-desks"></div>
     <div id="room-stuck"></div>
-    <div id="room-characters"></div>
     <div id="room-cookies"></div>
+    <div id="room-characters"></div>
     <div id="server-tip"></div>
   </div>
 </div>
@@ -2585,7 +2586,8 @@ function characterSVG(pill, look) {
   const sleepy = pill === "sleeping" && !look.cookie
     ? `<text x="17" y="3" style="font:700 7px sans-serif;fill:var(--dim)">z</text>` : "";
   // Idle: in the break room with a mug, waiting for a card. At cookie time the mug is down
-  // and the cookie is up at the mouth, a bite out of it.
+  // and the cookie is up at the mouth, a bite out of it — a sleeper wakes for one too (no
+  // z's), which is why `sleepy` above looks at the cookie.
   const mug = look.cookie
     ? `<path d="M18 11.5 a3 3 0 1 1 0.1 0 z" style="fill:#c9915a"/><circle cx="17.2" cy="11" r=".7" style="fill:#5b3a1a"/><circle cx="19.3" cy="12.4" r=".7" style="fill:#5b3a1a"/>
        <circle cx="16.3" cy="10.2" r="1.6" style="fill:${look.skin}"/>`
@@ -2817,7 +2819,7 @@ function seatBreakRoom(breakers, sleepers, spots, perRow, rows) {
 // break-room lane around the vending machine instead of at its seat, and renderCharacters
 // hands each a cookie. `window.__cookiePartyMs` lets the suite keep it short.
 let partyUntil = 0, partyTimer = null;
-const COOKIE_PARTY_MS = 14000, COOKIE_SPACING = 60;
+const COOKIE_PARTY_MS = 14000;
 const VENDING = {x: 124, y: 20, w: 22, h: 34};   // where the machine stands, in break-room pixels
 const partyOn = () => Date.now() < partyUntil;
 function cookieSVG() {
@@ -2864,18 +2866,23 @@ function cookieTime() {
   }, window.__cookiePartyMs || COOKIE_PARTY_MS);
 }
 window.__cookieTime = cookieTime;
-// Where everyone stands at cookie time: a crowd in front of the machine, closer together
-// than their seats, in rows if the crowd is big.
+// Where everyone stands at cookie time: a row in front of the machine, a seat's width
+// apart (the same spacing as everywhere, so nobody stands on anybody — review of
+// roloc/watcher#119 caught a tighter crowd with its plates stacked), the whole row shifted
+// into the room rather than each spot clamped on its own, and more rows when the room is
+// too narrow for one. Rows are counted so the room can grow to hold them.
 function cookieSpots(br, n) {
-  const cx = br.x + VENDING.x + VENDING.w / 2 + 40, perRow = Math.max(1, Math.floor((br.w - 2 * ROOM_PAD) / COOKIE_SPACING));
+  const cx = br.x + VENDING.x + VENDING.w / 2 + 40;
+  const minX = br.x + ROOM_PAD + CHAR_W / 2, maxX = br.x + br.w - ROOM_PAD - CHAR_W / 2;
+  const perRow = Math.max(1, Math.floor((maxX - minX) / CHAR_W) + 1);
   const spots = [];
   for (let i = 0; i < n; i++) {
     const row = Math.floor(i / perRow), col = i % perRow, inRow = Math.min(perRow, n - row * perRow);
-    let x = cx + (col - (inRow - 1) / 2) * COOKIE_SPACING;
-    x = Math.max(br.x + ROOM_PAD + 36, Math.min(br.x + br.w - ROOM_PAD - 36, x));
-    spots.push({x, y: br.y + BREAK.padTop + row * BREAK.rowH});
+    const width = (inRow - 1) * CHAR_W;
+    const start = Math.max(minX, Math.min(maxX - width, cx - width / 2));
+    spots.push({x: start + col * CHAR_W, row});
   }
-  return spots;
+  return {spots, rows: Math.max(1, Math.ceil(n / perRow))};
 }
 
 function wander() {
@@ -2909,7 +2916,9 @@ function computeStudio(state) {
   // The top row: the break room and Steve's office, a hallway between, as tall as the fuller.
   const breakW = Math.round((inner - VHALL) * 0.52), bossW = inner - VHALL - breakW;
   const nBreak = breakers.length + sleepers.length + BREAK_EXTRA;
-  const breakH = roomHeight(nBreak, breakW, BREAK);
+  const crowd = partyOn() ? cookieSpots({x: EDGE, w: breakW}, breakers.length + sleepers.length) : null;
+  const breakRows = Math.max(rowsFor(nBreak, breakW), crowd ? crowd.rows : 1);
+  const breakH = BREAK.padTop + (breakRows - 1) * BREAK.rowH + BREAK.padBottom;
   // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
   // row of chips, each with its own Review button when a card has a picture (#100).
   const stuck = projects.flatMap(p => p.stuck || []);
@@ -2976,9 +2985,9 @@ function computeStudio(state) {
   const bg = gridSpots(breakRoom, nBreak, BREAK);
   const {seatOf, couch} = seatBreakRoom(breakers, sleepers, bg.spots, bg.perRow, bg.rows);
   const guests = [...breakers, ...sleepers];
-  const crowd = partyOn() ? cookieSpots(breakRoom, guests.length) : null;
   guests.forEach((l, i) => {
-    const s = crowd ? crowd[i] : bg.spots[seatOf[l.lane]];
+    const s = crowd ? {x: crowd.spots[i].x, y: breakRoom.y + BREAK.padTop + crowd.spots[i].row * BREAK.rowH}
+                    : bg.spots[seatOf[l.lane]];
     l.pos = {x: s.x, y: s.y}; l.away = true; l.room = breakRoom.name;
     l.cookie = !!crowd;
   });
