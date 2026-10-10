@@ -17,7 +17,12 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   receipts) come from the project's own `CLAUDE.md`, never hard-coded here.
 - `commands/triage.md` — the `/triage` contract, the triage lane's tick: put the one
   `agent:` label on an unlabeled card, record what it waits on, stop. Generic the same way.
-- `agents/reviewer.md` — the one review pass. Read-only, blocking findings only, one round.
+- `agents/reviewer.md` — the last review pass, run on every change that touches source or
+  scripts. Read-only, blocking findings only, one round.
+- `agents/usability.md` — a second, earlier review pass, run on any change that touches a
+  screen, before `reviewer`. Sees only the card's ask and the pictures — never the diff —
+  and blocks when the person the card names could not do the thing from a phone shot.
+  Read-only, blocking findings only, one round.
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper. `bin/test-board.py`
   is `board.py`'s offline suite — the Needs-Steve comment reading (`ask`, and `images`: the
   mockups and screenshots under a Stuck comment's `Look:` section, which `bin/floor.py` shows

@@ -115,12 +115,15 @@ not a changed plan, is what `reviewer` checks for. Skip all of this for a card w
 produces no diff to review — a docs-only or relabel-only tick, a decision card whose only
 output is the doc itself.
 
-Build and test locally before opening the PR. Run `reviewer` once on the branch when the
-change touches source or scripts — hand it the plan when you wrote one, and whether
-`usability` ran on this change and what it found (below) — fix what it marks blocking,
-take or leave the nits. Docs-only changes get no review, unless they touch the merge gate
-(the CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names as its
-gate) — those always get `reviewer`.
+Build and test locally before opening the PR. **If the change touches a screen, call
+`usability` first** — as soon as its shots exist (its own invocation details are under "A
+change to a screen ships with its picture," below) — and only then run `reviewer` once on
+the branch when the change touches source or scripts, handing it the plan when you wrote
+one, and whether `usability` ran and what it found. Fix what either marks blocking, take
+or leave the nits. Docs-only changes get no review, unless they touch the merge gate (the
+CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names as its gate) —
+those always get `reviewer`; a docs-only change never gets `usability` either, since it
+touches no screen.
 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
@@ -306,10 +309,12 @@ it. The page drew nothing.)
 
 **That picture gets a second pair of eyes before `reviewer`'s.** Once the shots exist for
 a PR that must ship with its picture (above), call `usability` — hand it only the card's
-first line, its `You get` line, the shots (phone first, both themes), and the live URL
-when there is one. Never the diff, the plan, or the test results: that is the whole point
-of the pass, so it cannot nod along with what you think you built. Fix a blocking finding
-the way you fix a blocking `reviewer` finding; disagree with one and it is Stuck (§4), the
+first line, its `You get` line, and the shots (phone first, both themes). It has no tools
+of its own to fetch anything, so if a live page exists, take a phone-width shot of it
+yourself first (`browse.py shot`, same as above) and hand it that picture too — never the
+live URL, and never the diff, the plan, or the test results: that is the whole point of
+the pass, so it cannot nod along with what you think you built. Fix a blocking finding the
+way you fix a blocking `reviewer` finding; disagree with one and it is Stuck (§4), the
 same as `reviewer`'s. Then, when you call `reviewer` on the same change, tell it whether
 `usability` ran and what it found — `reviewer` treats a screen change with no `usability`
 verdict as blocking, the same as one nobody ever rendered. A docs-only PR, or one that
@@ -633,7 +638,7 @@ Reply A, B or C on this card, or say which way you lean, then move it back to **
 - Branch / PR: …
 - Exact error: …
 - Files: …
-- What the reviewer said: …
+- What `reviewer` (and `usability`, for a screen change) said: …
 
 </details>
 ```

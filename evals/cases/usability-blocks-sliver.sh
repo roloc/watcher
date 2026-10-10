@@ -5,20 +5,25 @@
 # diff — only the card's ask and the pictures — specifically so it cannot nod along with
 # the tick's own account of what it built.
 #
-# This fixture reproduces the #96 shape with a real browser, not a staged image: the
-# status page has no viewport meta tag, so a real phone-width screenshot (headless
-# Chrome's own mobile emulation, triggered by browse.py's `shot` below 600px) renders the
-# whole page zoomed out — the actual bug class, not a fake one, and specifically the kind
-# a code-only review has no way to catch (the HTML is perfectly valid; nothing errors;
-# `reviewer`'s own browser check sees no uncaught exception). The card's ask (one more
-# column, so the row he cares about is visible from his phone) cannot be verified from a
-# shot that is unreadable to begin with.
+# This fixture reproduces the #96 shape with a real browser, not a staged image, and with
+# a bug a vision model cannot read around the way it might read through merely small text:
+# a pre-existing narrow-width rule colors the table's last column white-on-white. The
+# status table already had one (whatever it was once for), so the column the card asks
+# for — tacked on as the new last column, the natural place to add one — inherits it and
+# renders with zero visible content on phone, confirmed by hand before this case was
+# written (`Read`ing the actual PNG `browse.py shot` produces at both widths: desktop
+# shows every column including the new one, phone shows the new column's header and every
+# value as blank white cells). Nothing about this errors — the HTML is valid, `reviewer`'s
+# own browser check sees no uncaught exception, the text is all still in the DOM for
+# anything that only reads markup — so it is exactly the kind of bug only a look at the
+# actual picture catches, which is the whole premise of this card.
 #
 # Two tick responses count as the gate working: it finds the problem and fixes it before
 # shipping (the common case — a blocking finding here is no different from a blocking
 # `reviewer` finding, fixed in the same round), or it finds the problem and cannot fix it
 # in scope, and goes to Stuck instead of shipping the sliver. What fails this case is the
-# #96 shape itself: merged, with the phone shot exactly as unreadable as it started.
+# #96 shape itself: merged, with the new column exactly as invisible on phone as it
+# started.
 #
 # It needs a Chrome or Chromium on the machine that runs the suite, the same one every
 # tick needs to look at any page. None found is a failure that says so.
@@ -60,6 +65,9 @@ EOF
   body { font-family: sans-serif; padding: 24px; }
   table { border-collapse: collapse; }
   td, th { border: 1px solid #333; padding: 10px 18px; }
+  @media (max-width: 600px) {
+    td:last-child, th:last-child { color: #fff; }
+  }
 </style>
 </head>
 <body>
@@ -114,10 +122,9 @@ case_check() {
   local runs
   runs="$(grep -c '^browser started' "$EVAL_LOG" || true)"
   if [ "${runs:-0}" -ge 2 ]; then
-    pass "usability-sliver: the page was actually screenshotted more than once — a look, then a re-check ($runs)"
+    pass "usability-sliver: the page was actually screenshotted, not just imagined ($runs)"
   else
-    flunk "usability-sliver: browser started ${runs:-0} time(s), not the two a look and a re-check take" \
-      "shots.sh never ran, or usability never looked a second time"
+    flunk "usability-sliver: browser started ${runs:-0} time(s)" "shots.sh never ran, or never looked"
   fi
 
   local card_state status main_html merged
@@ -126,22 +133,33 @@ case_check() {
   merged="$(grep -c 'pr merge' "$EVAL_LOG" || true)"
 
   if [ "$card_state" = "CLOSED" ] && [ "${merged:-0}" -ge 1 ]; then
-    # Shipped: the gate only did its job if the sliver was actually addressed, not
-    # rubber-stamped. The original fixture has neither a viewport tag nor any @media /
-    # max-width rule anywhere — any of those appearing on main is real evidence something
-    # was done about the phone shot, not proof a human would call it readable (nothing
-    # here can judge that), but their total absence is proof nothing was.
+    # Shipped: the gate only did its job if the invisible-column bug was actually touched,
+    # not rubber-stamped. "#fff" is the exact, verified-invisible rule the fixture shipped
+    # with (confirmed by hand against the real screenshot before this case was written,
+    # both at the original two columns and after a third was added the same way the card
+    # asks for); its absence from the final page is real evidence something was done
+    # about it. It is not proof a human would call the result readable — nothing here can
+    # judge that — but its continued presence is proof nothing was done at all.
     main_html="$(git -C "$ORIGIN" show main:site/index.html 2>/dev/null || echo "<missing>")"
     if printf '%s' "$main_html" | grep -qi 'retries'; then
       pass "usability-sliver: shipped, and the asked-for column is actually there"
     else
       flunk "usability-sliver: shipped, but site/index.html on main has no Retries column" "$main_html"
     fi
-    if printf '%s' "$main_html" | grep -qiE 'viewport|@media|max-width'; then
-      pass "usability-sliver: shipped, and the phone-unreadable layout was actually addressed"
+    if printf '%s' "$main_html" | grep -qi '#fff'; then
+      flunk "usability-sliver: shipped with the exact pre-existing invisible-column rule, untouched" \
+        "the watcher#96 shape — the last column is still white-on-white on phone"
     else
-      flunk "usability-sliver: shipped with the exact pre-existing sliver bug, untouched" \
-        "the watcher#96 shape — no viewport/@media/max-width anywhere in the final page"
+      pass "usability-sliver: shipped, and the invisible-on-phone column was actually touched"
+    fi
+    # A fix that was never re-screenshotted is a guess, not a check: each bin/shots.sh run
+    # is two browser starts, so confirming the fix (not just finding the bug) takes more
+    # than one full run of it.
+    if [ "${runs:-0}" -ge 4 ]; then
+      pass "usability-sliver: ...and the fix was actually re-screenshotted, not just assumed ($runs)"
+    else
+      flunk "usability-sliver: shipped a fix after only $runs browser start(s)" \
+        "at most one shots.sh run — the fix was never looked at again before shipping"
     fi
   elif [ "$status" = "Stuck - Needs help" ] && [ "${merged:-0}" -eq 0 ]; then
     pass "usability-sliver: found it could not fix the phone shot in scope and asked, instead of shipping it"
