@@ -262,25 +262,32 @@ run is one step, idempotent, so an interrupted one is picked up by the next:
    quiet board cannot hold every other project back, promotes to everyone else below. One
    tick that does not finish clean rolls the canary checkout back and holds the commit,
    same as a failed check. No canary lane configured: this step does nothing.
-5. **Every lane on the box idle.** Then each lane is paused (a `PAUSE` that says `deploy
-   <sha>`), and after one poll interval checked again. Lanes still busy after
-   `DEPLOY_DRAIN_AFTER_MIN` (240) are paused anyway and their ticks finish on their own.
-6. `/opt/watcher` fast-forwards to exactly that commit, `install.sh` runs without its own
-   pull, every running lane restarts, a lane file the commit added starts last, and only
-   the deployer's own `PAUSE` files are removed. A `PAUSE` you made stays.
+5. **The release.** The commit is cloned into its own folder under
+   `/opt/watcher-releases/<sha>`, that folder's own `install.sh` runs, and `/opt/watcher` —
+   a symlink, the pointer — flips onto it. A sweep then removes every older release folder
+   no lane's own state still names, keeping at least the newest two.
 
-A **held** commit — red `verify`, the suite failing twice, a canary tick that does not
-finish clean, or a box checkout that cannot fast-forward — gets one card on the Watcher
-board in **Stuck**. Move it to In progress and the watcher fixes the cause; add the
-`deploy-anyway` label and the next run ships it (skipping the suite and the canary stage
-both). A later commit that deploys closes it as superseded. Nothing here ever signals a
-tick.
+Card #106 (October 2026): this never waits for or pauses a lane. A lane already mid-tick
+is pinned, for the whole life of its own process, to whatever folder the pointer named
+when it started — the flip disturbs nothing in flight — and each lane follows the new
+pointer, on its own, at its own next idle poll, before its next tick. The floor page's
+Ship desk shows which release each lane is on.
+
+A **held** commit — red `verify`, the suite failing twice, or a canary tick that does not
+finish clean — gets one card on the Watcher board in **Stuck**. Move it to In progress and
+the watcher fixes the cause; add the `deploy-anyway` label and the next run ships it
+(skipping the suite and the canary stage both). A later commit that deploys closes it as
+superseded. Nothing here ever signals a tick.
 
     journalctl -u watcher-deploy -n 30        # what the deployer last did
     systemctl stop watcher-deploy.timer       # turn it off; `start` turns it back on
 
 State is in `/var/lib/watcher-deploy/`. Knobs (environment on the unit): `DEPLOY_EVALS=0`,
-`DEPLOY_DRAIN_AFTER_MIN`, `DEPLOY_GRACE_SEC`.
+`DEPLOY_RELEASES_DIR` (default `/opt/watcher-releases`).
+
+**Rolling back** is pointing `/opt/watcher` at an older release folder by hand
+(`ln -sfn /opt/watcher-releases/<sha> /opt/watcher`) — the sweep's "keep the newest two"
+is exactly what keeps one there to point back at.
 
 **The manual fallback**, for a Claude session when the deployer itself is broken or to try
 a branch on the box before it merges — never for Steve:
@@ -288,9 +295,9 @@ a branch on the box before it merges — never for Steve:
     /opt/watcher/deploy/rollout.sh riffmap            # main
     /opt/watcher/deploy/rollout.sh riffmap <branch>   # a branch, before it merges
 
-It stops the deployer's timer, runs the suite in a scratch clone, moves the code, pauses,
-**waits for each running tick to finish on its own**, restarts, un-pauses, and turns the
-timer back on only when it deployed `main`. After a branch, run it again for `main`.
+The same shape as the timer's own run: the suite in a scratch clone, a release cloned and
+installed, the pointer flipped. It never pauses or waits for a lane either. After a
+branch, run it again for `main`.
 
 ## Add a project
 

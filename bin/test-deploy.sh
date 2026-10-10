@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # The deployer's cases (deploy/autodeploy.sh), in test-spawn.sh's shape: no network, no
-# root, no systemd. git is real (a bare repo stands in for GitHub, a clone for
-# /opt/watcher); su, systemctl, gh, board and flock are stubs that log one line per call to
+# root, no systemd. git is real (a bare repo stands in for GitHub, a clone for the box's
+# own checkout); su, systemctl, gh, board and flock are stubs that log one line per call to
 # $CALLS, so a case can grep what the deployer did. A lane is busy when its `current` file
 # is non-empty — the deployer's fallback when a lane has no cgroup, which is every lane here.
+#
+# Card #106: the box's checkout ($BOX) becomes a pointer (a symlink) onto one of its own
+# release folders (under $RELEASES) the first time a deploy runs against it — `fresh`
+# recreates $BOX as a plain checkout before every case, the same shape every real box is in
+# today, so that migration (adopt_plain_checkout) is exercised on every single case here,
+# not just once. A deploy never pauses or restarts a stable lane any more: it clones the
+# target, installs from that clone, and flips the pointer. Only the canary stage (still a
+# separate, unchanged mechanism — section "Canary channel" below) pauses and restarts.
 #
 #   bash bin/test-deploy.sh      # exit 0 = every case holds
 set -uo pipefail
@@ -60,7 +68,7 @@ export PATH="$BIN:$PATH"
 
 # --- the fixture: origin, the box's checkout, the lanes ---------------------------------------
 
-ORIGIN="$TMP/origin.git"; SEED="$TMP/seed"; BOX="$TMP/opt/watcher"
+ORIGIN="$TMP/origin.git"; SEED="$TMP/seed"; BOX="$TMP/opt/watcher"; RELEASES="$TMP/opt/watcher-releases"
 git init -q --bare "$ORIGIN"
 git -C "$ORIGIN" symbolic-ref HEAD refs/heads/main
 mkdir -p "$SEED"; git -C "$SEED" init -q -b main
@@ -76,7 +84,11 @@ echo 'PROJECT_NAME=riffmap' > "$SEED/projects/riffmap.env"
 echo 'PROJECT_NAME=riffmap-design' > "$SEED/projects/riffmap-design.env"
 cat > "$SEED/deploy/install.sh" <<'EOF'
 #!/usr/bin/env bash
-echo "install $* NO_PULL=${INSTALL_NO_PULL:-0}" >> "$CALLS"
+# "pointer=<target>" is what /opt/watcher itself resolves to AT THIS MOMENT — install.sh's
+# own unconditional floor-service restart depends on the pointer already being flipped by
+# the time this runs (found in review: it used to run before the flip, so the floor page
+# served one release behind every deploy).
+echo "install $* NO_PULL=${INSTALL_NO_PULL:-0} DIR=${WATCHER_DIR:-} pointer=$(basename "$(readlink -f "$TMP/opt/watcher" 2>/dev/null)")" >> "$CALLS"
 EOF
 # The replay suite: logs the commit it ran at and the box's HEAD at that moment.
 cat > "$SEED/bin/eval.sh" <<'EOF'
@@ -89,17 +101,16 @@ chmod +x "$SEED"/deploy/*.sh "$SEED"/bin/*.sh
 echo "v1" > "$SEED/commands/watch.md"
 git -C "$SEED" add -A; git -C "$SEED" commit -qm v1
 git -C "$SEED" remote add origin "$ORIGIN"; git -C "$SEED" push -q origin main
-mkdir -p "$(dirname "$BOX")"; git clone -q "$ORIGIN" "$BOX"
-# A second, independent checkout (card #46) — cloned once here, like $BOX; a case that
-# wants LANE_CHANNEL=canary in play resets it to a known commit itself, the same way
-# `fresh` resets $BOX, since most cases have no canary lane at all and must never touch it.
+# A second, independent checkout (card #46) — cloned once here; a case that wants
+# LANE_CHANNEL=canary in play resets it to a known commit itself, the same way `fresh`
+# resets $BOX, since most cases have no canary lane at all and must never touch it.
 CANARY="$TMP/opt/watcher-canary"
 mkdir -p "$(dirname "$CANARY")"; git clone -q "$ORIGIN" "$CANARY"
 
 STATE="$TMP/state"
-export WATCHER_DIR="$BOX" WATCHER_STATE_ROOT="$STATE" DEPLOY_STATE="$TMP/dstate" \
-       DEPLOY_SCRATCH="$TMP/scratch" DEPLOY_CGROUP_ROOT="$TMP/no-cgroups" DEPLOY_USER="$(id -un)" \
-       DEPLOY_GRACE_SEC=0 DEPLOY_MOVE_RETRY_SEC=0 DEPLOY_DRAIN_AFTER_MIN=240 \
+export WATCHER_DIR="$BOX" DEPLOY_RELEASES_DIR="$RELEASES" WATCHER_STATE_ROOT="$STATE" \
+       DEPLOY_STATE="$TMP/dstate" DEPLOY_SCRATCH="$TMP/scratch" \
+       DEPLOY_CGROUP_ROOT="$TMP/no-cgroups" DEPLOY_USER="$(id -un)" DEPLOY_MOVE_RETRY_SEC=0 \
        DEPLOY_CANARY_DIR="$CANARY" DEPLOY_CANARY_SOAK_TICKS=2 DEPLOY_CANARY_QUIET_MIN=60
 
 # commit <path> <text>: a new commit on origin/main touching one file; prints its sha.
@@ -110,9 +121,12 @@ commit() {
 }
 run()   { : > "$CALLS"; bash "$DEPLOY" > "$TMP/out" 2>&1; }
 head_() { git -C "$BOX" rev-parse HEAD; }
-fresh() {  # a clean slate between cases: box at origin/main, no state, idle lanes
-  rm -rf "$TMP/dstate" "$STATE" "$TMP/eval-fails" "$TMP/labels" "$TMP/next-issue" "$TMP/board-fails"
-  git -C "$BOX" fetch -q origin; git -C "$BOX" reset -q --hard origin/main
+fresh() {  # a clean slate between cases: the box a plain checkout at origin/main — as if
+           # freshly installed, never yet deployed by this card's own code — no releases,
+           # no state, idle lanes.
+  rm -rf "$TMP/dstate" "$STATE" "$TMP/eval-fails" "$TMP/labels" "$TMP/next-issue" "$TMP/board-fails" \
+         "$RELEASES" "$BOX"
+  git clone -q "$ORIGIN" "$BOX"
   printf 'riffmap\nriffmap-design\nwatcher\n' > "$TMP/active"
   echo "completed success" > "$TMP/ci"
   mkdir -p "$STATE"/{riffmap,riffmap-design,watcher}
@@ -142,36 +156,41 @@ check "CI pending: the box stays where it was"         [ "$(head_)" != "$T" ]
 check "CI pending: the suite does not run yet"         not_called "eval at"
 check "CI pending: no lane is paused"                  [ ! -f "$STATE/riffmap/PAUSE" ]
 
-# 3. The happy path
+# 3. The happy path: a fresh release folder, installed, then the pointer flips. No lane is
+# ever paused or restarted — each follows the pointer on its own, later, out of this
+# script's sight (bin/spawn.sh's own job; see its test suite).
 fresh; OLD="$(head_)"; T="$(commit commands/watch.md v3)"
 run
-check "green + suite + idle: the box is at exactly the target" [ "$(head_)" = "$T" ]
+check "green + suite: the pointer now resolves to exactly the target" [ "$(head_)" = "$T" ]
+check "...as a symlink onto its own release folder"    [ -L "$BOX" ]
+check "...named by the target commit"                  [ "$(basename "$(readlink "$BOX")")" = "${T:0:12}" ]
 check "the suite ran at the target commit"             called "eval at $T"
-check "…before the box moved (box still at the old commit)" called "box $OLD"
+check "…before the pointer moved (box still at the old commit)" called "box $OLD"
 check "install.sh ran without its own pull"            called "NO_PULL=1"
+check "...from the release folder, not the old pointer" called "DIR=$RELEASES/${T:0:12}"
+check "the pointer is already flipped BEFORE install.sh runs (the floor page must see the new code when its restart happens inside install.sh)" \
+      called "pointer=${T:0:12}"
 check "install.sh got each project once"               called "install riffmap watcher NO_PULL"
-check "every running lane restarted"                   [ "$(count 'systemctl restart')" = 3 ]
-check "no PAUSE left behind"                           [ ! -e "$STATE/riffmap/PAUSE" ] && [ ! -e "$STATE/watcher/PAUSE" ]
+check "no lane is ever restarted by an ordinary deploy" not_called "systemctl restart"
+check "no PAUSE is ever written by an ordinary deploy"  [ ! -e "$STATE/riffmap/PAUSE" ] && [ ! -e "$STATE/watcher/PAUSE" ]
 check "the deployed commit is recorded"                [ "$(cat "$TMP/dstate/deployed")" = "$T" ]
 
-# 4. Steve's own PAUSE survives
+# 4. Steve's own PAUSE is never touched by a deploy — nothing here writes or removes a
+# PAUSE file for a stable lane any more, hand-made or not.
 fresh; : > "$STATE/riffmap-design/PAUSE"; T="$(commit commands/watch.md v4)"
 run
 check "a hand-made PAUSE is still there after a deploy" [ -f "$STATE/riffmap-design/PAUSE" ]
-check "…and the deployer's own PAUSE files are gone"   [ ! -e "$STATE/riffmap/PAUSE" ]
 check "…and it still deployed"                         [ "$(head_)" = "$T" ]
 
-# 5. Busy lanes: wait, then drain after the limit
+# 5. A busy lane never blocks, waits for, or is touched by a deploy: its folder is pinned
+# for the whole life of its own tick (bin/spawn.sh's own comment on this), so the deployer
+# does not need to know or care that it is busy at all.
 fresh; echo 12 > "$STATE/riffmap/current"; T="$(commit commands/watch.md v5)"
 run
-check "a busy lane: nothing is paused while it works"  [ ! -f "$STATE/watcher/PAUSE" ]
-check "a busy lane: not deployed yet"                  [ "$(head_)" != "$T" ]
-DEPLOY_DRAIN_AFTER_MIN=0 run
-check "busy past the limit: lanes are paused to drain" grep -q "^deploy $T" "$STATE/watcher/PAUSE"
-check "…but nothing restarts while the tick runs"      not_called "systemctl restart"
-rm -f "$STATE/riffmap/current"; run
-check "the tick finished: deployed on the next run"    [ "$(head_)" = "$T" ]
-check "…and un-paused"                                 [ ! -e "$STATE/watcher/PAUSE" ]
+check "a busy lane: the deploy lands anyway, with no pause"   [ "$(head_)" = "$T" ]
+check "a busy lane: nothing is paused"                        [ ! -f "$STATE/riffmap/PAUSE" ]
+check "a busy lane: its current file is left exactly as it was" [ "$(cat "$STATE/riffmap/current")" = 12 ]
+check "a busy lane: it is never restarted"                    not_called_exact "systemctl restart watcher@riffmap"
 
 # 6. The suite fails twice: one held card, in Stuck, once
 fresh; touch "$TMP/eval-fails"; T="$(commit commands/watch.md v6)"
@@ -202,21 +221,14 @@ run
 check "a red check: held, with one card"               [ "$(count 'gh issue create')" = 1 ]
 check "…and the suite never ran"                       not_called "eval at"
 
-# 10. main moves during a drain: the drained commit ships, not the newer one
-fresh; echo 12 > "$STATE/riffmap/current"; T="$(commit commands/watch.md v10)"
-DEPLOY_DRAIN_AFTER_MIN=0 run
-N="$(commit commands/watch.md v10b)"; rm -f "$STATE/riffmap/current"; run
-check "a newer commit mid-drain: the checked one ships" [ "$(head_)" = "$T" ]
-run; run
-check "…and the newer one follows on its own"          [ "$(head_)" = "$N" ]
-
-# 11. A lane this commit adds starts last
+# 10. A lane this commit adds starts right away — never waiting for a sibling lane, which
+# (unlike before this card) may still be mid-tick on an older commit for a while yet.
 fresh; T="$(commit projects/riffmap-triage.env PROJECT_NAME=riffmap-triage)"
 run
 check "a new lane file: its unit is enabled and started" called "systemctl enable --now watcher@riffmap-triage"
-check "…after every running lane restarted"            [ "$(grep -n 'enable --now' "$CALLS" | cut -d: -f1)" -gt "$(grep -n 'systemctl restart' "$CALLS" | tail -1 | cut -d: -f1)" ]
+check "…and no existing lane is restarted for it"       not_called_exact "systemctl restart watcher@riffmap"
 
-# 11a. Only projects/<name>.env is a lane: a project's helper files are never started
+# 10a. Only projects/<name>.env is a lane: a project's helper files are never started
 fresh; commit projects/riffmap-health-probe.sh 'echo 0' >/dev/null
 T="$(commit projects/riffmap.detect.env DETECT_WHAT=x)"
 run
@@ -224,54 +236,60 @@ check "a helper script under projects/ is not started as a lane" not_called "wat
 check "…nor a <name>.detect.env config"                not_called "watcher@riffmap.detect"
 check "…and the deploy still lands"                    [ "$(head_)" = "$T" ]
 
-# 11b. The drain clock counts from when the box fell behind, not from the newest commit
-fresh; echo 12 > "$STATE/riffmap/current"; T="$(commit commands/watch.md v11b)"
-DEPLOY_DRAIN_AFTER_MIN=60 run
-echo "$(head_) $(( $(date +%s) - 3 * 3600 ))" > "$TMP/dstate/ready"   # behind for 3 hours
-N="$(commit commands/watch.md v11c)"
-DEPLOY_DRAIN_AFTER_MIN=60 run
-check "busy for hours with new commits arriving: the drain still starts" grep -q "^deploy $N" "$STATE/watcher/PAUSE"
-
-# 11c. A lane whose spawner still holds a card is busy, even with no tick process
-fresh; T="$(commit commands/watch.md v11d)"; echo 7 > "$STATE/watcher/current"
-run
-check "a lane still finishing its exit handling blocks the swap" not_called "systemctl restart"
-
-# 11d. A swap that cannot happen un-pauses the lanes, and the next run holds with a card
-fresh; echo 12 > "$STATE/riffmap/current"; T="$(commit commands/watch.md v11e)"
-DEPLOY_DRAIN_AFTER_MIN=0 run
-echo local-edit >> "$BOX/commands/watch.md"; rm -f "$STATE/riffmap/current"; run
-check "a failed fast-forward: the box is not moved"   [ "$(head_)" != "$T" ]
-check "…the deployer's PAUSE files are gone"           [ ! -e "$STATE/watcher/PAUSE" ]
-check "…and the drain is over"                         [ ! -e "$TMP/dstate/draining" ]
-run
-check "…and the next run holds it with a card"         [ "$(count 'gh issue create')" = 1 ]
-
-# 12. A dirty checkout is never overwritten without Steve
-fresh; T="$(commit commands/watch.md v12)"; echo local-edit >> "$BOX/commands/watch.md"
-run
-check "a dirty box checkout: held, not merged"         [ "$(head_)" != "$T" ]
-check "…with one card (the reason has an apostrophe)"  [ "$(count 'gh issue create')" = 1 ]
-echo deploy-anyway > "$TMP/labels"; run
-check "deploy-anyway on it: reset to the target"       [ "$(head_)" = "$T" ]
-
-# 12b. A file's executable bit changed on the box (install.sh chmods bin/) is not a change
-fresh; T="$(commit commands/watch.md v12b)"; chmod +x "$BOX/commands/watch.md"
-run
-check "a mode-only change on the box does not hold the deploy" [ "$(head_)" = "$T" ]
-check "…and files no card"                             not_called "issue create"
-
-# 12c. The move to Stuck is retried when the board has not caught up with the new item
-fresh; touch "$TMP/eval-fails"; echo 2 > "$TMP/board-fails"; T="$(commit commands/watch.md v12c)"
+# 10b. The move to Stuck is retried when the board has not caught up with the new item
+fresh; touch "$TMP/eval-fails"; echo 2 > "$TMP/board-fails"; T="$(commit commands/watch.md v10b)"
 run; run
 check "a held card still reaches Stuck when the first moves fail" [ "$(count 'board move 77 Stuck')" = 3 ]
 rm -f "$TMP/board-fails"
 
-# 13. A deploy closes the older held cards
-fresh; touch "$TMP/eval-fails"; H="$(commit commands/watch.md v13)"; run; run
-rm -f "$TMP/eval-fails"; T="$(commit commands/watch.md v13b)"; run
+# 11. A deploy closes the older held cards
+fresh; touch "$TMP/eval-fails"; H="$(commit commands/watch.md v11)"; run; run
+rm -f "$TMP/eval-fails"; T="$(commit commands/watch.md v11b)"; run
 check "a later commit deploys past a held one"         [ "$(head_)" = "$T" ]
 check "…and closes the held card as superseded"        called "gh issue close 77"
+
+# 12. The sweep keeps the newest two release folders and nothing a lane still names
+fresh
+A="$(commit commands/watch.md v12a)"; run
+echo "${A:0:12}" > "$STATE/watcher/release"   # a lane pins itself to the first release
+B="$(commit commands/watch.md v12b)"; run
+C="$(commit commands/watch.md v12c)"; run
+check "the sweep keeps the newest release"             [ -d "$RELEASES/${C:0:12}" ]
+check "...and the one before it"                       [ -d "$RELEASES/${B:0:12}" ]
+check "...and a release a lane still names, however old" [ -d "$RELEASES/${A:0:12}" ]
+rm -f "$STATE/watcher/release"
+D="$(commit commands/watch.md v12d)"; run
+check "once no lane names it any more, an old release is swept" [ ! -d "$RELEASES/${A:0:12}" ]
+check "...but the newest two always survive"           [ -d "$RELEASES/${C:0:12}" ] && [ -d "$RELEASES/${D:0:12}" ]
+
+# 12e. A lane's own state dir can outlive the lane (a disabled/removed unit never cleans up
+# after itself) — its stale release/ file must not pin an old release against the sweep
+# forever, only an ACTIVE lane's own file counts.
+fresh
+mkdir -p "$STATE/retired-lane"
+E="$(commit commands/watch.md v12e)"; run
+echo "${E:0:12}" > "$STATE/retired-lane/release"   # "retired-lane" is not in $TMP/active
+F="$(commit commands/watch.md v12f)"; run
+G="$(commit commands/watch.md v12g)"; run
+check "a release only an INACTIVE lane's state still names is swept anyway" [ ! -d "$RELEASES/${E:0:12}" ]
+
+# 12f. A $WATCHER_DIR this script could not adopt (the rename itself fails) is never
+# silently nested into — the deploy holds instead of reporting success on a box that never
+# moved. $RELEASES is made FIRST, and still exists (and so still needs no write on its own
+# now-read-only parent to confirm, `mkdir -p` on an existing dir is a no-op) when
+# $(dirname "$BOX") goes read-only — so the failure lands on the guarded `mv` inside
+# adopt_plain_checkout specifically, not on an earlier, unguarded `mkdir -p` under `set -e`
+# (that would crash the whole run instead of holding it, and prove nothing about the guard
+# this case means to exercise — caught in review round 2).
+fresh
+mkdir -p "$RELEASES"
+chmod 555 "$(dirname "$BOX")"
+H="$(commit commands/watch.md v12h)"
+run
+chmod 755 "$(dirname "$BOX")"
+check "a checkout the deployer cannot adopt is never silently nested into" \
+      out_lacks "now points at"
+check "...and the box genuinely did not move" [ "$(head_)" != "$H" ]
 
 # ============================================================================
 echo "Canary channel (card #46): a lane whose project file sets LANE_CHANNEL=canary"
@@ -279,7 +297,8 @@ echo "takes a commit first, on a second checkout, before it reaches every other 
 # ============================================================================
 # From here on, watcher.env carries LANE_CHANNEL=canary — the fixture equivalent of this
 # card's own projects/watcher.env. $CANARY (cloned once, above) is this section's own
-# checkout; every case resets it the same way `fresh` resets $BOX.
+# checkout; every case resets it the same way `fresh` resets $BOX. Unchanged by card #106:
+# the canary stage still pauses and restarts only its own lane(s), directly.
 cat > "$SEED/projects/watcher.env" <<'EOF'
 PROJECT_NAME=watcher
 PROJECT_REPO=roloc/watcher
@@ -308,13 +327,14 @@ check "canary A: riffmap's lane does not"                 not_called_exact "syst
 check "canary A: riffmap-design's lane does not"          not_called_exact "systemctl restart watcher@riffmap-design"
 check "canary A: the stable checkout has not moved yet"   [ "$(head_)" != "$T" ]
 
-# B. A clean soak (DEPLOY_CANARY_SOAK_TICKS=2 in this fixture) promotes the rest
+# B. A clean soak (DEPLOY_CANARY_SOAK_TICKS=2 in this fixture) promotes the rest — onto the
+# ordinary release path, which (card #106) never restarts a stable lane either.
 canary_fresh; T="$(commit commands/watch.md canary-b)"
 run   # the canary swap; starts the soak clock
 canary_tick_log success; canary_tick_log success
 run   # sees 2 clean ticks, promotes
 check "canary B: a clean soak promotes the stable checkout too" [ "$(head_)" = "$T" ]
-check "canary B: the other lanes restart on promotion"          called "systemctl restart watcher@riffmap"
+check "canary B: the other lanes are never restarted for it"    not_called_exact "systemctl restart watcher@riffmap"
 
 # C. A canary tick that dies holds the commit and rolls the canary back
 canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-c)"

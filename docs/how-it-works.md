@@ -238,6 +238,14 @@ decides when the soak is done, restarting only the canary lane(s) until it clear
 project with no canary lane is entirely unaffected. `projects/watcher.env` is the first
 one to opt in (see "The watcher's own board", below).
 
+**Every stable lane gets its own version of that pinning** (card #106), with no second
+checkout and no re-exec into a different directory: `bin/spawn.sh` resolves its own
+`WATCHER_HERE` (and so `WATCHER_HOME`) through whatever `/opt/watcher` — the pointer —
+currently names, once, when its process starts, never again while that process runs. A
+deploy flipping the pointer later changes nothing this lane reads until the lane itself
+notices, on a later poll between ticks, and re-launches from the new target. See "The
+watcher's own board", below, for what the pointer is a pointer onto.
+
 What a lane shares with its sibling: the board, the repo, the main checkout, the worktree
 directory (one worktree per card, so never the same one), and `main`. What it does not:
 its state (`attempts/`, `parked/`, `current`, `PAUSE`, the pidfile, the logs), its poll
@@ -286,9 +294,25 @@ its own board"). The three things that make a loop editing itself safe enough:
   of its own. `/opt/watcher` is what every lane runs. A tick edits the clone, never the
   running copy.
 - **The deploy is the gate.** A merge lands on `main`; `main` goes live only through
-  `deploy/autodeploy.sh`, which ships a commit once `verify` passed on it, the replay suite
-  passed on it in a scratch clone (the new prompts, tested before any lane uses them), and
-  every lane on the box is idle. One deploy moves `/opt/watcher` for every project.
+  `deploy/autodeploy.sh`, which ships a commit once `verify` passed on it and the replay
+  suite passed on it in a scratch clone (the new prompts, tested before any lane uses
+  them). Since card #106, it never waits for a lane to go idle either: `/opt/watcher` is a
+  symlink — the pointer — onto one of its own release folders under
+  `/opt/watcher-releases/<sha>`, each a full clone made once and never touched again. A
+  deploy clones the new commit into its own folder, installs from there, and flips the
+  pointer; a lane already mid-tick is pinned, for the whole life of its own process, to
+  whichever folder it resolved the pointer to when it started (`bin/spawn.sh`'s own
+  `WATCHER_HERE`), so the flip disturbs nothing in flight. Each lane notices the pointer
+  has moved on its own next idle poll and re-launches itself from the new folder before
+  its next tick — no pause, no drain, no wait, anywhere. A sweep keeps the newest two
+  release folders (and any an in-flight tick still names) and removes the rest. The floor
+  page's Ship desk shows which release each lane is on. **Rolling back** is pointing
+  `/opt/watcher` at the previous release folder by hand (`ln -sfn
+  /opt/watcher-releases/<older sha> /opt/watcher`) — the sweep's "newest two" is exactly
+  what keeps a previous release there to point back at. `DEPLOY_DRAIN_AFTER_MIN` and
+  `DEPLOY_GRACE_SEC` are gone along with the pause they used to configure, including any
+  box-only override that set `DEPLOY_DRAIN_AFTER_MIN=0` to skip a long wait — there is no
+  wait left to skip.
 - **The gate is reviewed hardest, then merged like everything else.** A change to CI, the
   reviewer, the merge rules, the hard rules below, anything under `deploy/`, or the replay
   suite always gets the reviewer, which blocks anything that weakens it, and then merges on
@@ -302,9 +326,11 @@ never race each other to `main`.
 Since card #46, `projects/watcher.env` also sets `LANE_CHANNEL=canary` (see "Lanes",
 above): a commit that touches what a model reads lands on the Watcher board's own lane
 first, soaks there, and only then reaches every other project's. The systemd unit still
-starts `/opt/watcher/bin/spawn.sh`; that copy's own re-exec shim is what hands the tick off
-to `/opt/watcher-canary`, so "one deploy moves `/opt/watcher` for every project" above is
-still true of the *entry point* — a canary lane just runs a second checkout once it is in.
+starts `/opt/watcher/bin/spawn.sh` — the pointer is still the one entry point every lane's
+unit names, canary or not — and that copy's own re-exec shim is what hands the tick off to
+`/opt/watcher-canary` instead, before the pointer-following logic (card #106) ever gets a
+say: a canary lane never follows `/opt/watcher`'s own pointer at all, it runs a second,
+independent checkout once it is in.
 
 ## Dependencies
 

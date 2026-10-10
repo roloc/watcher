@@ -9,10 +9,13 @@ One page for the whole box, not one per project: it groups every lane in `projec
 by the board it works, and for each lane shows one of exactly five states — **working**
 (a card, its Stage, minutes since launch), **idle** (why), **needs Steve** (the card, the
 first line of its ask, and — when its Stuck comment points at a mockup or a screenshot —
-the picture itself, right there, on the floor and in the studio alike, so approving it
-never means clicking through to the card first; card #91), **paused** (a `PAUSE` file), or
-**sleeping** (a died tick,
-inside the spawner's own ten-minute retry sleep — `how-it-works.md`, "step 8"). A "Recent
+a Review button that opens it full-window, zoomable and flippable, on the floor and in
+the studio alike, so approving it never means clicking through to the card first; card
+#91, reshaped by card #100), **paused** (a `PAUSE` file, and no card held), or **sleeping**
+(a died tick, inside the spawner's own ten-minute retry sleep — `how-it-works.md`,
+"step 8"). A lane holding a card still reads **working** even with a `PAUSE` file beside
+it — paused means it takes nothing new, never that it is idle — and carries a short
+"pausing" line saying why (card #110). A "Recent
 ticks" list, across every project, closes the loop: project, lane, card, when, quota. A
 **Peek** button on **every** lane's desk opens a panel decoded from that lane's own Claude
 Code session transcript, the same way `bin/tail.sh` decodes it on the command line (card
@@ -101,6 +104,8 @@ ALLOWED_FIELDS = {
     "recent", "project", "when", "quota",
     # the ship station (after the lanes): CI on main, and the box's own deployer
     "ship", "ci", "deploy", "state", "sha", "failing", "live", "target",
+    # card #106: which release each lane on the box is pinned to, box-wide
+    "release",
     # the Needs Steve strip (card #96): every Stuck card on the board, whichever lane last
     # touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
@@ -114,6 +119,8 @@ ALLOWED_FIELDS = {
     "proxmox", "vmid", "type", "status", "cpu", "maxcpu", "mem", "maxmem",
     # the wins board: every card a lane took to Done this week, with its title from the board
     "wins", "title", "days", "items",
+    # card #110: a working lane that is also pausing (a PAUSE file sits beside a held card)
+    "pausing", "pausing_reason",
 }
 
 WINS_DAYS = 7       # the wins board's window
@@ -359,34 +366,40 @@ def _read(path):
 
 def deploy_status(repo_dir, deploy_state, repo, git=_git):
     """What deploy/autodeploy.sh is doing, from the files it keeps (read-only):
-    live | checking | testing | waiting | swapping | held."""
+    live | checking | testing | held. Card #106: a deploy never pauses or waits for a lane
+    any more — it clones the target, installs it, and flips the pointer inside one run — so
+    there is no separate "waiting for idle lanes"/"swapping" state left to show; `live` and
+    `target` already say the rest, and `lane_release`/the page's per-lane lines (below) say
+    which lanes have already followed the pointer there."""
     live = git(repo_dir, "rev-parse", "HEAD")
     target = git(repo_dir, "rev-parse", "origin/main")
     if not live:
         return None
     out = {"live": live[:7], "target": (target or live)[:7]}
     held = _read(os.path.join(deploy_state, "held", target)) if target else None
-    draining = (_read(os.path.join(deploy_state, "draining")) or "").split()
-    ready = (_read(os.path.join(deploy_state, "ready")) or "").split()
     evals = _read(os.path.join(deploy_state, "evals", target)) if target else None
-    # Swapping and live come before held: a commit shipped with deploy-anyway keeps its own
-    # held/<sha> file (the deployer only clears the OTHER held cards), and the page must not
-    # call a live commit Blocked, or count it as needing Steve.
-    if draining:
-        out["state"], out["target"] = "swapping", draining[0][:7]
-    elif not target or live == target:
+    # Live comes before held: a commit shipped with deploy-anyway keeps its own held/<sha>
+    # file (the deployer only clears the OTHER held cards), and the page must not call a
+    # live commit Blocked, or count it as needing Steve.
+    if not target or live == target:
         out["state"] = "live"
     elif held is not None:
         out["state"] = "held"
         if held.isdigit():
             out["card"] = {"number": int(held), "url": f"https://github.com/{repo}/issues/{held}"}
-    elif ready and ready[0] == live:
-        out["state"] = "waiting"
     elif evals and evals.startswith("fail"):
         out["state"] = "testing"
     else:
         out["state"] = "checking"
     return out
+
+
+def lane_release(lane):
+    """The release folder (its bare directory name, a commit's short sha) this lane's own
+    process last said it was pinned to — bin/spawn.sh's own $WATCHER_STATE/release, written
+    once at process start (see its comment there). None when the lane has never run under
+    a release layout (a box, or a project, not using one) or has not polled since."""
+    return _read(os.path.join(lane["state_dir"], "release"))
 
 
 # --- one lane's desk ---------------------------------------------------------------------
@@ -426,6 +439,16 @@ def _idle_reason(lane, items_by_number, last_tick):
     return "Nothing to pick up right now."
 
 
+def _pause_reason(path):
+    """The first line of a `PAUSE` file, or `""` for an empty (hand-touched) one — never
+    more than that line, so a multi-line file can never leak past it (there is no reason
+    one would have more than one line; this is a floor not a parser)."""
+    text = _read(path)
+    if not text:
+        return ""
+    return text.splitlines()[0].strip()
+
+
 def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None,
               images=None):
     """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
@@ -436,14 +459,21 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
     touch the network); `images` is the same shape for `needs_steve_images` — a mockup or
     a screenshot to show right on the desk (card #91), never required to be called for a
     pill other than needs_steve; `unit_active` is `systemctl is-active`'s answer, already
-    looked up by the caller (None when it could not be checked)."""
+    looked up by the caller (None when it could not be checked).
+
+    A held card always wins the pill (card #110): a `PAUSE` file beside a held card never
+    means idle — it means the lane will not pick up anything new once this tick ends. So
+    `current` is read before `PAUSE`, and a lane holding a card gets `pill: working`
+    whether or not `PAUSE` sits beside it; `PAUSE` only adds `pausing: true` and
+    `pausing_reason` (the file's own first line — "deploy <sha>" for the deployer and the
+    canary stage, "" for a hand-touched one) for the page script to turn into plain
+    words. Only a lane holding nothing reads as `paused`."""
     base = {"lane": lane["lane"], "kind": lane_kind(lane), "unit": lane["unit"]}
     if unit_active is not None:
         base["unit_active"] = unit_active
     state_dir = lane["state_dir"]
-
-    if os.path.exists(os.path.join(state_dir, "PAUSE")):
-        return {**base, "pill": "paused", "link": board_url}
+    pause_path = os.path.join(state_dir, "PAUSE")
+    paused = os.path.exists(pause_path)
 
     current_path = os.path.join(state_dir, "current")
     n = _read_current(current_path)
@@ -455,8 +485,15 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             minutes = 0
         it = items_by_number.get(n) or {}
         url = it.get("url") or board_url
-        return {**base, "pill": "working", "link": url, "card": {"number": n, "url": url},
+        desk = {**base, "pill": "working", "link": url, "card": {"number": n, "url": url},
                 "stage": it.get("stage") or "", "minutes": minutes}
+        if paused:
+            desk["pausing"] = True
+            desk["pausing_reason"] = _pause_reason(pause_path)
+        return desk
+
+    if paused:
+        return {**base, "pill": "paused", "link": board_url}
 
     # The board is authoritative over the lane's own log: a card the SPAWNER parked (two
     # died ticks, no Stuck-shaped comment from the tick itself) is just as much "needs
@@ -751,8 +788,7 @@ def _worst(marks):
 
 _DEPLOY_WORDS = {
     "live": "live on the box: {live}", "checking": "checking {target}: CI and tests",
-    "testing": "retesting {target}", "waiting": "{target} passed; waiting for idle lanes",
-    "swapping": "swapping in {target}", "held": "held: {target}",
+    "testing": "retesting {target}", "held": "held: {target}",
 }
 
 
@@ -1106,6 +1142,14 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                 ship["deploy"] = dep
                 if dep["state"] == "held":
                     needs_steve_total += 1
+                # Card #106: every lane on the box runs this same deploy's code, whichever
+                # project it works — so the one Ship desk that shows the deployer's own
+                # state (the watcher's) is where "which release each lane is on" belongs
+                # too, box-wide, never only this project's own lanes.
+                ship["lanes"] = [
+                    {"project": proj["name"], "lane": l["lane"], "release": lane_release(l)}
+                    for proj in projects for l in proj["lanes"]
+                ]
 
         entry = {"name": p["name"], "board_url": p["board_url"],
                   "counts": project_counts(items), "lanes": lane_out, "ship": ship,
@@ -1198,10 +1242,11 @@ def board_images(issue, project_repo, board_py=None, timeout=20):
 def board_rounds(issue, project_repo, board_py=None, timeout=20):
     """Every `Needs Steve` round for this card, newest first — `board.py images
     --all-rounds`, which wraps `needs_steve_rounds` — each with its own pictures, lettered
-    by direction (card #96: the Needs Steve strip's carousel, which flips through every
-    round a card has been asked, not only the lane's own single-thumbnail desk pill).
-    Same `GH_REPO` pinning as `board_ask`/`board_images`, for the same reason. `[]` on any
-    failure — a card the strip then shows with its ask and no pictures, never a crash."""
+    by direction (card #96: the Needs Steve strip's Review overlay, card #100, which flips
+    through every round a card has been asked, not only the lane's own single-thumbnail
+    desk pill). Same `GH_REPO` pinning as `board_ask`/`board_images`, for the same reason.
+    `[]` on any failure — a card the strip then shows with its ask and no pictures, never
+    a crash."""
     board_py = board_py or os.path.join(HERE, "board.py")
     env = dict(os.environ, GH_REPO=project_repo)
     try:
@@ -1293,6 +1338,9 @@ INDEX_HTML = """<!doctype html>
   .pill.paused { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
   .pill.sleeping { background: color-mix(in srgb, var(--sleep) 18%, transparent); color: var(--sleep); }
   .detail { font-size: 13px; margin-top: 6px; color: var(--dim); }
+  /* card #110: a working desk that is also pausing — a second fact, not a replacement
+     for the Working pill, so it reads small and amber beside the detail line. */
+  .pausing { font-size: 12px; margin-top: 2px; color: var(--paused); }
   /* A mockup or a screenshot a Needs Steve comment pointed at, shown right on the desk
      instead of making Steve click through to the card to find it (card #91). */
   .mockups { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -1300,59 +1348,49 @@ INDEX_HTML = """<!doctype html>
     max-width: 120px; max-height: 90px; border-radius: 6px; border: 1px solid var(--line);
     object-fit: cover;
   }
-  /* The Needs Steve strip (card #96): every card Stuck on this board, whichever lane last
-     touched it — a mockup to approve right here, flipped through with a carousel, never
-     only a link off to the card. */
+  /* The Needs Steve strip (card #96, reshaped by #100): every card Stuck on this board,
+     whichever lane last touched it — its ask, the directions it offers, and a Review
+     button that opens the full-window overlay (below) rather than a sliver inline. */
   .needs-strip { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-  .needs-strip.compact { gap: 6px; }
   .needs-card {
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
     background: color-mix(in srgb, var(--needs) 5%, transparent); flex: 1 1 220px; max-width: 320px;
   }
-  .needs-strip.compact .needs-card { flex: 0 0 auto; max-width: 150px; padding: 4px 6px; font-size: 11px; }
   .needs-ask {
     display: block; font-size: 13px; font-weight: 600; color: inherit; text-decoration: none;
     margin-bottom: 6px;
   }
-  .needs-strip.compact .needs-ask { font-size: 10px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .carousel { }
-  .car-frame {
-    position: relative; display: flex; align-items: center; justify-content: center;
-    background: var(--bg); border-radius: 6px; overflow: hidden; min-height: 60px;
+  .direction-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .direction-chip {
+    font-size: 11px; font-weight: 700; color: var(--dim);
+    background: color-mix(in srgb, var(--dim) 14%, transparent);
+    border-radius: 999px; padding: 1px 7px;
   }
-  .car-img { display: block; max-width: 100%; max-height: 160px; width: 100%; object-fit: contain; }
-  .carousel.compact .car-img { max-height: 70px; }
-  .car-btn {
-    position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
-    border: none; background: rgba(0, 0, 0, .45); color: #fff; width: 26px; height: 26px;
-    border-radius: 999px; font-size: 16px; line-height: 1; cursor: pointer; padding: 0;
+  .direction-chip.recommended {
+    color: var(--working); background: color-mix(in srgb, var(--working) 16%, transparent);
   }
-  .carousel.compact .car-btn { width: 18px; height: 18px; font-size: 12px; }
-  .car-prev { left: 4px; } .car-next { right: 4px; }
-  .car-chip {
-    position: absolute; top: 4px; right: 4px; background: var(--working); color: #fff;
-    font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  .review-btn {
+    font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
   }
-  .carousel.compact .car-chip { font-size: 9px; padding: 0 4px; }
-  .car-caption { font-size: 12px; color: var(--dim); margin-top: 4px; }
-  .carousel.compact .car-caption { font-size: 10px; }
-  .car-counter { font-size: 11px; color: var(--dim); }
-  /* The studio's own row gets the same strip in miniature, plus a chip list so a crowded
-     row still names every card even where there is no room to draw its pictures. */
+  .review-btn:hover { border-color: var(--dim); }
+  .review-btn.tray { font-size: 10px; padding: 1px 7px; margin-left: 3px; vertical-align: middle; }
+  /* The studio's own row gets the same strip in miniature: a chip list so a crowded row
+     still names every card even where there is no room for its ask, each with its own
+     Review button when it has a picture behind it. */
   .row-stuck {
     position: absolute; right: 2%; display: flex; flex-direction: column; align-items: flex-end;
     gap: 4px; max-width: 46%; pointer-events: auto;
   }
-  .row-stuck-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .row-stuck-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
   /* In the office the same strip is the in-tray on Steve's desk: a paper tray in front of
-     it, chips grouped by board, the carousel inside. */
+     it, chips grouped by board. */
   .row-stuck.in-tray {
     right: auto; max-width: none; box-sizing: border-box; align-items: stretch; padding: 4px 6px;
     border: 1.5px solid var(--line); border-radius: 4px;
     background: color-mix(in srgb, var(--needs) 8%, var(--panel));
   }
   .row-stuck.in-tray .row-stuck-chips { justify-content: flex-start; align-items: center; }
-  .row-stuck.in-tray .carousel { align-self: center; width: min(100%, 150px); }
   .tray-label, .tray-board {
     font-size: 9px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .05em;
   }
@@ -1429,6 +1467,48 @@ INDEX_HTML = """<!doctype html>
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
+  /* Review (card #100): a card's pictures, full-window, over everything else — zoom,
+     flip, and a way out to the browser's own zoom via a new tab. The stage is sized in
+     viewport units so even a tiny fixture image fills it (`object-fit: contain` only
+     shrinks the drawn picture inside that box; the element itself stays full size). */
+  #review-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .92); z-index: 30;
+    display: none; align-items: center; justify-content: center;
+  }
+  #review-overlay.open { display: flex; }
+  body.review-open { overflow: hidden; }
+  #review-stage {
+    width: 92vw; height: 74vh; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; touch-action: none;
+  }
+  #review-img {
+    width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none;
+  }
+  .review-nav {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+    border: none; background: rgba(255, 255, 255, .15); color: #fff; width: 48px; height: 48px;
+    border-radius: 999px; font-size: 26px; line-height: 1; cursor: pointer;
+  }
+  .review-nav:hover { background: rgba(255, 255, 255, .28); }
+  #review-prev { left: 10px; } #review-next { right: 10px; }
+  #review-close {
+    position: absolute; top: 8px; right: 10px; z-index: 3; border: none; background: none;
+    color: #fff; font-size: 32px; line-height: 1; cursor: pointer; padding: 4px 12px;
+  }
+  #review-caption {
+    position: absolute; left: 10px; right: 10px; bottom: 54px; text-align: center; color: #fff;
+    font-size: 14px;
+  }
+  #review-counter {
+    position: absolute; left: 0; right: 0; bottom: 34px; text-align: center;
+    color: rgba(255, 255, 255, .7); font-size: 12px;
+  }
+  #review-newtab {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); color: #fff;
+    font-size: 13px; font-weight: 600; text-decoration: none; border: 1px solid rgba(255, 255, 255, .4);
+    border-radius: 999px; padding: 5px 14px;
+  }
+  #review-newtab:hover { background: rgba(255, 255, 255, .12); }
   /* ---- The studio: an office the lanes walk around in (card #88; rooms since October 9,
      2026, a floor plan with hallways, a server room and the boards in Steve's office the
      same day). The floor page above is untouched; this is a second view of the same data,
@@ -1700,9 +1780,28 @@ window.addEventListener("unhandledrejection", function () {
     <pre id="peek-lines"></pre>
   </div>
 </div>
+<div id="review-overlay">
+  <div id="review-stage"><img id="review-img" alt=""></div>
+  <button class="review-nav" id="review-prev" type="button" aria-label="Previous picture">&lsaquo;</button>
+  <button class="review-nav" id="review-next" type="button" aria-label="Next picture">&rsaquo;</button>
+  <button id="review-close" type="button" aria-label="Close">&times;</button>
+  <div id="review-caption"></div>
+  <div id="review-counter"></div>
+  <a id="review-newtab" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+</div>
 <script id="main">
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
                      paused: "Paused", sleeping: "Sleeping"};
+
+// Card #110: a working lane can also be pausing (a PAUSE file sits beside its held card).
+// The backend hands back the file's own first line as `pausing_reason` — "deploy <sha>"
+// for the deployer and the canary stage, "" for a hand-touched one — and this turns it
+// into plain words, never the sha or the file's path (`talking-to-steve.md`, rule 8).
+function pausingLine(d) {
+  if (!d.pausing) return "";
+  const forDeploy = (d.pausing_reason || "").startsWith("deploy");
+  return `<div class="pausing">pausing after this card${forDeploy ? " for a deploy" : ""}</div>`;
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({
@@ -1788,6 +1887,24 @@ function dispatcherSVG(pill) {
 // deployer too. Not a lane — nothing here works a card.
 const SHIP_PILL = {ok: ["working", "All green"], busy: ["paused", "Shipping"],
                    blocked: ["needs_steve", "Blocked"], unknown: ["idle", "Unknown"]};
+// laneReleaseLines (card #106) — one line per project naming how many of its lanes have
+// already followed the pointer to the live release, and which have not (still finishing a
+// tick on an older one — never disturbed, just not there yet). `live` is the deployer's
+// own 7-char sha; a lane's own release name is 12 — compared on the 7 both share, which is
+// exactly as precise as every other short-sha the page already shows.
+function laneReleaseLines(dep, lanes) {
+  if (!dep || !lanes || !lanes.length) return [];
+  const byProject = {};
+  lanes.forEach(l => { (byProject[l.project] = byProject[l.project] || []).push(l); });
+  return Object.keys(byProject).sort().map(name => {
+    const group = byProject[name];
+    const behind = group.filter(l => !l.release || l.release.slice(0, 7) !== dep.live).map(l => l.lane);
+    const onIt = group.length - behind.length;
+    return behind.length
+      ? `${esc(name)}: ${onIt} of ${group.length} lane(s) on it (${behind.map(esc).join(", ")} still finishing on an older one)`
+      : `${esc(name)}: all ${group.length} lane(s) on it`;
+  });
+}
 function shipState(ship) {
   const ci = (ship && ship.ci) || {state: "unknown"};
   const dep = ship && ship.deploy;
@@ -1795,16 +1912,15 @@ function shipState(ship) {
   const ciLine = {passing: "all checks passed", running: "checks running",
                   failing: "failing: " + (ci.failing || []).join(", "), none: "no checks"}[ci.state];
   lines.push(ci.state === "unknown" ? "CI unreachable" : `main ${esc(ci.sha)}: ${esc(ciLine)}`);
-  if (dep) lines.push({live: `live on the box: ${esc(dep.live)}`,
-                       checking: `checking ${esc(dep.target)}: CI and tests`,
-                       testing: `retesting ${esc(dep.target)}`,
-                       waiting: `${esc(dep.target)} passed; waiting for idle lanes`,
-                       swapping: `swapping in ${esc(dep.target)}`,
-                       held: `held: ${esc(dep.target)}` + (dep.card ? ` (#${dep.card.number})` : "")}[dep.state] || "");
+  if (dep) {
+    lines.push({live: `live on the box: ${esc(dep.live)}`,
+                checking: `checking ${esc(dep.target)}: CI and tests`,
+                testing: `retesting ${esc(dep.target)}`,
+                held: `held: ${esc(dep.target)}` + (dep.card ? ` (#${dep.card.number})` : "")}[dep.state] || "");
+    lines.push(...laneReleaseLines(dep, ship.lanes));
+  }
   let pill = "ok", mode = "done";
   if ((dep && dep.state === "held") || ci.state === "failing") { pill = "blocked"; mode = "blocked"; }
-  else if (dep && dep.state === "waiting") { pill = "busy"; mode = "waiting"; }
-  else if (dep && dep.state === "swapping") { pill = "busy"; mode = "pushing"; }
   else if ((dep && dep.state !== "live") || ci.state === "running") { pill = "busy"; mode = "checking"; }
   else if (ci.state === "unknown" && !dep) { pill = "unknown"; mode = "idle"; }
   const link = (dep && dep.card && dep.card.url) || ci.url || "";
@@ -1859,12 +1975,24 @@ function mockupThumbsHTML(images, cls) {
          onerror="this.style.display='none'">`).join("")}</div>`;
 }
 
-// The Needs Steve carousel (card #96): every picture a Stuck card's Needs Steve comments
-// have shown, newest round first, lettered by direction when the comment named one —
-// shared by the floor's per-project strip and the studio's per-row strip, so the two
-// views never disagree about what a card's carousel holds. The slide a viewer left a
-// card on persists across refreshes (keyed by card number, not re-read from the server),
-// so a poll mid-flip never snaps it back to the first picture.
+// A card's own `Needs Steve:` ask, read back from the comment that made it (board #96's
+// first line keeps the comment's own `**...**` wrapping) — rendered, not shown raw, so no
+// `**` ever reaches the page (card #100: "the ask line shows raw ** markdown"). `esc()`
+// first, so the regexes only ever see the three markers, never anything a title injected.
+function renderAsk(text) {
+  return esc(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/_(.+?)_/g, "<em>$1</em>");
+}
+
+// The Needs Steve carousel's own state (card #96): every picture a Stuck card's Needs
+// Steve comments have shown, newest round first, lettered by direction when the comment
+// named one — shared by the strip, the studio's in-tray, the podium's held thumbnail and
+// the Review overlay (#100), so none of them ever disagree about which picture a card is
+// "on". The slide a viewer left a card on persists across refreshes (keyed by card
+// number, not re-read from the server), so a poll mid-flip never snaps it back to the
+// first picture.
 const carouselSlide = {};
 
 function stuckSlides(entry) {
@@ -1888,89 +2016,90 @@ function currentSlide(entry) {
   return {slides, idx, slide: slides[idx]};
 }
 
-function carouselHTML(entry, compact) {
-  const {slides, idx, slide} = currentSlide(entry);
-  if (!slide) return "";
-  const n = entry.card.number;
-  const chip = slide.letter
-    ? `<span class="car-chip">${esc(slide.letter)}${slide.recommended ? " ★" : ""}</span>` : "";
-  const cap = [slide.label, slide.dated ? relTime(slide.when) : ""].filter(Boolean).map(esc).join(" · ");
-  const arrows = slides.length > 1
-    ? `<button class="car-btn car-prev" type="button" data-car-prev="${n}" aria-label="Previous picture">&lsaquo;</button>
-       <button class="car-btn car-next" type="button" data-car-next="${n}" aria-label="Next picture">&rsaquo;</button>`
-    : "";
-  return `<div class="carousel${compact ? " compact" : ""}" data-carousel="${n}" tabindex="0">
-    <div class="car-frame">
-      ${arrows}
-      <img class="car-img" src="${esc(slide.url)}" alt="${esc(slide.label || "Mockup to approve")}"
-           loading="lazy" onerror="this.style.display='none'">
-      ${chip}
-    </div>
-    <div class="car-caption">${cap}</div>
-    <div class="car-counter">${idx + 1} of ${slides.length}</div>
-  </div>`;
-}
-
-// Every card Stuck on this board, whichever lane last touched it (card #96's "why
-// nothing shows today": a lane's own desk only ever shows the one card it last worked,
-// so a design lane that parked three cards and moved on to a fourth showed none of the
-// three). `compact` is the studio's own miniature version of the same strip.
-function stuckStripHTML(stuck, compact) {
-  if (!stuck || !stuck.length) return "";
-  return `<div class="needs-strip${compact ? " compact" : ""}">${stuck.map(s => `
-    <div class="needs-card">
-      <a class="needs-ask" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}: ${esc(s.ask) || "needs a decision"}</a>
-      ${carouselHTML(s, compact)}
-    </div>`).join("")}</div>`;
-}
-
 function stepCarousel(cardNum, dir) {
   carouselSlide[cardNum] = (carouselSlide[cardNum] || 0) + dir;
   if (lastState) { render(lastState); renderStudio(lastState); }
-  // render()/renderStudio() replace the carousel's own DOM node (a fresh innerHTML each
-  // time), so a re-render drops focus to <body> and every arrow key after the first one
-  // stops doing anything — the strip exists twice (floor and studio), and only the
-  // currently-visible copy can actually take focus back.
-  for (const el of document.querySelectorAll(`[data-carousel="${cardNum}"]`)) {
-    el.focus({preventScroll: true});
-    if (document.activeElement === el) break;
+}
+
+// Every card Stuck on this board, whichever lane last touched it (card #96's "why
+// nothing shows today": a lane's own desk only ever shows the one card it last worked, so
+// a design lane that parked three cards and moved on to a fourth showed none of the
+// three) — card number, its ask rendered (never raw `**`), the directions it offers as
+// chips, and a Review button that opens the full-window overlay (#100: the old inline
+// sliver carousel "fits a full-page screenshot into a short box, so every picture is a
+// sliver you cannot read").
+function directionChipsHTML(slides) {
+  const letters = new Map();
+  for (const s of slides) {
+    if (!s.letter) continue;
+    letters.set(s.letter, letters.get(s.letter) || s.recommended);
   }
+  if (!letters.size) return "";
+  return `<div class="direction-chips">${[...letters.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([letter, rec]) => `<span class="direction-chip${rec ? " recommended" : ""}">${esc(letter)}${rec ? " ★" : ""}</span>`)
+    .join("")}</div>`;
+}
+
+function stuckStripHTML(stuck) {
+  if (!stuck || !stuck.length) return "";
+  return `<div class="needs-strip">${stuck.map(s => {
+    const slides = stuckSlides(s);
+    return `
+    <div class="needs-card">
+      <a class="needs-ask" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}: ${s.ask ? renderAsk(s.ask) : "needs a decision"}</a>
+      ${slides.length ? `${directionChipsHTML(slides)}
+        <button class="review-btn" type="button" data-review="${s.card.number}" aria-label="Review the pictures for #${s.card.number}">Review</button>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+}
+
+// Every stuck card currently drawn anywhere on the page, by card number — built fresh at
+// the top of every `render()` (which always runs before `renderStudio()` on the same
+// state), so the strip, the in-tray, the podium and a lane's own desk tile all resolve a
+// Review button against the one shared answer for "what does this card have to show".
+let stuckByCard = {};
+
+// A lane's needs_steve pill carries only a flat list of image URLs (`images_fn`, card
+// #91) — no letters, no rounds — because that is all `lane_desk` ever needed before the
+// overlay existed. `stuckByCard` has the richer shape whenever this card is also the
+// board's own Stuck card, which is always, except a demo fixture with no `stuck` entry of
+// its own; that gets a one-round entry synthesized from the flat list so its Review button
+// still works. `images` wrapped in nothing is a card with no picture to show at all.
+function resolveStuckEntry(num, images) {
+  if (num == null) return null;
+  const entry = stuckByCard[num];
+  if (entry && stuckSlides(entry).length) return entry;
+  if (images && images.length) {
+    return {card: {number: num},
+            rounds: [{when: null, images: images.map(u => ({url: u, label: "", letter: null, recommended: false}))}]};
+  }
+  return null;
+}
+
+function reviewButtonHTML(num, images, cls) {
+  if (!resolveStuckEntry(num, images)) return "";
+  const fallback = stuckByCard[num] ? "" : ` data-review-images='${esc(JSON.stringify(images || []))}'`;
+  return `<button class="review-btn${cls ? " " + cls : ""}" type="button" data-review="${num}"${fallback}
+    aria-label="Review the pictures for #${num}">Review</button>`;
+}
+
+function openReviewFromEl(el) {
+  let images = null;
+  if (el.dataset.reviewImages) { try { images = JSON.parse(el.dataset.reviewImages); } catch (err) { images = null; } }
+  openReview(Number(el.dataset.review), images);
 }
 
 document.addEventListener("click", (e) => {
-  const prev = e.target.closest("[data-car-prev]"), next = e.target.closest("[data-car-next]");
-  if (!prev && !next) return;
+  const btn = e.target.closest("[data-review]");
+  if (!btn) return;
   e.preventDefault(); e.stopPropagation();
-  const btn = prev || next;
-  stepCarousel(Number(btn.dataset.carPrev || btn.dataset.carNext), prev ? -1 : 1);
+  openReviewFromEl(btn);
 });
-// Arrow keys and a swipe, for a carousel that has focus (phone-first: `tabindex` above
-// makes a tap on the frame itself focus it, no separate "activate" step needed).
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-  const el = document.activeElement && document.activeElement.closest("[data-carousel]");
-  if (!el) return;
-  e.preventDefault();
-  stepCarousel(Number(el.dataset.carousel), e.key === "ArrowLeft" ? -1 : 1);
-});
-let swipeStartX = null, swipeCard = null;
-document.addEventListener("touchstart", (e) => {
-  const el = e.target.closest("[data-carousel]");
-  if (!el) { swipeCard = null; return; }
-  swipeCard = Number(el.dataset.carousel);
-  swipeStartX = e.changedTouches[0].clientX;
-}, {passive: true});
-document.addEventListener("touchend", (e) => {
-  if (swipeCard == null || swipeStartX == null) return;
-  const dx = e.changedTouches[0].clientX - swipeStartX;
-  if (Math.abs(dx) > 40) stepCarousel(swipeCard, dx < 0 ? 1 : -1);
-  swipeCard = swipeStartX = null;
-}, {passive: true});
 
 function deskHTML(d) {
   let detail = "";
   if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m`;
-  else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${esc(d.ask) || "needs a decision"}`;
+  else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${d.ask ? renderAsk(d.ask) : "needs a decision"}`;
   else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
   const dispatcher = d.kind === "Triage";
   // Peek is on every lane's desk, whatever its pill: live while the lane works, its last
@@ -1983,7 +2112,9 @@ function deskHTML(d) {
       <div class="unit">${esc(d.unit)}</div>
       <span class="pill ${esc(d.pill)}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
       <div class="detail">${detail}</div>
+      ${pausingLine(d)}
       ${d.pill === "needs_steve" ? mockupThumbsHTML(d.images) : ""}
+      ${d.pill === "needs_steve" ? reviewButtonHTML(d.card.number, d.images) : ""}
     </a>
     <button class="peek-btn" type="button" data-peek-lane="${esc(d.lane)}" data-peek-name="${esc(d.kind)} (${esc(d.lane)})">Peek</button>
   </div>`;
@@ -1993,6 +2124,8 @@ let lastState = null;
 
 function render(state) {
   lastState = state;
+  stuckByCard = {};
+  for (const p of state.projects || []) for (const s of p.stuck || []) stuckByCard[s.card.number] = s;
   document.getElementById("box").textContent =
     "The floor — " + state.header.box +
     (state.header.needs_steve_total > 0 ? ` — ${state.header.needs_steve_total} need Steve` : "");
@@ -2144,6 +2277,156 @@ document.addEventListener("click", (e) => {
   if (!btn) return;
   openPeek({lane: btn.dataset.peekLane, ship: btn.dataset.peekShip}, btn.dataset.peekName);
 });
+
+// ---- Review (card #100): a card's pictures, full-window, over everything else --------
+// Replaces the old inline sliver carousel. A click on any `[data-review]` element (the
+// strip's button, the in-tray's, a lane desk's, the studio podium's held thumbnail) opens
+// here, on whichever picture `carouselSlide` says this card is on — the same index the
+// strip, the in-tray and the podium all read, so flipping here moves them too the next
+// time they redraw. Zoom and pan are the overlay's own transform on the image; both reset
+// on every flip, per the card's own ask.
+let reviewEntry = null, reviewCard = null, reviewZoom = 1, reviewPanX = 0, reviewPanY = 0;
+
+function reviewApplyTransform() {
+  const img = document.getElementById("review-img");
+  img.style.transform = `translate(${reviewPanX}px, ${reviewPanY}px) scale(${reviewZoom})`;
+  img.style.cursor = reviewZoom > 1 ? "grab" : "zoom-in";
+}
+
+function resetReviewZoom() {
+  reviewZoom = 1; reviewPanX = 0; reviewPanY = 0;
+  reviewApplyTransform();
+}
+
+function reviewSetZoom(z) {
+  reviewZoom = Math.min(4, Math.max(1, z));
+  if (reviewZoom <= 1.01) { reviewZoom = 1; reviewPanX = 0; reviewPanY = 0; }
+  reviewApplyTransform();
+}
+
+function renderReviewSlide() {
+  if (!reviewEntry) return;
+  const {slides, idx, slide} = currentSlide(reviewEntry);
+  if (!slide) { closeReview(); return; }
+  const img = document.getElementById("review-img");
+  img.src = slide.url;
+  img.alt = slide.label || "Mockup to approve";
+  const parts = [slide.letter ? `${slide.letter}${slide.recommended ? " ★" : ""}` : null, slide.label].filter(Boolean);
+  document.getElementById("review-caption").textContent = parts.join(" — ");
+  document.getElementById("review-counter").textContent = `${idx + 1} of ${slides.length}`;
+  document.getElementById("review-newtab").href = slide.url;
+  const multi = slides.length > 1;
+  document.getElementById("review-prev").style.display = multi ? "" : "none";
+  document.getElementById("review-next").style.display = multi ? "" : "none";
+}
+
+function openReview(num, fallbackImages) {
+  const entry = resolveStuckEntry(num, fallbackImages);
+  if (!entry) return;
+  reviewEntry = entry; reviewCard = num;
+  resetReviewZoom();
+  renderReviewSlide();
+  document.getElementById("review-overlay").classList.add("open");
+  document.body.classList.add("review-open");
+}
+
+function closeReview() {
+  document.getElementById("review-overlay").classList.remove("open");
+  document.body.classList.remove("review-open");
+  reviewEntry = null; reviewCard = null;
+}
+
+function reviewStep(dir) {
+  if (reviewCard == null) return;
+  stepCarousel(reviewCard, dir);
+  resetReviewZoom();
+  renderReviewSlide();
+}
+
+document.getElementById("review-prev").addEventListener("click", () => reviewStep(-1));
+document.getElementById("review-next").addEventListener("click", () => reviewStep(1));
+document.getElementById("review-close").addEventListener("click", closeReview);
+document.getElementById("review-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "review-overlay") closeReview();
+});
+document.addEventListener("keydown", (e) => {
+  if (!document.getElementById("review-overlay").classList.contains("open")) return;
+  if (e.key === "Escape") closeReview();
+  else if (e.key === "ArrowLeft") reviewStep(-1);
+  else if (e.key === "ArrowRight") reviewStep(1);
+});
+
+// Zoom: scroll-wheel or double-click/double-tap on a desktop, pinch on the phone; drag to
+// pan once zoomed in. A swipe while at 1x (not zoomed) flips to the next/previous picture
+// instead — the same gesture means different things depending on whether there's anywhere
+// to pan to.
+const reviewImgEl = document.getElementById("review-img");
+reviewImgEl.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  reviewSetZoom(reviewZoom - e.deltaY * 0.0015);
+}, {passive: false});
+reviewImgEl.addEventListener("dblclick", () => reviewSetZoom(reviewZoom > 1 ? 1 : 2.5));
+
+let reviewDrag = null;
+reviewImgEl.addEventListener("mousedown", (e) => {
+  if (reviewZoom <= 1) return;
+  reviewDrag = {x: e.clientX, y: e.clientY, panX: reviewPanX, panY: reviewPanY};
+});
+document.addEventListener("mousemove", (e) => {
+  if (!reviewDrag) return;
+  reviewPanX = reviewDrag.panX + (e.clientX - reviewDrag.x);
+  reviewPanY = reviewDrag.panY + (e.clientY - reviewDrag.y);
+  reviewApplyTransform();
+});
+document.addEventListener("mouseup", () => { reviewDrag = null; });
+
+// Tap vs. swipe is decided at touchend, from how far the finger actually ended up from
+// where it started — never from whether a `touchmove` happened to fire in between, which
+// a very quick flick can skip. Double-tap zoom only ever fires for two touches that each
+// ended close to where they started, so two swipes thrown quickly never zoom by mistake.
+let reviewTouch = null, reviewLastTapTime = 0, reviewLastTapX = null, reviewLastTapY = null;
+reviewImgEl.addEventListener("touchstart", (e) => {
+  if (e.touches.length === 2) {
+    const [a, b] = e.touches;
+    reviewTouch = {mode: "pinch", dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom: reviewZoom};
+    return;
+  }
+  const t = e.touches[0];
+  reviewTouch = reviewZoom > 1
+    ? {mode: "pan", x: t.clientX, y: t.clientY, panX: reviewPanX, panY: reviewPanY}
+    : {mode: "tap", x: t.clientX, y: t.clientY};
+}, {passive: true});
+reviewImgEl.addEventListener("touchmove", (e) => {
+  if (!reviewTouch) return;
+  if (reviewTouch.mode === "pinch" && e.touches.length === 2) {
+    const [a, b] = e.touches;
+    reviewSetZoom(reviewTouch.zoom * (Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / reviewTouch.dist));
+  } else if (reviewTouch.mode === "pan" && e.touches.length === 1) {
+    reviewPanX = reviewTouch.panX + (e.touches[0].clientX - reviewTouch.x);
+    reviewPanY = reviewTouch.panY + (e.touches[0].clientY - reviewTouch.y);
+    reviewApplyTransform();
+  }
+}, {passive: true});
+reviewImgEl.addEventListener("touchend", (e) => {
+  if (!reviewTouch) return;
+  if (reviewTouch.mode === "tap") {
+    const end = e.changedTouches[0];
+    const dx = end.clientX - reviewTouch.x, dy = end.clientY - reviewTouch.y;
+    if (Math.abs(dx) > 40) {
+      reviewStep(dx < 0 ? 1 : -1);
+    } else {
+      const now = Date.now();
+      const dist = reviewLastTapX == null ? Infinity : Math.hypot(reviewTouch.x - reviewLastTapX, reviewTouch.y - reviewLastTapY);
+      if (now - reviewLastTapTime < 300 && dist < 30) {
+        reviewSetZoom(reviewZoom > 1 ? 1 : 2.5);
+        reviewLastTapTime = 0;
+      } else {
+        reviewLastTapTime = now; reviewLastTapX = reviewTouch.x; reviewLastTapY = reviewTouch.y;
+      }
+    }
+  }
+  reviewTouch = null;
+}, {passive: true});
 
 // ---- The studio: an office the lanes walk around in (card #88) -----------------------
 // A second view of the same data `render()` already has. Toggled by one button; `render()`
@@ -2344,7 +2627,7 @@ const WALK_SPEED = 180;            // px per second
 const BREAK = {padTop: 104, rowH: 68, padBottom: 30};
 const BOSS = {padTop: 200, rowH: 100, padBottom: 30};
 const BOSS_EMPTY_H = 130;          // nobody waiting: the wall, the desk
-const TRAY_CHIP_H = 34, TRAY_PIC_H = 146;   // the in-tray: chips alone, or chips and a compact carousel
+const TRAY_CHIP_H = 34;   // the in-tray: one row of chips, each with its own Review button
 const TEAM = {padTop: 108, rowH: 76, padBottom: 24};
 const BREAK_EXTRA = 2;             // free spots in the break room, so a wanderer has somewhere to go
 
@@ -2435,13 +2718,11 @@ function computeStudio(state) {
   const nBreak = breakers.length + sleepers.length + BREAK_EXTRA;
   const breakH = roomHeight(nBreak, breakW, BREAK);
   // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
-  // row of chips, or the chips and the compact carousel when a card has a picture; one
-  // more line per row the chips wrap onto.
+  // row of chips, each with its own Review button when a card has a picture (#100).
   const stuck = projects.flatMap(p => p.stuck || []);
   const chipRows = Math.max(1, Math.ceil((stuck.length * 46 + projects.filter(p => (p.stuck || []).length).length * 40 + 48)
                                           / Math.max(80, bossW - 2 * ROOM_PAD - 16)));
-  const trayH = !stuck.length ? 0
-    : (stuck.some(s => stuckSlides(s).length) ? TRAY_PIC_H : TRAY_CHIP_H) + (chipRows - 1) * 18;
+  const trayH = !stuck.length ? 0 : TRAY_CHIP_H + (chipRows - 1) * 18;
   const bossSpec = {...BOSS, padTop: BOSS.padTop + trayH};
   const bossH = needs.length ? roomHeight(needs.length, bossW, bossSpec) : BOSS_EMPTY_H + trayH + (trayH ? 14 : 0);
   const topH = Math.max(breakH, bossH, 170);
@@ -2653,18 +2934,26 @@ function newCharacter(container, cls) {
 }
 // The mockup held up over a waving character's head — the carousel's own current slide
 // when this card has one (card #96: so flipping it in Steve's in-tray flips it here too),
-// the old single thumbnail otherwise (a demo fixture with no `rounds` of its own).
+// the old single thumbnail otherwise (a demo fixture with no `rounds` of its own). Either
+// way it is tappable: the same overlay as the Review button, never a click through to the
+// card (card #100's own Detail note: "the podium figure keeps holding the first picture
+// as a thumbnail; tapping it opens the same overlay").
 function heldMockupHTML(l, stuckByCard) {
-  const entry = l.card && stuckByCard && stuckByCard[l.card.number];
+  if (!l.card) return "";
+  const entry = stuckByCard && stuckByCard[l.card.number];
+  let img;
   if (entry) {
     const {slide} = currentSlide(entry);
-    if (slide) {
-      return `<div class="character-mockup"><img class="mockup-thumb" src="${esc(slide.url)}"
-        alt="${esc(slide.label || "Mockup to approve")}" loading="lazy" onerror="this.style.display='none'"></div>`;
-    }
-    return "";
+    if (!slide) return "";
+    img = `<img class="mockup-thumb" src="${esc(slide.url)}"
+      alt="${esc(slide.label || "Mockup to approve")}" loading="lazy" onerror="this.style.display='none'">`;
+  } else {
+    const first = (l.images || [])[0];
+    if (!first) return "";
+    img = `<img class="mockup-thumb" src="${esc(first)}" alt="Mockup to approve" loading="lazy" onerror="this.style.display='none'">`;
   }
-  return mockupThumbsHTML((l.images || []).slice(0, 1), "character-mockup");
+  const fallback = entry ? "" : ` data-review-images='${esc(JSON.stringify((l.images || []).slice(0, 1)))}'`;
+  return `<div class="character-mockup" data-review="${l.card.number}"${fallback}>${img}</div>`;
 }
 function renderCharacters(lanes, stuckByCard) {
   const container = document.getElementById("room-characters");
@@ -2709,22 +2998,19 @@ function renderShipDock(ships) {
 
 // The in-tray on Steve's desk (card #96: "in each board's row, on the floor page and in
 // the studio" — in the office, the cards waiting on him are on his desk): every Stuck
-// card's chip, always, grouped by board, and one carousel for whichever of them actually
-// has a picture to show (a direction linked only as a `.html` mockup has none yet, and
-// still gets its chip with no frame beside it).
+// card's chip, always, grouped by board, each with its own Review button (#100) when it
+// has a picture behind it — a direction linked only as a `.html` mockup has none yet, and
+// still gets its chip with no button beside it.
 function renderRoomStuck(projects, boss) {
   const groups = [];
   for (const p of projects || []) if ((p.stuck || []).length) groups.push(p);
   if (!groups.length || !boss.tray) { document.getElementById("room-stuck").innerHTML = ""; return; }
   const chips = groups.map(p => `<span class="tray-board">${esc(p.name)}</span>` + p.stuck.map(s =>
-    `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}</a>`
+    `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}</a>${reviewButtonHTML(s.card.number, null, "tray")}`
   ).join("")).join("");
-  const withPics = groups.flatMap(p => p.stuck).filter(s => stuckSlides(s).length);
-  const pic = withPics.length ? carouselHTML(withPics[0], true) : "";
   document.getElementById("room-stuck").innerHTML = `<div class="row-stuck in-tray"
       style="left:${boss.x + boss.tray.x}px;top:${boss.y + boss.tray.y}px;width:${boss.tray.w}px">
     <div class="row-stuck-chips"><span class="tray-label">In-tray</span>${chips}</div>
-    ${pic}
   </div>`;
 }
 
@@ -2822,8 +3108,6 @@ function renderStudio(state) {
   lastState = state;
   const office = computeStudio(state);
   renderRooms(office, state);
-  const stuckByCard = {};
-  for (const p of state.projects || []) for (const s of p.stuck || []) stuckByCard[s.card.number] = s;
   renderRoomDesks(office.lanes);
   renderRoomStuck(state.projects, office.boss);
   renderCharacters(office.lanes, stuckByCard);
@@ -2974,6 +3258,9 @@ function openBubble(el, lane, ship, name) {
   bubbleTimer = setInterval(pollBubble, ship ? 15000 : 2000);
 }
 document.getElementById("room-characters").addEventListener("click", (e) => {
+  // The held mockup is tappable on its own (card #100): the overlay, never the bubble.
+  const mockup = e.target.closest("[data-review]");
+  if (mockup) { e.stopPropagation(); openReviewFromEl(mockup); return; }
   const el = e.target.closest(".character");
   if (!el) return;
   e.stopPropagation();

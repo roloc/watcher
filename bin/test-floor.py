@@ -192,12 +192,15 @@ def write_log(state_dir, issue, minutes_ago, **kw):
 watcher_dir = lane_dir("watcher")
 open(os.path.join(watcher_dir, "PAUSE"), "w").close()
 
-# riffmap: a card checked out right now -> working
+# riffmap: a card checked out right now -> working, AND a PAUSE file beside it (card #110:
+# a deploy or a hand pause mid-tick never means idle) -> still working, plus a pausing flag
 riffmap_dir = lane_dir("riffmap")
 current_path = os.path.join(riffmap_dir, "current")
 with open(current_path, "w") as f:
     f.write("501\n")
 set_mtime(current_path, 17)
+with open(os.path.join(riffmap_dir, "PAUSE"), "w") as f:
+    f.write("deploy abc1234\n")
 
 # riffmap-design: died 2 minutes ago -> sleeping (inside the 10-minute retry window)
 design_dir = lane_dir("riffmap-design")
@@ -315,6 +318,14 @@ check("riffmap: card #501, its board Stage, ~17 minutes", d["card"]["number"] ==
       and d["stage"] == "Building" and 16 <= d["minutes"] <= 18, d)
 check("riffmap: links straight to the card", d["link"] == "https://github.com/roloc/riffmap/issues/501")
 check("riffmap: unit_active reported True", d.get("unit_active") is True)
+check("card #110: a PAUSE file beside a held card never flips the pill — still working",
+      d["pill"] == "working" and d.get("pausing") is True, d)
+check("card #110: the pausing reason is the PAUSE file's own first line",
+      d.get("pausing_reason") == "deploy abc1234", d)
+
+d = lanes_by_name[("watcher", "watcher")]
+check("card #110: a PAUSE file with no card held is still a plain paused desk, no pausing flag",
+      "pausing" not in d and "pausing_reason" not in d, d)
 
 d = lanes_by_name[("riffmap", "riffmap-design")]
 check("riffmap-design: sleeping (died 2 minutes ago, inside the 10-minute retry window)",
@@ -350,6 +361,18 @@ check("fourth: needs_steve, not sleeping — the board (a spawner park, no Stuck
       d["pill"] == "needs_steve" and d["card"]["number"] == 99, d)
 check("fourth: no mockup in its comment — an empty list, never a missing field",
       d["images"] == [], d)
+
+print("5b. _pause_reason: the PAUSE file's own first line, never more, '' for a hand-touch")
+reason_dir = tempfile.mkdtemp(prefix="watcher-floor-pause-")
+hand = os.path.join(reason_dir, "HAND")
+open(hand, "w").close()
+check("a hand-touched (empty) PAUSE file: ''", floor._pause_reason(hand) == "")
+multi = os.path.join(reason_dir, "MULTI")
+with open(multi, "w") as f:
+    f.write("deploy c920516\nsome second line that must never surface\n")
+check("only the first line, trimmed", floor._pause_reason(multi) == "deploy c920516")
+check("a path that does not exist: '', never a crash",
+      floor._pause_reason(os.path.join(reason_dir, "MISSING")) == "")
 
 print("6. header and counts")
 check("needs_steve_total counts every Stuck CARD on every board (riffmap: #777 and #778; "
@@ -571,9 +594,6 @@ def fake_git(live, target):
 def dstate():
     return floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(L, T))
 def reset():
-    for f_ in ("draining", "ready"):
-        try: os.remove(os.path.join(DS, f_))
-        except OSError: pass
     for d_ in ("held", "evals"):
         for f_ in os.listdir(os.path.join(DS, d_)): os.remove(os.path.join(DS, d_, f_))
 reset()
@@ -582,14 +602,9 @@ check("the box on main's newest commit is live",
 check("behind with nothing recorded yet is checking", dstate()["state"] == "checking")
 open(os.path.join(DS, "evals", T), "w").write("fail 1")
 check("one suite failure is testing (the retry)", dstate()["state"] == "testing")
-open(os.path.join(DS, "ready"), "w").write(f"{L} 1790000000")
-check("ready and behind is waiting for idle lanes", dstate()["state"] == "waiting")
-open(os.path.join(DS, "draining"), "w").write(f"{T} {L} ")
-check("a drain in progress is swapping", dstate()["state"] == "swapping")
+# Card #106: there is no "waiting for idle lanes"/"swapping" state any more — a release is
+# cloned, installed and the pointer flipped inside one run, never split across a pause.
 open(os.path.join(DS, "held", T), "w").write("58")
-check("...even when that commit was held and is shipping through deploy-anyway",
-      dstate()["state"] == "swapping")
-os.remove(os.path.join(DS, "draining"))
 check("a held commit that is now live is live, not held (review finding)",
       floor.deploy_status("/x", DS, "roloc/watcher", git=fake_git(T, T))["state"] == "live")
 h = dstate()
@@ -604,6 +619,15 @@ check("a deployer read that blows up leaves the page up, with no deploy block",
       all("deploy" not in p["ship"] for p in state17c["projects"]))
 check("a checkout that is not a repo shows no deployer", floor.deploy_status("/x", DS, "r/w", git=lambda d, *a: "") is None)
 
+# Card #106: a lane's own $WATCHER_STATE/release (bin/spawn.sh writes it at process start)
+# is read for the Ship desk's per-lane view, box-wide — "riffmap" is on the live release,
+# "riffmap-design" is still on the one before it, "watcher" has never polled since one was
+# adopted at all (no file).
+os.makedirs(os.path.join(STATE, "riffmap"), exist_ok=True)
+os.makedirs(os.path.join(STATE, "riffmap-design"), exist_ok=True)
+open(os.path.join(STATE, "riffmap", "release"), "w").write(L[:12])
+open(os.path.join(STATE, "riffmap-design", "release"), "w").write(T[:12])
+
 state17 = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
                             ask_fn=stub_ask, now=NOW, box_name="test-box",
                             ci_fetcher=lambda repo: {"sha": S, "runs": [("verify", "completed", "success")]},
@@ -614,6 +638,13 @@ check("the deployer shows on the project whose repo it ships, only", "deploy" in
       and not any("deploy" in p["ship"] for p in others))
 check("a held deploy counts toward 'need Steve'",
       state17["header"]["needs_steve_total"] == state15["header"]["needs_steve_total"] + 1)
+lane_releases = {l["lane"]: l["release"] for l in rm17["ship"]["lanes"]}
+check("the ship desk names every lane on the box, not just this project's own",
+      {"watcher", "riffmap", "riffmap-design", "riffmap-triage", "second", "third"} <= set(lane_releases),
+      lane_releases)
+check("a lane already on the live release names it", lane_releases["riffmap"] == L[:12])
+check("a lane still on an older one names that instead", lane_releases["riffmap-design"] == T[:12])
+check("a lane that has never recorded one is None, not a crash", lane_releases["watcher"] is None)
 def keys(o):
     if isinstance(o, dict):
         for k, v in o.items():

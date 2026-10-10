@@ -1,53 +1,67 @@
 #!/usr/bin/env bash
-# Deploy the watcher's `main` onto this box by itself, when every lane is idle. Run as root
-# by watcher-deploy.timer every few minutes; one run is one step, and it is idempotent, so
-# a run that stops half way is picked up by the next. Nobody runs deploy/rollout.sh by hand
-# any more (Steve, September 28, 2026: "I don't want to run rollout ever").
+# Deploy the watcher's `main` onto this box by itself, without ever waiting for a lane to go
+# idle. Run as root by watcher-deploy.timer every few minutes; one run is one step, and it
+# is idempotent, so a run that stops half way is picked up by the next. Nobody runs
+# deploy/rollout.sh by hand any more (Steve, September 28, 2026: "I don't want to run
+# rollout ever").
 #
 # Why this is on the box and not a CI job: a CI job that deploys here needs a GitHub runner
 # on the box that holds the bot's GitHub login and the Claude token, and ci.yml's rule is
 # that PR code never runs there. So CI decides WHETHER a commit may ship (its required check
-# is green) and this decides WHEN (every lane idle). It only ever reads GitHub.
+# is green) and this decides WHEN (as soon as it can). It only ever reads GitHub.
+#
+# Card #106: each shipped commit gets its OWN folder under $RELEASES_DIR, never touched
+# again once made, and $WATCHER_DIR (/opt/watcher) is a symlink — "the pointer" — this
+# script flips onto the new one's folder. A lane never has its folder changed under it: a
+# tick is pinned to whatever $WATCHER_DIR resolved to when bin/spawn.sh's own process
+# started (see its own comment), so flipping the pointer disturbs nothing running. Each
+# lane's own idle poll notices the pointer moved and re-launches itself from the new folder
+# at its own next tick — no pause, no drain, no wait, here or there. (Before this card, this
+# script paused every lane and waited for every running tick to finish before moving
+# /opt/watcher in place; a deploy that landed while a lane was mid-tick could cost that lane
+# over an hour of idle time, times every lane on the box.)
 #
 # One run, in order:
-#   1. Fetch origin/main. Nothing new, and no drain in progress: exit quietly.
-#   2. The deploy checkout (/opt/watcher) must be clean and able to fast-forward.
-#   3. The commit's required check (`verify`) must be green. Pending: wait for a later run.
-#   4. The replay suite (bin/eval.sh) runs in a SCRATCH clone at that exact commit, before
+#   1. Fetch origin/main. Nothing new: exit quietly.
+#   2. The commit's required check (`verify`) must be green. Pending: wait for a later run.
+#   3. The replay suite (bin/eval.sh) runs in a SCRATCH clone at that exact commit, before
 #      anything goes live — the suite copies the prompts from the checkout it runs in, so
 #      this tests the new prompts, not the ones lanes are already using. Skipped when the
 #      commits touch nothing a model reads. A fail is retried once (a live suite has flakes,
 #      roloc/watcher#44); a second fail holds the commit.
-#   4b. THE CANARY STAGE (card #46), only when the commit touches what a model reads and at
+#   3b. THE CANARY STAGE (card #46), only when the commit touches what a model reads and at
 #      least one active lane's project file sets LANE_CHANNEL=canary: move the canary
 #      checkout (/opt/watcher-canary — a second, independent clone; see bin/spawn.sh's own
-#      LANE_CHANNEL shim) onto the commit and restart ONLY its lane(s), before /opt/watcher
-#      moves at all. A run later sees the soak through: DEPLOY_CANARY_SOAK_TICKS clean ticks
-#      on those lanes promotes (falls through to step 5 below); DEPLOY_CANARY_QUIET_MIN
-#      minutes with no canary work at all promotes anyway, so a quiet Watcher board cannot
-#      hold every other project back forever; one tick that does not finish clean (killed, a
-#      subtype of error_during_execution, or parked after 2 attempts) rolls the canary
-#      checkout back to the commit before it and holds this one exactly like step 3/4 would.
-#      A project with no canary lane, or a commit that skips the suite in step 4, skips this
-#      stage entirely and promotes straight away — canary is additive, never a new gate on
-#      an ordinary deploy.
-#   5. Wait until no lane on the box is running a tick. Then pause every lane (a PAUSE file
-#      that says "deploy <sha>"), wait one poll interval so a spawner that was mid-poll
-#      cannot launch behind our back, and check again. If lanes stay busy for
-#      DEPLOY_DRAIN_AFTER_MIN, pause anyway and let the running ticks finish on their own.
-#   6. Fast-forward /opt/watcher to exactly that commit, re-run install.sh without its pull,
-#      restart every running lane, start a lane this commit added, and remove only the
-#      PAUSE files this script wrote — a PAUSE Steve made himself stays.
+#      LANE_CHANNEL shim) onto the commit and restart ONLY its lane(s), before the pointer
+#      moves at all. This stage is unchanged by card #106 — it still pauses and restarts its
+#      own lane(s) directly, on purpose: it is bake-testing a risky change on a small,
+#      consenting set of lanes, not an ordinary deploy. A run later sees the soak through:
+#      DEPLOY_CANARY_SOAK_TICKS clean ticks on those lanes promotes (falls through to step 4
+#      below); DEPLOY_CANARY_QUIET_MIN minutes with no canary work at all promotes anyway, so
+#      a quiet Watcher board cannot hold every other project back forever; one tick that does
+#      not finish clean (killed, a subtype of error_during_execution, or parked after 2
+#      attempts) rolls the canary checkout back to the commit before it and holds this one
+#      exactly like step 2/3 would. A project with no canary lane, or a commit that skips the
+#      suite in step 3, skips this stage entirely and promotes straight away — canary is
+#      additive, never a new gate on an ordinary deploy.
+#   4. Clone the commit into its own folder under $RELEASES_DIR, run that folder's own
+#      install.sh (without a pull — this clone IS the commit), and flip the pointer onto it.
+#      A sweep then removes every older release folder no lane's own state still names,
+#      always keeping the newest two.
 #
-# A HELD commit (red check, suite failing twice, a checkout that cannot fast-forward, or a
-# canary tick that did not finish clean) gets one card on the watcher's board in Stuck, in
-# the talking-to-steve.md shape. Moving it to In progress lets the watcher fix the cause;
-# adding the `deploy-anyway` label ships it (and skips both step 4 and the canary stage).
-# Nothing here ever signals a tick, force-pushes, or posts to Discord except through that
-# card's move (board.py posts the Stuck alert, as it does for every card).
+# A HELD commit (red check, the suite failing twice, or a canary tick that did not finish
+# clean) gets one card on the watcher's board in Stuck, in the talking-to-steve.md shape.
+# Moving it to In progress lets the watcher fix the cause; adding the `deploy-anyway` label
+# ships it (and skips both the suite and the canary stage). Nothing here ever signals a
+# tick, force-pushes, or posts to Discord except through that card's move (board.py posts
+# the Stuck alert, as it does for every card).
 set -uo pipefail
 
 WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
+# Card #106: every release this script ever makes lives here, named by its commit (the
+# first 12 hex chars are plenty — see release_dir). $WATCHER_DIR becomes a symlink into one
+# of these; never a release's own real directory.
+RELEASES_DIR="${DEPLOY_RELEASES_DIR:-/opt/watcher-releases}"
 STATE_ROOT="${WATCHER_STATE_ROOT:-/home/watcher/.local/state/watcher}"
 DSTATE="${DEPLOY_STATE:-/var/lib/watcher-deploy}"
 SCRATCH_ROOT="${DEPLOY_SCRATCH:-/home/watcher/.cache/watcher-deploy}"
@@ -57,8 +71,6 @@ BRANCH="${DEPLOY_BRANCH:-main}"
 CHECK="${DEPLOY_CHECK:-verify}"
 # The project whose repo is this one, and whose board gets a held commit's card.
 SELF_PROJECT="${DEPLOY_PROJECT:-watcher}"
-GRACE="${DEPLOY_GRACE_SEC:-75}"                # longer than one spawner poll (60 s)
-DRAIN_AFTER="${DEPLOY_DRAIN_AFTER_MIN:-240}"   # lanes busy this long: pause and drain
 EVALS="${DEPLOY_EVALS:-1}"                     # 0 skips the replay suite entirely
 # What a model reads: a commit range touching none of these skips the suite.
 EVAL_PATHS="${DEPLOY_EVAL_PATHS:-commands agents docs evals bin/eval.sh CLAUDE.md}"
@@ -151,33 +163,12 @@ tick_running() {
   return 1
 }
 
-busy_lanes() { local l; for l in $(active_lanes); do tick_running "$l" && echo "$l"; done; }
-
+# Card #106: the ordinary deploy path no longer pauses or waits for any lane (every lane
+# keeps its own folder for the whole life of its current tick, so nothing it is doing can be
+# disturbed) — only the canary stage still pauses, and only the lane(s) that opted into it
+# (canary_pause/canary_unpause, below), which is why `ours` and PAUSE-file bookkeeping
+# survive here for that one caller.
 ours() { head -c 7 "$1" 2>/dev/null | grep -q '^deploy '; }
-
-pause_all() {
-  local sha="$1" l p
-  : > "$DSTATE/paused"
-  for l in $(active_lanes); do
-    p="$STATE_ROOT/$l/PAUSE"
-    if [ -f "$p" ] && ! ours "$p"; then
-      say "watcher@$l was already paused by hand; leaving its PAUSE as it is"
-      continue
-    fi
-    mkdir -p "$STATE_ROOT/$l"
-    echo "deploy $sha" > "$p"; chown "$RUN_AS:$RUN_AS" "$STATE_ROOT/$l" "$p" 2>/dev/null
-    echo "$l" >> "$DSTATE/paused"
-  done
-}
-
-unpause_ours() {
-  local l p
-  while read -r l; do
-    p="$STATE_ROOT/$l/PAUSE"
-    ours "$p" && rm -f "$p"
-  done < "$DSTATE/paused"
-  rm -f "$DSTATE/paused"
-}
 
 # --- a held commit --------------------------------------------------------------------------
 
@@ -345,7 +336,7 @@ canary_needed() {
 # A lane with a tick still running is skipped entirely, not judged: bin/spawn.sh creates
 # its result json by redirection AT LAUNCH (`launch_tick`), so it sits at 0 bytes for the
 # tick's whole run — indistinguishable, by content alone, from a tick the watchdog killed
-# before it could write anything. `tick_running` (already used by busy_lanes) is what the
+# before it could write anything. `tick_running` (already used by canary_busy) is what the
 # deployer everywhere else uses to tell "still going" from "gone"; once it says gone, THEN
 # an empty or unparseable file really does mean killed, and is judged as such below.
 canary_died() {
@@ -415,14 +406,15 @@ canary_ticks() {
   echo "$n"
 }
 
-# canary_busy — the canary lane(s) currently running a tick, same predicate busy_lanes uses.
+# canary_busy — the canary lane(s) currently running a tick.
 canary_busy() { local l; for l in $(canary_lanes); do tick_running "$l" && echo "$l"; done; }
 
-# canary_pause/canary_unpause <sha> — pause_all/unpause_ours, scoped to only the canary
-# lane(s): moving the canary checkout out from under a card in flight is exactly the
-# restart-kills-the-cleanup bug active_lanes' own comment warns about, so a lane with a
-# tick running is never restarted — it is paused (stops picking up new work) and waited on,
-# the same shape the stable promote below already uses for every lane.
+# canary_pause/canary_unpause <sha> — scoped to only the canary lane(s): moving the canary
+# checkout out from under a card in flight is exactly the restart-kills-the-cleanup bug
+# active_lanes' own comment warns about, so a lane with a tick running is never restarted —
+# it is paused (stops picking up new work) and waited on. The stable release path (swap,
+# below) needs none of this any more (card #106): it never touches a running tick's folder
+# at all, so it never pauses or waits for one.
 canary_pause() {
   local sha="$1" l p
   for l in $(canary_lanes); do
@@ -523,34 +515,154 @@ canary_stage() {
   return 1
 }
 
-# --- the swap -------------------------------------------------------------------------------
+# --- the release ----------------------------------------------------------------------------
 
-swap() {
-  local sha="$1" cur="$2" force="$3" lanes projects l f p new=()
-  if [ "$force" = force ]; then
-    wgit "reset -q --hard $sha" || return 1
-  elif ! wgit "merge -q --ff-only $sha"; then
+# release_dir <sha> — the folder a given commit's release lives in, named by the first 12
+# hex chars, the same abbreviation every scratch/canary clone in this file already uses.
+release_dir() { printf '%s/%s' "$RELEASES_DIR" "${1:0:12}"; }
+
+# adopt_plain_checkout — a one-time migration. Every box that existed before card #106 has
+# $WATCHER_DIR as a real checkout, not a pointer; the first run of this code folds it into
+# $RELEASES_DIR under its own HEAD and replaces it with a symlink, so every commit after
+# this one can flip the pointer instead of pausing. A no-op once $WATCHER_DIR is already a
+# symlink — which is every run after the first.
+adopt_plain_checkout() {
+  [ -L "$WATCHER_DIR" ] && return 0
+  [ -d "$WATCHER_DIR/.git" ] || return 0
+  local sha dir
+  sha="$(wgit 'rev-parse HEAD')"
+  dir="$(release_dir "$sha")"
+  mkdir -p "$RELEASES_DIR"; chown "$RUN_AS:$RUN_AS" "$RELEASES_DIR" 2>/dev/null
+  # `mv`, not `as_user "mv …"`: $WATCHER_DIR's PARENT (/opt) is root-owned, so the watcher
+  # user cannot rename an entry inside it — only this script's own root can (found in
+  # review: the as_user form failed silently here on a real box, every run, forever, with
+  # the pointer never created and no hold to say why). The directory's own contents stay
+  # watcher:watcher; only the rename needs root.
+  if [ ! -d "$dir" ]; then
+    mv "$WATCHER_DIR" "$dir" || { say_once "adopt-fail $sha" "could not adopt $WATCHER_DIR as its own first release; leaving it as a plain checkout"; return 1; }
+  fi
+  ln -sfn "$dir" "$WATCHER_DIR"
+  echo "${sha:0:12}" >> "$DSTATE/releases"
+  say "adopted the existing checkout as its first release, ${sha:0:7}, at $dir"
+}
+
+# release_new <sha> — a fresh, FULLY INDEPENDENT clone of exactly that commit under
+# $RELEASES_DIR. Never --shared: a release outlives the one it was made from (sweep_releases,
+# below, may remove an older release while a newer one made with --shared from it is still
+# kept — alternates would then point a live release at a deleted one's objects) and the
+# pointer it is cloned via can itself move before this finishes making one release's own
+# existence depend on another's. Reused as-is if a previous run already made it (a run that
+# died between the clone and the pointer flip) rather than cloned twice. Prints the folder on
+# success; a failed clone cleans up after itself so a half-made folder is never mistaken for
+# a finished one on a later run.
+release_new() {
+  local sha="$1" dir real_origin; dir="$(release_dir "$sha")"
+  if [ -d "$dir/.git" ]; then echo "$dir"; return 0; fi
+  mkdir -p "$RELEASES_DIR"; chown "$RUN_AS:$RUN_AS" "$RELEASES_DIR" 2>/dev/null
+  # Cloning locally from $WATCHER_DIR is only ever for a fast, no-network copy of the
+  # objects — the new release's own `origin` must still be the TRUE upstream, read from
+  # $WATCHER_DIR before the clone touches anything, and set explicitly after: a plain local
+  # clone's own origin defaults to the SOURCE PATH, which is the pointer itself (or a release
+  # before this one), never the real remote. Left at that default, this release's own next
+  # `git fetch origin` would fetch from wherever the pointer happens to be pointing by
+  # then — itself, most of the time — and never see a commit newer than its own.
+  real_origin="$(wgit 'remote get-url origin')"
+  if as_user "git clone -q '$WATCHER_DIR' '$dir' && git -C '$dir' remote set-url origin '$real_origin' && git -C '$dir' checkout -q --detach $sha" >&2; then
+    echo "$dir"
+  else
+    as_user "rm -rf '$dir'" >&2
     return 1
   fi
+}
+
+# sweep_releases — removes every folder under $RELEASES_DIR except the newest two (by
+# deploy ORDER — $DSTATE/releases, appended to by swap() every time the pointer flips, one
+# sha per line; two deploys inside the same second have identical mtimes, so order on disk
+# is the only reliable "current one and the one before") and any a lane's own state still
+# names (bin/spawn.sh writes $WATCHER_STATE/<lane>/release at its own process start — see
+# its comment there — so a lane whose current tick is still running from an older release
+# keeps that release safe from the sweep for as long as the tick runs). Best-effort: never
+# fails the deploy that calls it, and a folder it cannot list or remove is just left for
+# the next run.
+sweep_releases() {
+  [ -d "$RELEASES_DIR" ] || return 0
+  local inuse="" f name d newest l
+  # Only a lane that is actually running right now can protect a release this way — a
+  # lane's own state directory outlives the lane itself (a disabled or removed unit never
+  # cleans up after itself), and a stale release/ file in it would otherwise pin an old
+  # release against the sweep forever.
+  for l in $(active_lanes); do
+    f="$STATE_ROOT/$l/release"
+    [ -f "$f" ] || continue
+    name="$(cat "$f" 2>/dev/null)"
+    [ -n "$name" ] && inuse="$inuse
+$name"
+  done
+  newest="$(tail -2 "$DSTATE/releases" 2>/dev/null)"
+  for d in "$RELEASES_DIR"/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    printf '%s\n' "$inuse" | grep -qxF "$name" && continue
+    printf '%s\n' "$newest" | grep -qxF "$name" && continue
+    as_user "rm -rf '$d'" && say "swept old release $name"
+  done
+}
+
+# swap <target sha> <commit the box was on> <force> — clone, install, flip. Never pauses or
+# waits for a lane: a running tick stays pinned to the folder it already has (bin/spawn.sh's
+# own comment on WATCHER_HERE), so moving the pointer disturbs nothing in flight.
+swap() {
+  local tgt="$1" cur="$2" force="$3" dir lanes projects l f p new=()
+  adopt_plain_checkout || return 1
+  dir="$(release_dir "$tgt")"
+  if [ ! -d "$dir/.git" ]; then
+    dir="$(release_new "$tgt")" || return 1
+  fi
+  if [ "$force" = force ]; then
+    as_user "git -C '$dir' reset -q --hard $tgt" || return 1
+  fi
+  # Never silently nest a release INSIDE $WATCHER_DIR: adopt_plain_checkout above is what
+  # turns a real directory there into a symlink, and if it could not (a permission problem,
+  # logged there already), $WATCHER_DIR is still a real directory here — `ln -sfn` onto
+  # one does not fail, it creates the link AS AN ENTRY INSIDE it (found in review: that
+  # ran clean, logged "now points at", and never actually moved the box, forever, with
+  # nothing holding the commit to say why).
+  if [ -e "$WATCHER_DIR" ] && [ ! -L "$WATCHER_DIR" ]; then
+    say "$WATCHER_DIR is a real directory, not the pointer — refusing to flip onto it; fix by hand"
+    return 1
+  fi
+  # The pointer flips BEFORE install.sh runs: install.sh's own unconditional restart of
+  # watcher-floor.service (never drained or paused) resolves /opt/watcher at the moment IT
+  # restarts the unit — flip first, and that restart already serves the new code; flip
+  # after, and the floor page runs one release behind until the NEXT deploy (found in
+  # review). install.sh is still told WATCHER_DIR="$dir" explicitly either way, so its own
+  # self-references never depend on the pointer having moved.
+  ln -sfn "$dir" "$WATCHER_DIR" || { say "could not flip $WATCHER_DIR onto $dir"; return 1; }
+  echo "${tgt:0:12}" >> "$DSTATE/releases"
   lanes="$(active_lanes | tr '\n' ' ')"
   projects="$(for l in $lanes; do project_of "$l"; done | sort -u | tr '\n' ' ')"
   # shellcheck disable=SC2086
-  INSTALL_NO_PULL=1 "$WATCHER_DIR/deploy/install.sh" $projects >/dev/null \
-    || say "install.sh reported a problem (see above); restarting the lanes anyway"
-  for l in $lanes; do
-    systemctl restart "watcher@$l" && say "watcher@$l restarted on ${sha:0:7}"
-  done
-  # A lane file this commit added, for a project already running, is started last, once
-  # every sibling is on the new code (rollout.sh step 5 explains why the order matters).
+  WATCHER_DIR="$dir" INSTALL_NO_PULL=1 "$dir/deploy/install.sh" $projects >/dev/null \
+    || say "install.sh reported a problem (see above); the pointer already points at ${tgt:0:7}"
+  say "$WATCHER_DIR now points at ${tgt:0:7}; each lane picks it up at its own next idle poll"
+  # A lane file this commit added, for a project already running: started right away, the
+  # same as every other lane adopting the new code at its own pace — unlike before this
+  # card, nothing here waits for a sibling to be on the new code first. The one window that
+  # leaves: a sibling still mid-tick on an OLDER commit, with that commit's own (possibly
+  # non-disjoint) LANE_AGENTS split, could in principle race this freshly-started lane for
+  # one card, for as long as that sibling's current tick runs. Splitting an existing lane's
+  # filter and adding its new sibling in the SAME commit is rare and deliberate; doing it as
+  # two commits (split first, add the lane once that is live) avoids the window entirely.
   while read -r f; do
-    [ -n "$f" ] && [ -f "$WATCHER_DIR/$f" ] && is_lane_file "$f" || continue
+    [ -n "$f" ] && [ -f "$dir/$f" ] && is_lane_file "$f" || continue
     l="$(basename "$f" .env)"; p="$(project_of "$l")"
     [ "$l" != "$p" ] && echo " $lanes " | grep -q " $p " && new+=("$l")
-  done <<< "$(wgit "diff --name-only --diff-filter=A $cur $sha -- projects/")"
+  done <<< "$(wgit "diff --name-only --diff-filter=A $cur $tgt -- projects/")"
   for l in "${new[@]+"${new[@]}"}"; do
     rm -f "$STATE_ROOT/$l/PAUSE"
-    systemctl enable --now "watcher@$l" && say "watcher@$l is new in ${sha:0:7}; started"
+    systemctl enable --now "watcher@$l" && say "watcher@$l is new in ${tgt:0:7}; started"
   done
+  sweep_releases
   return 0
 }
 
@@ -558,104 +670,65 @@ swap() {
 
 main() {
   # install.sh chmods every script in bin/ and deploy/, so a file committed without its
-  # executable bit reads as a local change and every commit would be held as "the box's
-  # copy has changes of its own" (September 28, 2026: bin/test-deploy.sh held four
-  # commits for six hours). The mode is the installer's business, not git's.
+  # executable bit reads as a local change — the mode is the installer's business, not
+  # git's (September 28, 2026: bin/test-deploy.sh held four commits for six hours before
+  # this `config core.fileMode false` existed).
   wgit "config core.fileMode false" || true
   wgit "fetch -q origin $BRANCH" || { say_once fetch "fetch failed; trying again next run"; return 0; }
-  local cur tgt drain="" from="" force=""
+  local cur tgt force=""
   cur="$(wgit 'rev-parse HEAD')"; tgt="$(wgit "rev-parse origin/$BRANCH")"
-  # The drain record: "<sha> <the commit the box was on> [force]". Kept across runs, so a
-  # run that dies after the swap still knows which lane files the deploy added.
-  [ -f "$DSTATE/draining" ] && read -r drain from force < "$DSTATE/draining"
+  if [ "$cur" = "$tgt" ]; then say_once "live $cur" "live at ${cur:0:7}; nothing to deploy"; return 0; fi
 
-  if [ -z "$drain" ]; then
-    if [ "$cur" = "$tgt" ]; then rm -f "$DSTATE/ready"; say_once "live $cur" "live at ${cur:0:7}; nothing to deploy"; return 0; fi
+  # Card #106 removed the old "box's checkout must be clean and able to fast-forward" gate:
+  # a release is always a FRESH clone (release_new, above), never the live pointer's own
+  # checkout edited in place, so there is nothing left that can ever be dirty or diverged.
 
-    # 2. The deploy checkout: clean, and behind (never beside) the target.
-    if [ -n "$(wgit 'status --porcelain --untracked-files=no')" ] || ! wgit "merge-base --is-ancestor $cur $tgt"; then
-      if overridden "$tgt"; then
-        # Reset at the swap, with the lanes paused — not now, while they run.
-        say "deploy-anyway on ${tgt:0:7}: it replaces what is in $WATCHER_DIR at the swap"
-        force=force
-      else
-        hold "$tgt" "the box's copy of the watcher has changes of its own and cannot be updated cleanly" \
-          "\`git status\` in \`$WATCHER_DIR\` is not clean, or its \`HEAD\` (\`${cur:0:7}\`) is not an ancestor of \`${tgt:0:7}\`. B resets it to \`${tgt:0:7}\`, discarding what is there."
-        return 0
-      fi
-    fi
-
-    # 3. CI, and 4. the replay suite — both skipped for a commit Steve said to ship.
-    if ! overridden "$tgt"; then
-      case "$(check_state "$tgt")" in
-        pending) say_once "ci $tgt" "waiting for $CHECK on ${tgt:0:7}"; return 0 ;;
-        failure) hold "$tgt" "its $CHECK check failed" "The required check \`$CHECK\` did not pass on \`$tgt\`."; return 0 ;;
-      esac
-      case "$(evals_state "$cur" "$tgt")" in
-        pending|retry) return 0 ;;
-        fail) hold "$tgt" "the replay suite failed on it twice" \
-                "\`bin/eval.sh\` failed twice on \`$tgt\`. The last run's result lines:
+  # 2. CI, and 3. the replay suite — both skipped for a commit Steve said to ship.
+  if ! overridden "$tgt"; then
+    case "$(check_state "$tgt")" in
+      pending) say_once "ci $tgt" "waiting for $CHECK on ${tgt:0:7}"; return 0 ;;
+      failure) hold "$tgt" "its $CHECK check failed" "The required check \`$CHECK\` did not pass on \`$tgt\`."; return 0 ;;
+    esac
+    case "$(evals_state "$cur" "$tgt")" in
+      pending|retry) return 0 ;;
+      fail) hold "$tgt" "the replay suite failed on it twice" \
+              "\`bin/eval.sh\` failed twice on \`$tgt\`. The last run's result lines:
 \`\`\`
 $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -20)
 \`\`\`"
-              return 0 ;;
-      esac
-    fi
-
-    # 4b. The canary stage — skipped for a commit Steve said to ship, exactly like CI and
-    # the suite above, and for a commit/project canary_needed finds nothing to do for.
-    if ! overridden "$tgt" && canary_needed "$cur" "$tgt"; then
-      canary_stage "$tgt"
-      case $? in
-        1) return 0 ;;
-        2) hold "$tgt" "$CANARY_HOLD_WHY" "$CANARY_HOLD_DETAILS"; return 0 ;;
-      esac
-    fi
-
-    # 5. Idle, or waited long enough: pause everything and give any mid-poll spawner a beat.
-    # "Undeployed since": keyed on the commit the box is ON, so a stream of new commits on a
-    # busy box does not restart the clock and put the forced drain off for ever.
-    [ "$(cut -d' ' -f1 "$DSTATE/ready" 2>/dev/null)" = "$cur" ] || echo "$cur $(date +%s)" > "$DSTATE/ready"
-    local since busy
-    since="$(cut -d' ' -f2 "$DSTATE/ready")"
-    busy="$(busy_lanes | tr '\n' ' ')"
-    if [ -n "${busy// /}" ] && [ $(( $(date +%s) - since )) -lt $(( DRAIN_AFTER * 60 )) ]; then
-      say_once "busy $tgt $busy" "${tgt:0:7} is ready; waiting for idle lanes (busy: $busy)"
-      return 0
-    fi
-    [ -n "${busy// /}" ] && say "lanes busy for over $DRAIN_AFTER min; pausing them so ${tgt:0:7} can land when their ticks finish"
-    pause_all "$tgt"
-    echo "$tgt $cur $force" > "$DSTATE/draining"; drain="$tgt"; from="$cur"
-    say "paused the lanes for ${tgt:0:7}; waiting ${GRACE}s for any poll in progress"
-    sleep "$GRACE"
+            return 0 ;;
+    esac
+  else
+    force=force
+    say "deploy-anyway on ${tgt:0:7}: shipping it without the check or the suite"
   fi
 
-  # 6. Draining: every paused lane idle, then swap.
-  local busy
-  busy="$(busy_lanes | tr '\n' ' ')"
-  if [ -n "${busy// /}" ]; then
-    say_once "drain $drain $busy" "waiting for running ticks to finish before ${drain:0:7} (busy: $busy)"
+  # 3b. The canary stage — skipped for a commit Steve said to ship, exactly like CI and the
+  # suite above, and for a commit/project canary_needed finds nothing to do for. Unchanged
+  # by card #106: it still pauses and restarts only its own lane(s), directly.
+  if ! overridden "$tgt" && canary_needed "$cur" "$tgt"; then
+    canary_stage "$tgt"
+    case $? in
+      1) return 0 ;;
+      2) hold "$tgt" "$CANARY_HOLD_WHY" "$CANARY_HOLD_DETAILS"; return 0 ;;
+    esac
+  fi
+
+  # 4. Release it: clone, install, flip the pointer. No pause, no drain, no wait.
+  if ! swap "$tgt" "$cur" "$force"; then
+    say "could not release ${tgt:0:7}; trying again next run"
     return 0
   fi
-  if ! swap "$drain" "${from:-$(wgit 'rev-parse HEAD')}" "$force"; then
-    # Never leave the lanes paused on a swap that cannot happen: let them run on the old
-    # code, and the next run's checkout check holds the commit with a card.
-    say "could not move $WATCHER_DIR to ${drain:0:7}; un-pausing the lanes on the old code"
-    unpause_ours; rm -f "$DSTATE/draining"
-    return 0
-  fi
-  unpause_ours
-  rm -f "$DSTATE/draining" "$DSTATE/ready"
-  echo "$drain" > "$DSTATE/deployed"
-  close_held_except "$drain"
+  echo "$tgt" > "$DSTATE/deployed"
+  close_held_except "$tgt"
   # A canary soak record for the commit that just promoted has done its job; the next
   # commit that needs one starts a fresh clock rather than reading this stale one. Any
   # earlier canary-died commit is moot too, now that a newer, good one is live — it would
   # never be retried anyway (nothing ever fetches an older commit again), but a stale file
   # naming a superseded sha is one less thing to wonder about in the state directory.
-  [ "$(cut -d' ' -f1 "$DSTATE/canary-soak" 2>/dev/null)" = "$drain" ] && rm -f "$DSTATE/canary-soak" "$DSTATE/canary-prev"
+  [ "$(cut -d' ' -f1 "$DSTATE/canary-soak" 2>/dev/null)" = "$tgt" ] && rm -f "$DSTATE/canary-soak" "$DSTATE/canary-prev"
   rm -f "$DSTATE/canary-died"
-  say "deployed ${drain:0:7}; every lane un-paused"
+  say "deployed ${tgt:0:7}; live for new ticks"
 }
 
 exec 9> "$DSTATE/lock"

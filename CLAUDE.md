@@ -70,13 +70,16 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   (`steve-cheat-sheet.md`).
 - `deploy/autodeploy.sh` — **the deploy path.** A timer on the box (`watcher-deploy.timer`)
   ships `main` by itself: `verify` green on the commit, the replay suite green in a scratch
-  clone, then every lane idle. Nobody runs a deploy by hand. `bash bin/test-deploy.sh` is
+  clone, then a fresh release folder cloned, installed, and the `/opt/watcher` pointer
+  flipped onto it (card #106) — never a pause or a wait for a lane, which is pinned to
+  whatever folder it already has for the life of its own process and follows the new
+  pointer on its own, later. Nobody runs a deploy by hand. `bash bin/test-deploy.sh` is
   its offline suite (CI runs it); run it after touching the file. Everything it says goes
   to the journal and to `/var/lib/watcher-deploy/history`, a plain file the floor page's
   Ship desk reads for its Peek (the page's user cannot read the journal).
 - `deploy/`, `projects/` — the systemd unit, the installer, `rollout.sh` (the manual
-  fallback: deploy without
-  killing a running tick: pull, pause, wait, restart, un-pause, per lane), one env file per
+  fallback, the same release-folder shape as the timer's own run: clone, install, flip the
+  pointer — never a pause or a wait either), one env file per
   systemd instance. A project with two lanes has two files; the lane file sources the
   project file and sets `PROJECT_NAME` and `LANE_AGENTS`, nothing else. `projects/watcher.env`
   is the watcher's own lane; see "When the watcher works its own board" below.

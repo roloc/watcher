@@ -201,6 +201,13 @@ cat > "$BIN/claude" <<'STUB'
 echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
 echo "claude-env background-tasks-disabled=${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-unset}" >> "$TEST_LOG"
 echo "claude-env path-head=${PATH%%:*} real=${WATCHER_REAL_CLAUDE:-unset}" >> "$TEST_LOG"
+echo "claude-env watcher-home=${WATCHER_HOME:-unset}" >> "$TEST_LOG"
+# CLAUDE_FLIP_POINTER="<symlink>:<new target>" (card #106 test only): flips the pointer as
+# a side effect of this tick running, standing in for a deploy landing while the tick (in
+# the real world, a whole lane's process) is still going.
+if [ -n "${CLAUDE_FLIP_POINTER:-}" ]; then
+  ln -sfn "${CLAUDE_FLIP_POINTER#*:}" "${CLAUDE_FLIP_POINTER%%:*}"
+fi
 if [ "$1" = "-p" ] && [ "$2" = "reply ok" ]; then
   # untrusted_message: the real CLI names the exact key it checked in the warning, when
   # $CLAUDE_UNTRUSTED_KEY is set — round 4 fold-in, ensure_trust's parse_trust_key.
@@ -440,6 +447,7 @@ run() {
   CLAUDE_SUBTYPE="${CLAUDE_SUBTYPE:-success}" CLAUDE_RC="${CLAUDE_RC:-0}" \
   CLAUDE_COST="${CLAUDE_COST:-0.01}" CLAUDE_TURNS="${CLAUDE_TURNS:-1}" CLAUDE_DENIALS="${CLAUDE_DENIALS:-0}" \
   CLAUDE_TICK_SLEEP="${CLAUDE_TICK_SLEEP:-}" CLAUDE_BG_SLEEP_MARKER="${CLAUDE_BG_SLEEP_MARKER:-}" \
+  CLAUDE_FLIP_POINTER="${CLAUDE_FLIP_POINTER:-}" \
   CLAUDE_BG_TERM_COUNT_FILE="${CLAUDE_BG_TERM_COUNT_FILE:-}" \
   CLAUDE_UNTRUSTED_ONCE_MARKER="${CLAUDE_UNTRUSTED_ONCE_MARKER:-}" \
   CLAUDE_UNTRUSTED_ALWAYS="${CLAUDE_UNTRUSTED_ALWAYS:-}" \
@@ -2057,5 +2065,49 @@ if [ "${calls_cached:-99}" -le 3 ] 2>/dev/null; then
 else
   flunk "more real calls than expected with caching on" "$calls_cached"
 fi
+
+# ============================================================================
+echo "36. card #106: a tick is pinned to its own folder; the next one follows the pointer"
+# A pointer symlink ($TMP/pointer) onto a "v1" release folder, each holding its own copy
+# of this very spawn.sh — bin/spawn.sh's own WATCHER_HERE resolves THROUGH the pointer, so
+# invoking it as "$TMP/pointer/bin/spawn.sh" (rather than $SPAWN directly, as every other
+# test here does) is what makes this exercise the real path a deploy flips.
+POINTER_ROOT="$TMP/pointer-test"
+rm -rf "$POINTER_ROOT"; mkdir -p "$POINTER_ROOT/v1/bin" "$POINTER_ROOT/v2/bin"
+cp "$SPAWN" "$POINTER_ROOT/v1/bin/spawn.sh"; cp "$SPAWN" "$POINTER_ROOT/v2/bin/spawn.sh"
+chmod +x "$POINTER_ROOT/v1/bin/spawn.sh" "$POINTER_ROOT/v2/bin/spawn.sh"
+POINTER="$POINTER_ROOT/pointer"
+ln -s "$POINTER_ROOT/v1" "$POINTER"
+
+fresh_state
+board_list $'50\tP1\tbuilder\t-\tCard fifty'
+OLD_SPAWN="$SPAWN"; SPAWN="$POINTER/bin/spawn.sh"
+# The first (and, since board_list never changes, every later) tick flips the pointer to
+# v2 as a side effect of running — standing in for a deploy landing while this one lane's
+# process is still going. WATCHER_MAX_POLLS=2 keeps ONE spawn.sh process alive across both
+# polls, the same long-running shape the real daemon has.
+CLAUDE_FLIP_POINTER="$POINTER:$POINTER_ROOT/v2" WATCHER_MAX_POLLS=2 run >/dev/null 2>&1
+SPAWN="$OLD_SPAWN"
+
+if grep -q "watcher-home=$POINTER_ROOT/v1" "$TESTLOG"; then
+  pass "the first tick launches with WATCHER_HOME pinned to v1"
+else
+  flunk "the first tick did not use v1" "$(grep watcher-home "$TESTLOG")"
+fi
+if grep -q "watcher-home=$POINTER_ROOT/v2" "$TESTLOG"; then
+  pass "a later tick, in the same still-running process, launches with WATCHER_HOME on v2"
+else
+  flunk "no later tick picked up v2" "$(grep watcher-home "$TESTLOG")"
+fi
+# The pointer moved AFTER the first tick's own claude invocation had already logged v1
+# (above) — so that invocation's own env was never touched retroactively. What this
+# checks beyond that: the re-launch happened BETWEEN ticks, not mid-launch — the v1 line
+# and the first v2 line are for two SEPARATE claude invocations, never the same one.
+if [ "$(grep -c 'claude -p' "$TESTLOG")" -ge 2 ]; then
+  pass "more than one tick ran across the two polls (v1, then v2)"
+else
+  flunk "expected at least two tick launches" "$(grep -c 'claude -p' "$TESTLOG")"
+fi
+
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail
