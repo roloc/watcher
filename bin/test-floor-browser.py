@@ -821,6 +821,12 @@ try:
         check("all six idle lanes are in the break room, each plate naming its board",
               b.eval("""[...document.querySelectorAll('.character[data-pill="idle"]')]
                      .every(e => e.dataset.room === 'Break room' && e.querySelector('.where').textContent === e.dataset.project)"""))
+        check("the ship station is a dock hand with a hand truck of crates in front of a shelf — not the "
+              "floor's desk sprite shrunk, which read as a person carrying a desk around (October 9, 2026)",
+              b.eval("""['riffmap', 'riffmap-site', 'watcher'].every(n => {
+                      const c = document.querySelector('.character[data-ship="' + n + '"] svg');
+                      return c && !c.innerHTML.includes('desk-top') && c.innerHTML.includes('#ffd33d')
+                          && !!document.querySelector('.desk-set.shelf[data-ship="' + n + '"]'); })"""))
         check("a ship shelf stands in each board's own room",
               b.eval("""['riffmap', 'riffmap-site', 'watcher'].every(n => {
                       const s = document.querySelector('.character[data-ship="' + n + '"]').getBoundingClientRect();
@@ -1057,6 +1063,14 @@ try:
               info(b, "alpha") == ["needs_steve", "Steve's office", "Build\nalpha"], info(b, "alpha"))
         check("the light over his door is red while it waits there",
               b.eval("document.getElementById('beacon').className") == "beacon-red")
+        check("alpha's build is failing in this state, so its dock hand waves a flag; beta's is green, a check on the crates",
+              b.eval("!!document.querySelector('.character[data-ship=\"alpha\"] .character-wave')")
+              and b.eval("document.querySelector('.character[data-ship=\"beta\"] svg').innerHTML.includes('l5 -5')"))
+        b.eval("window.__demoGoto(2)")  # alpha's checks running: dots on the crates
+        check("...and while checks run the crates blink dots",
+              b.eval("document.querySelectorAll('.character[data-ship=\"alpha\"] .dot').length") == 3)
+        b.eval("window.__demoGoto(1)")
+        settled(b)
         check("the sleeping lane naps on the break room couch, named for its board too",
               info(b, "beta") == ["sleeping", "Break room", "Build\nbeta"]
               and b.eval("""(() => { const e = document.querySelector('.character[data-pill="sleeping"]').getBoundingClientRect();

@@ -1648,6 +1648,9 @@ INDEX_HTML = """<!doctype html>
   }
   .character svg { width: 30px; height: 34px; display: block; margin: 0 auto; }
   .character.ship svg { width: 40px; }
+  .character.ship .ship-push { animation: push .9s infinite; }
+  .character.ship .dot { animation: blink 1.2s infinite; }
+  .character.ship .dot.d2 { animation-delay: .3s; } .character.ship .dot.d3 { animation-delay: .6s; }
   .character-mockup { margin-bottom: 2px; }
   .character-mockup .mockup-thumb {
     display: block; margin: 0 auto; max-width: 46px; max-height: 34px; border-radius: 3px;
@@ -2587,6 +2590,45 @@ function deskSVG(lit) {
     <rect x="20" y="40" width="20" height="12" rx="4" fill="var(--dim)"/><rect x="24" y="36" width="12" height="6" rx="2" fill="color-mix(in srgb, var(--dim) 70%, #000)"/></svg>`;
 }
 // The triage counter by the door: a counter, an inbox tray, a bell.
+// The ship station's own figure: a dock hand in a hard hat with a hand truck of crates —
+// not the floor page's desk sprite shrunk to fit, which read as a person carrying a desk
+// around (October 9, 2026). The crates say the state the way the floor's pill does: a
+// check when main is green, blinking dots while checks run, an hourglass while the deployer
+// waits for idle lanes, a waved flag when blocked, and the truck rolling while a release
+// is being swapped in.
+function shipCharacterSVG(mode, pill, look) {
+  const c = `var(--${{working: "working", paused: "paused", needs_steve: "needs", idle: "idle"}[SHIP_PILL[pill][0]]})`;
+  let sign = "";
+  if (mode === "done") sign = `<path d="M30 4 l2.5 2.5 l5 -5" style="fill:none;stroke:${c};stroke-width:1.8"/>`;
+  if (mode === "checking") sign = [0, 1, 2].map(i => `<circle class="dot d${i + 1}" cx="${30 + i * 4}" cy="4" r="1.4" style="fill:${c}"/>`).join("");
+  if (mode === "waiting") sign = `<path d="M30 0.5 h8 l-4 4.5 l4 4.5 h-8 l4 -4.5 z" style="fill:${c}"/>`;
+  if (mode === "blocked") sign = `<g class="character-wave" style="transform-box:fill-box;transform-origin:50% 100%">
+    <rect x="29" y="0.5" width="1.5" height="10" style="fill:var(--dim)"/><rect x="30.5" y="0.5" width="7" height="5" style="fill:${c}"/></g>`;
+  return `<svg viewBox="0 0 40 30" aria-hidden="true">
+    <rect x="3" y="15" width="3" height="7" rx="1" style="fill:${c}"/>
+    <rect x="17" y="14" width="8" height="2.6" rx="1" style="fill:${c}"/>
+    <rect x="6" y="12" width="14" height="13" rx="4" style="fill:${c}"/>
+    <circle cx="13" cy="7" r="6" style="fill:${look.skin}"/>
+    <path d="M6.5 6 a6.5 5.5 0 0 1 13 0 z" style="fill:#ffd33d"/><rect x="5.5" y="5.5" width="15" height="1.6" rx=".8" style="fill:#d29922"/>
+    <g${mode === "pushing" ? ' class="ship-push"' : ""}>
+      <rect x="24" y="8" width="2" height="19" rx="1" style="fill:var(--dim)"/>
+      <rect x="26" y="19" width="11" height="7" rx="1" style="fill:#a86f3a"/><rect x="26" y="12" width="11" height="7" rx="1" style="fill:#c9915a"/>
+      <path d="M28 15.5 h7 M28 22.5 h7" style="stroke:#7a4e24;stroke-width:1"/>
+      <circle cx="26" cy="27.5" r="2.2" style="fill:#30363d"/><rect x="24" y="26" width="13" height="1.5" style="fill:var(--dim)"/>
+    </g>${sign}</svg>`;
+}
+// The ship shelf the dock hand stands in front of: two shelves of crates, a clipboard.
+function shelfSVG() {
+  return `<svg width="52" height="54" viewBox="0 0 52 54">
+    <rect x="2" y="4" width="48" height="46" rx="2" fill="#5b3a1a"/><rect x="4" y="6" width="44" height="42" fill="#3b2410"/>
+    <rect x="4" y="25" width="44" height="3" fill="#8a5a2b"/><rect x="4" y="46" width="44" height="3" fill="#8a5a2b"/>
+    <rect x="7" y="12" width="12" height="13" rx="1" fill="#c9915a"/><rect x="21" y="15" width="10" height="10" rx="1" fill="#a86f3a"/>
+    <rect x="34" y="10" width="11" height="15" rx="1" fill="#c9915a"/>
+    <rect x="7" y="34" width="14" height="12" rx="1" fill="#a86f3a"/><rect x="23" y="37" width="9" height="9" rx="1" fill="#c9915a"/>
+    <rect x="36" y="33" width="9" height="12" rx="1" fill="#f3f4f6"/><path d="M38 37 h5 M38 40 h5 M38 43 h3" stroke="#8b949e" stroke-width="1"/>
+    <path d="M10 18 h6 M24 20 h4 M37 17 h5 M11 40 h6" stroke="#7a4e24" stroke-width="1"/></svg>`;
+}
+
 function counterSVG() {
   return `<svg width="60" height="54" viewBox="0 0 60 54">
     <rect x="4" y="26" width="52" height="16" rx="2" fill="#a86f3a"/><rect x="4" y="26" width="52" height="4" rx="1" fill="#c9915a"/>
@@ -2852,13 +2894,15 @@ function renderRooms(office, state) {
   tip.style.top = (server.y - CORR_H + 6) + "px";
 }
 
-function renderRoomDesks(lanes) {
+function renderRoomDesks(lanes, ships) {
+  const shelves = (ships || []).map(s =>
+    `<div class="desk-set shelf" data-ship="${esc(s.name)}" style="left:${s.pos.x}px;top:${s.pos.y + 10}px">${shelfSVG()}</div>`);
   const furniture = lanes.map(l => (l.kind === "Triage"
     ? `<div class="desk-set" style="left:${l.home.x}px;top:${l.home.y + 10}px">${counterSVG()}</div>`
     : `<div class="desk-set${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
             style="left:${l.home.x}px;top:${l.home.y + 10}px">${deskSVG(l.pill === "working")}</div>`)
     + (l.away ? `<div class="desk-tag" data-lane="${esc(l.lane)}" style="left:${l.home.x}px;top:${l.home.y}px">${esc(l.kind)} · out</div>` : ""));
-  document.getElementById("room-desks").innerHTML = furniture.join("");
+  document.getElementById("room-desks").innerHTML = shelves.join("") + furniture.join("");
 }
 
 // The plate under a character: what it is (Build, Design, Triage), and — only when it has
@@ -2990,7 +3034,7 @@ function renderShipDock(ships) {
       shipEls[s.name] = el;
     }
     const st = shipState(s.ship);
-    el.innerHTML = shipSVG(st.mode, st.pill) + plateHTML("Ship", s.name, false);
+    el.innerHTML = shipCharacterSVG(st.mode, st.pill, laneLook("ship:" + s.name)) + plateHTML("Ship", s.name, false);
     moveCharacter(el, s.pos, s.room);
   }
   for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }
@@ -3108,7 +3152,7 @@ function renderStudio(state) {
   lastState = state;
   const office = computeStudio(state);
   renderRooms(office, state);
-  renderRoomDesks(office.lanes);
+  renderRoomDesks(office.lanes, office.ships);
   renderRoomStuck(state.projects, office.boss);
   renderCharacters(office.lanes, stuckByCard);
   renderShipDock(office.ships);
