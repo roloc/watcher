@@ -167,6 +167,11 @@ check("notify with no webhook is a silent no-op, exit 0", board.cmd_notify("87",
 
 print("7. board.py sweep-stages: a closed card does not keep its Stage")
 os.environ["DISCORD_WEBHOOK_URL"] = "https://discord.example/webhook"
+# STAGE_SWEEP_SEC=0: this section calls cmd_sweep_stages() several times in a row to check
+# the clearing logic itself, never the board-level interval gate (card #114; that gate has
+# its own case in test-board.py) — 0 means "no gating, run every call" for board.py's stamp
+# the same way it already does for spawn.sh's own per-lane one.
+os.environ["STAGE_SWEEP_SEC"] = "0"
 
 
 def card(n, state, stage):

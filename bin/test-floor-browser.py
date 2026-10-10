@@ -248,6 +248,8 @@ class LiveCache:
                                  box_name="test-box",
                                  ratelimit_fn=lambda: {"remaining": 4312, "resetAt":
                                                         "2026-10-09T20:00:00Z", "limit": 5000},
+                                 ledger_fn=lambda: {"points_per_min": 1.5, "by_caller":
+                                                     {"lane:alpha": 60, "tick:alpha:7": 30}},
                                  box_stats_fn=lambda: BOX, proxmox_fn=lambda: PVE,
                                  # Card #106: alpha is "the board this box deploys" — the
                                  # Ship desk's per-lane view belongs here, box-wide.
@@ -407,6 +409,15 @@ try:
               b.eval("document.getElementById('github-budget').textContent")
               == "GitHub: 4,312 / 5,000 · resets " + b.eval(
                   "new Date('2026-10-09T20:00:00Z').toLocaleTimeString()"))
+        check("card #114: this hour's GraphQL spend by caller is drawn beside it, from "
+              "the fixture's ledger_fn — highest spender first, points per minute too",
+              b.eval("document.getElementById('github-spend').textContent")
+              == "This hour: lane:alpha 60 · tick:alpha:7 30 (1.5 pts/min)",
+              b.eval("document.getElementById('github-spend').textContent"))
+        check("…and it is not drawn red: 1.5 pts/min would not exhaust 4,312 points "
+              "before the hour resets",
+              b.eval("document.getElementById('github-spend').classList.contains('alert')")
+              is False)
         shot(b, "floor-desktop.png")
 
         print("2b. the Needs Steve strip (card #100): no raw markdown, a chip per "

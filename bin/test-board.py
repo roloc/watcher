@@ -259,7 +259,7 @@ def graphql_stub_run(cmd, **kwargs):
         ]}}}}
     else:
         n = int(kv.get("number", "0"))
-        payload = {"rateLimit": {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000},
+        payload = {"rateLimit": {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000, "cost": 1},
                    "user": {"projectV2": {"items": {
                        "pageInfo": {"hasNextPage": False, "endCursor": None},
                        "nodes": [{"id": "ITEM_1",
@@ -414,7 +414,7 @@ GRAPHQL_CALLS.clear()
 board.items()  # a real query that happens to carry rateLimit
 cached_rl = board._cache_read_any_age(board.RATELIMIT_CACHE_NAME)
 check("the rate limit from that call is on file",
-      cached_rl == {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000}, cached_rl)
+      cached_rl == {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000, "cost": 1}, cached_rl)
 calls_before = len(GRAPHQL_CALLS)
 board._cache_read_any_age(board.RATELIMIT_CACHE_NAME)
 check("reading it again makes no gh() call at all", len(GRAPHQL_CALLS) == calls_before)
@@ -438,6 +438,156 @@ check("no writable cache dir: every items() call is live",
       len(GRAPHQL_CALLS) == 2, GRAPHQL_CALLS)
 check("...and the data is still correct", a104 == b104)
 os.remove(blocker.name)
+
+# Case 19 pointed WATCHER_CACHE_DIR at a now-deleted blocker path and never restored it —
+# harmless while it was the last case, not harmless now that more follow.
+os.environ["WATCHER_CACHE_DIR"] = CACHE_DIR
+board._cache_dir_cached = None
+board._cache_dir_warned = False
+
+print("20. BOARD_CACHE_SEC's new default (card #114): the old 45s was SHORTER than the "
+      "lanes' own 60-second poll, so a lane's own next poll was ALWAYS a miss on its own "
+      "last read — only two different lanes landing within 45 seconds of each other ever "
+      "actually shared a read. The new default comfortably outlives one poll interval, so "
+      "two reads 60 seconds apart now share one real gh() call. Fails on main (45s).")
+board.OWNER, board.NUMBER = "roloc", 110
+os.environ.pop("BOARD_CACHE_SEC", None)  # the real default, not a test override
+GRAPHQL_CALLS.clear()
+board.items()
+path110 = board._cache_path(board._items_cache_name())
+sixty_ago = time.time() - 60
+os.utime(path110, (sixty_ago, sixty_ago))
+board.items()
+check("two items() calls 60 seconds apart make exactly one real gh() call",
+      len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+os.environ["BOARD_CACHE_SEC"] = "45"
+
+print("21. a cache miss takes a lock around its own refill (card #114), so two processes "
+      "racing the same miss make one real gh() call between them, not two — the October 9 "
+      "measurement found exactly this: the same board read by two processes within a "
+      "second of each other, twice in two minutes. Reproduced here with two threads "
+      "racing a cold cache; fails on main (no lock: both call gh() independently).")
+import threading  # noqa: E402  (only this one case needs it)
+
+board.OWNER, board.NUMBER = "roloc", 111
+refill_started = threading.Event()
+release_refill = threading.Event()
+
+
+def slow_graphql_stub_run(cmd, **kwargs):
+    if cmd[:3] == ["gh", "api", "graphql"]:
+        kv = _graphql_kv(cmd)
+        if "items(first:100" in kv["query"] and kv.get("number") == "111":
+            refill_started.set()
+            release_refill.wait(2)
+    return graphql_stub_run(cmd, **kwargs)
+
+
+board.subprocess.run = slow_graphql_stub_run
+GRAPHQL_CALLS.clear()
+lock_results = []
+t1 = threading.Thread(target=lambda: lock_results.append(board.items()))
+t2 = threading.Thread(target=lambda: lock_results.append(board.items()))
+t1.start()
+refill_started.wait(2)   # t1 is inside its own live call now, holding the lock
+t2.start()
+time.sleep(0.2)          # best-effort: give t2 a real chance to reach the lock and block
+release_refill.set()
+t1.join(2)
+t2.join(2)
+board.subprocess.run = graphql_stub_run
+check("two concurrent misses make exactly one real gh() call",
+      len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
+check("...and both threads got the same, correct data",
+      len(lock_results) == 2 and lock_results[0] == lock_results[1], lock_results)
+
+print("22. the ledger (card #114): a real gh() call appends one line with its caller, "
+      "query kind, cost and remaining; `ledger` sums the last hour by caller, never a "
+      "call of its own")
+board.OWNER, board.NUMBER = "roloc", 112
+os.environ["WATCHER_LEDGER_CALLER"] = "lane:test"
+board.items(fresh=True)
+ledger_path = board._cache_path(board.LEDGER_NAME)
+with open(ledger_path) as f:
+    last_line = json.loads(f.readlines()[-1])
+check("the ledger's newest line names this call's caller",
+      last_line["caller"] == "lane:test", last_line)
+check("...and the kind of query", last_line["query"] == "items", last_line)
+check("...and the cost GitHub returned with it", last_line["cost"] == 1, last_line)
+summary = board._ledger_hour_summary()
+check("the hour's summary attributes at least this call's cost to that caller",
+      summary["by_caller"].get("lane:test", 0) >= 1, summary)
+del os.environ["WATCHER_LEDGER_CALLER"]
+
+print("23. a gh() failure that is a rate limit serves the stale items cache instead of "
+      "failing the call outright, with no cache at all it still exits 1 the same as any "
+      "other gh failure (card #114, the October 9 outage: 'API rate limit exceeded' "
+      "turned into every lane sleeping five minutes with nothing cached to fall back on). "
+      "items(fresh=True) — cmd_show's own call — is the one exception: its whole contract "
+      "is to fail loud, never serve a stale answer, so it still exits even with cache on file")
+board.OWNER, board.NUMBER = "roloc", 113
+board.items()  # warm the cache
+warm = board._cache_read_any_age(board._items_cache_name())
+# Age the cache file past its TTL (not `_cache_invalidate`, which would delete the very
+# data the fallback is supposed to serve) so the next items() call treats it as a miss.
+_old_items_path = board._cache_path(board._items_cache_name())
+_long_ago = time.time() - 600
+os.utime(_old_items_path, (_long_ago, _long_ago))
+
+
+class RateLimitedResult(FakeResult):
+    def __init__(self):
+        super().__init__("", returncode=1)
+        self.stderr = "gh: API rate limit exceeded for user ID 1 (HTTP 403)"
+
+
+def rate_limited_stub_run(cmd, **kwargs):
+    if cmd[:3] == ["gh", "api", "graphql"]:
+        kv = _graphql_kv(cmd)
+        if "items(first:100" in kv["query"]:
+            return RateLimitedResult()
+    return graphql_stub_run(cmd, **kwargs)
+
+
+board.subprocess.run = rate_limited_stub_run
+served = board.items()
+check("rate-limited with a stale cache on file: served that cache instead of exiting",
+      served == warm, served)
+try:
+    # A direct call sees the raw RateLimitError; through the CLI dispatch (__main__,
+    # below) it becomes a plain sys.exit(1) the same as any other gh failure — this is
+    # testing that items(fresh=True) does NOT swallow it into a stale answer, not the
+    # CLI's own conversion.
+    board.items(fresh=True)
+    died = False
+except board.RateLimitError:
+    died = True
+check("items(fresh=True) still exits even with that same stale cache on file: show's "
+      "contract is freshness or a loud failure, never a silent stale answer", died)
+board.OWNER, board.NUMBER = "roloc", 114  # a cold board: nothing cached at all
+try:
+    board.items()
+    died2 = False
+except SystemExit:
+    died2 = True
+check("rate-limited with nothing cached at all: still exits, same as any other gh failure", died2)
+board.subprocess.run = graphql_stub_run
+
+print("24. the closed-card Stage sweep is board-level, not per-lane (card #114): two "
+      "sweeps inside STAGE_SWEEP_SEC do one real items() read between them, whichever "
+      "lane calls second finding the stamp fresh and touching nothing")
+board.OWNER, board.NUMBER = "roloc", 115
+os.environ["STAGE_SWEEP_SEC"] = "300"
+board._cache_invalidate(board._sweep_stamp_name())
+GRAPHQL_CALLS.clear()
+board.cmd_sweep_stages()
+calls_after_first_sweep = len(GRAPHQL_CALLS)
+board.cmd_sweep_stages()
+check("the first sweep in the interval reads the board",
+      calls_after_first_sweep >= 1, calls_after_first_sweep)
+check("a second sweep inside the interval makes no additional call at all",
+      len(GRAPHQL_CALLS) == calls_after_first_sweep, GRAPHQL_CALLS)
+del os.environ["STAGE_SWEEP_SEC"]
 
 board.subprocess.run = stub_run  # restore for anything appended after this suite
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES ABOVE'}")

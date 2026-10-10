@@ -137,6 +137,12 @@ WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 [ -n "$WATCHER_ROOT" ] || { echo "spawn.sh: set WATCHER_PROJECT=projects/<name>.env (or WATCHER_ROOT)" >&2; exit 64; }
 PROJECT_NAME="${PROJECT_NAME:-$(basename "$WATCHER_ROOT")}"
 export BOARD_OWNER="${BOARD_OWNER:-}" BOARD_NUMBER="${BOARD_NUMBER:-}"
+# The ledger's caller column (card #114): this lane's own board.py calls (polling, the
+# sweeps) are attributed to the lane by name. The tick itself gets a narrower one, set
+# only on the one command line that launches it (print_claude_cmd) — never here, or every
+# board.py call the tick makes would also read "lane:$PROJECT_NAME" and the ledger could
+# never tell a lane's own poll from the card it is working.
+export WATCHER_LEDGER_CALLER="lane:$PROJECT_NAME"
 # Discord is board.py's job (notify.py), and it only hears about a card that is stuck or a
 # run that broke: a `board move` to Stuck posts the alert by itself, from this script and
 # from inside the tick alike, so the webhook only has to reach board.py's environment. A
@@ -212,8 +218,11 @@ case "$WIP_MAX" in ''|*[!0-9]*) echo "spawn.sh: WIP_MAX must be a number, not '$
 INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-600}"
 INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-7200}"
 # The closed-card Stage sweep (sweep_closed_stages): the least time between two of them.
-# Each one is a full board read, so it is not done every poll.
-STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-300}"
+# Each one is a full board read, so it is not done every poll. Exported (card #114):
+# board.py's own cmd_sweep_stages reads this same knob for its board-level stamp, so a
+# project file that changes it changes both the per-lane gate here AND the board-wide one
+# there, never one without the other.
+export STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-300}"
 case "$STAGE_SWEEP_SEC" in ''|*[!0-9]*) echo "spawn.sh: STAGE_SWEEP_SEC must be a number, not '$STAGE_SWEEP_SEC'" >&2; exit 64 ;; esac
 # The awaiting-rebuild stale-label sweep (sweep_awaiting_rebuild, card #85): a card that has
 # carried `awaiting-rebuild` this long with no project workflow ever dropping the label is
@@ -828,6 +837,7 @@ print_claude_cmd() {
   local n="$1" dir="$2" ts="$3"
   cat <<EOF
 (cd "$dir" && PATH="$WATCHER_SHIM_DIR:\$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \\
+  WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" \\
   "$WATCHER_REAL_CLAUDE" -p "$LANE_COMMAND $n" \\
   --dangerously-skip-permissions \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\

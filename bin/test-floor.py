@@ -414,6 +414,42 @@ state_failrl = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_activ
 check("ratelimit_fn raising: the page still renders, just with no budget line",
       state_failrl["header"]["github_remaining"] is None, state_failrl["header"])
 
+print("6d. card #114: this hour's GraphQL spend by caller rides in the header too, from "
+      "ledger_fn — a list sorted by spend, never a dict with caller names as keys (every "
+      "key in the page's JSON has to be one all_keys-walked, card #9 below)")
+
+
+def stub_ledger():
+    return {"points_per_min": 1.5, "by_caller": {"lane:riffmap": 60, "tick:riffmap:501": 30}}
+
+
+state_ledger = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                  ask_fn=stub_ask, now=NOW, box_name="test-box",
+                                  ratelimit_fn=stub_ratelimit, ledger_fn=stub_ledger)
+check("points_per_min rides straight through", state_ledger["header"]["github_points_per_min"] == 1.5,
+      state_ledger["header"])
+check("spend is a list, highest caller first",
+      state_ledger["header"]["github_spend"] ==
+      [{"caller": "lane:riffmap", "points": 60}, {"caller": "tick:riffmap:501", "points": 30}],
+      state_ledger["header"]["github_spend"])
+
+state_noledger = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                    ask_fn=stub_ask, now=NOW, box_name="test-box")
+check("no ledger_fn given: points_per_min is None and spend is an empty list, never a crash",
+      state_noledger["header"]["github_points_per_min"] is None
+      and state_noledger["header"]["github_spend"] == [], state_noledger["header"])
+
+
+def failing_ledger():
+    raise RuntimeError("board.py: no writable cache directory")
+
+
+state_failledger = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                      ask_fn=stub_ask, now=NOW, box_name="test-box",
+                                      ledger_fn=failing_ledger)
+check("ledger_fn raising: the page still renders, just with no spend line",
+      state_failledger["header"]["github_points_per_min"] is None, state_failledger["header"])
+
 print("6b. the Needs Steve strip (card #96): every Stuck card on the board, independent "
       "of which lane last touched it, with the round pictures it has been asked")
 riffmap_proj = next(p for p in state["projects"] if p["name"] == "riffmap")

@@ -17,14 +17,19 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py images <issue>          # direct image links under its "Look:" section, one per line
     python3 scripts/board.py images <issue> --all-rounds  # every Needs Steve round, as JSON (bin/floor.py's carousel)
     python3 scripts/board.py ratelimit               # cached GraphQL remaining/resetAt/limit, as JSON (never a call of its own)
+    python3 scripts/board.py ledger                  # this hour's GraphQL spend by caller, as JSON (reads ledger.jsonl, no call of its own)
 
 Caching (card #98): `list`, `queue` and `dump` read `items()` through a short-lived file
 cache, one per board, so every lane and the floor page polling the same board inside the
 same window share one real read instead of each paying for their own. `WATCHER_CACHE_DIR`
 names the directory (default: `/var/cache/watcher`, falling back to `WATCHER_STATE_ROOT` or
-`~/.local/state/watcher`); `BOARD_CACHE_SEC` is the TTL in seconds (default 45; 0 disables
-the `items()`/`project()` cache entirely — reads and writes both — which is what the
-offline suites set. `show` always reads live, cache or not — it is what the spawner's own
+`~/.local/state/watcher`); `BOARD_CACHE_SEC` is the TTL in seconds (default 120, a little
+over the lanes' own 60s poll so two lanes polling on offset clocks still share one read; 0
+disables the `items()`/`project()` cache entirely — reads and writes both — which is what the
+offline suites set. A cache miss takes an exclusive lock around its own refill, so a second
+process racing the same miss (card #114: two lanes landing within a second of each other,
+each paying for their own live call) waits for the first's write and reads that instead.
+`show` always reads live, cache or not — it is what the spawner's own
 do-not-fail-open guards decide a card's `in-flight` state from, so it never serves a
 snapshot that could predate a `move`/`stage`/`unclaim` elsewhere. `move`, `stage`,
 `unclaim` and `sweep-stages` invalidate the cache only once their own mutation has
@@ -43,11 +48,27 @@ holding a card, a product check the detector filed a card for). Every other `mov
 every `stage`, is silent: the floor page shows those. A failed post is one stderr line,
 never a non-zero exit — the board is the record, Discord is the pager.
 
+The ledger (card #114): every real `gh api graphql` call that carries a `rateLimit` object
+appends one line to `$WATCHER_CACHE_DIR/ledger.jsonl` — when, which caller (`WATCHER_LEDGER_CALLER`,
+set by `spawn.sh` for a lane and the tick it launches, and by `floor.py` for itself; "unknown"
+otherwise), which kind of query, and the `cost`/`remaining`/`limit` GitHub returned with it.
+Lines older than 24 hours are dropped the next time the file crosses `LEDGER_TRIM_BYTES`, not
+on every append. `board.py ledger` sums the last hour by caller — never a call of its own,
+the same free-ride `ratelimit` already does.
+
+A `gh` call that fails because the account is rate-limited does not fail `items()` or
+`project()` outright: with a cached answer on file, however old, that is what gets served
+(one stderr line naming its age) rather than failing the whole poll — the exact shape of the
+October 9, 2026 outage (card #114), where a bad minute turned into every lane sleeping five
+minutes with nothing on file to say why. With no cached answer at all, this still exits 1
+the same as before.
+
 Every failure exits 1 with a one-line `board.py: ...` message on stderr; only a
 successful command exits 0. A caller may therefore treat any non-zero exit as "do not
 proceed" — in particular `list` exits 1 for a column name the board does not have,
 rather than printing nothing and looking like an empty column.
 """
+import fcntl
 import json
 import os, re, subprocess, sys, tempfile, time
 from urllib.parse import urlsplit
@@ -74,13 +95,27 @@ BOARD_URL = f"https://github.com/users/{OWNER}/projects/{NUMBER}"
 # construction, since neither is keyed to a single lane's own state dir — falling back to
 # `WATCHER_STATE_ROOT` (or `~/.local/state/watcher`, the same derivation floor.py's own
 # default uses) if that isn't writable. `BOARD_CACHE_SEC` is the TTL for `items()` (default
-# 45s, a little under the lanes' own 60s poll); 0 disables the whole cache — reads and
-# writes both — which is what the offline suites set, so a test never touches a real
-# directory or sees a stale value a previous case wrote. `project()` (the board's fields
-# and options, which only change when Steve edits the board) gets its own, longer TTL.
-BOARD_CACHE_SEC_DEFAULT = 45
+# 120s: the old 45s was shorter than the lanes' own 60s poll, so a lane's own next poll was
+# ALWAYS a miss on its own last read — only two different lanes polling within 45 seconds of
+# each other ever actually shared one; card #114, measured October 9, 2026); 0 disables the
+# whole cache — reads and writes both — which is what the offline suites set, so a test
+# never touches a real directory or sees a stale value a previous case wrote. `project()`
+# (the board's fields and options, which only change when Steve edits the board) gets its
+# own, longer TTL.
+BOARD_CACHE_SEC_DEFAULT = 120
 PROJECT_CACHE_SEC_DEFAULT = 600
 RATELIMIT_CACHE_NAME = "ratelimit.json"
+LEDGER_NAME = "ledger.jsonl"
+LEDGER_MAX_AGE_SEC = 24 * 3600
+LEDGER_TRIM_BYTES = 512 * 1024  # trim on crossing this size, not on every append (card #114)
+
+
+class RateLimitError(Exception):
+    """Raised by `gh()` when the account is rate-limited, instead of exiting the whole
+    process (card #114): `items()`/`project()` catch it and fall back to whatever cache is
+    on file, however old, rather than failing the poll with nothing to serve. A caller with
+    no sensible stale fallback (a mutation, or a read with nothing cached yet) lets it
+    propagate to the top-level dispatch below, which exits 1 the same as `gh()` always did."""
 
 _cache_dir_cached = None
 _cache_dir_warned = False
@@ -199,6 +234,134 @@ def _project_cache_name():
     return f"project-{OWNER}-{NUMBER}.json"
 
 
+def _with_lock(name, fn):
+    """Run `fn()` holding an exclusive lock on a file named after `name`, so a second
+    process racing the same cache miss (card #114) waits for the first to finish its
+    refill instead of starting one of its own. `fn` is expected to re-check the cache once
+    it holds the lock — the whole point is that the wait can end in a cache hit, not
+    another live call. Falls through to a lock-free `fn()` when there is nowhere to put
+    the lock file (no writable cache dir), the same as every other cache primitive here."""
+    d = _cache_dir()
+    if not d:
+        return fn()
+    try:
+        fd = os.open(os.path.join(d, name + ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError:
+        return fn()
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            return fn()
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+# --- the GraphQL ledger (card #114) -----------------------------------------------------
+# Every real `gh api graphql` call that carries a rateLimit object appends one line: when,
+# which caller, which kind of query, and the cost/remaining/limit GitHub returned. The
+# October 9, 2026 outage left nothing on file to say where 5,000 points went in nineteen
+# minutes; this is that record. One shared file, not one per board — the rate limit itself
+# is per ACCOUNT, not per project, so a ledger split by board would undercount every call
+# that happened to land on the others.
+
+def _ledger_caller():
+    return os.environ.get("WATCHER_LEDGER_CALLER") or "unknown"
+
+
+def _query_label(query):
+    """A short name for what kind of call this is, read off the query text itself — there
+    is no separate query-name argument anywhere this file calls `gh()`, and adding one to
+    every call site would be a bigger change than four substring checks."""
+    if "items(first:100" in query:
+        return "items"
+    if "fields(first:40)" in query:
+        return "project"
+    if "updateProjectV2ItemFieldValue" in query:
+        return "move/stage"
+    if "clearProjectV2ItemFieldValue" in query:
+        return "clear-stage"
+    return "other"
+
+
+def _ledger_append(caller, label, rl):
+    path = _cache_path(LEDGER_NAME)
+    if not path:
+        return
+    line = json.dumps({"ts": time.time(), "caller": caller, "query": label,
+                        "cost": rl.get("cost") if rl else None,
+                        "remaining": rl.get("remaining") if rl else None,
+                        "limit": rl.get("limit") if rl else None})
+    try:
+        with open(path, "a") as f:
+            f.write(line + "\n")
+        if os.path.getsize(path) > LEDGER_TRIM_BYTES:
+            _ledger_trim(path)
+    except OSError:
+        pass
+
+
+def _ledger_trim(path):
+    """Drop every ledger line older than 24 hours. Called once the file crosses
+    LEDGER_TRIM_BYTES rather than on every append, so a box making a call every few
+    seconds is not rewriting the whole file that often."""
+    cutoff = time.time() - LEDGER_MAX_AGE_SEC
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except OSError:
+        return
+    kept = [ln for ln in lines if _ledger_line_ts(ln) >= cutoff]
+    if len(kept) == len(lines):
+        return
+    try:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
+        with os.fdopen(fd, "w") as f:
+            f.writelines(kept)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _ledger_line_ts(line):
+    try:
+        return json.loads(line).get("ts", 0)
+    except ValueError:
+        return 0
+
+
+def _ledger_hour_summary():
+    """`{"points_per_min": <float>, "by_caller": {<caller>: <points int>, ...}}` over the
+    ledger's last hour — `{}` if nothing is on file yet. `cost` is `None` for a line whose
+    query carried no rateLimit object (a mutation; card #114's own "How": those were never
+    the cost driver measured on October 9) and contributes nothing to the sum, the caller
+    still appearing with 0 if it made no other call."""
+    path = _cache_path(LEDGER_NAME)
+    if not path:
+        return {}
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except OSError:
+        return {}
+    cutoff = time.time() - 3600
+    by_caller = {}
+    for ln in lines:
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            continue
+        if rec.get("ts", 0) < cutoff:
+            continue
+        caller = rec.get("caller") or "unknown"
+        by_caller[caller] = by_caller.get(caller, 0) + (rec.get("cost") or 0)
+    if not by_caller:
+        return {}
+    total = sum(by_caller.values())
+    return {"points_per_min": total / 60, "by_caller": by_caller}
+
+
 def gh(query, **vars):
     cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
     for k, v in vars.items():
@@ -208,7 +371,10 @@ def gh(query, **vars):
     except FileNotFoundError:
         sys.exit("board.py: `gh` is not installed or not on PATH")
     if r.returncode:
-        sys.exit(f"board.py: gh failed: {r.stderr.strip()[:400]}")
+        err = r.stderr.strip()[:400]
+        if "rate limit" in err.lower():
+            raise RateLimitError(err)
+        sys.exit(f"board.py: gh failed: {err}")
     try:
         d = json.loads(r.stdout)
     except json.JSONDecodeError:
@@ -221,26 +387,62 @@ def gh(query, **vars):
     rl = data.get("rateLimit") if isinstance(data, dict) else None
     if rl:
         _cache_write(RATELIMIT_CACHE_NAME, rl)
+    _ledger_append(_ledger_caller(), _query_label(query), rl)
     return data
 
 
 def project(fresh=False):
     name = _project_cache_name()
+    sec = _project_cache_sec()
     if not fresh:
-        cached = _cache_read(name, _project_cache_sec())
+        cached = _cache_read(name, sec)
         if cached is not None:
             return cached["project"], cached["fields"]
-    q = """query($owner:String!,$number:Int!){ user(login:$owner){ projectV2(number:$number){
-      id title
-      fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } }"""
-    u = gh(q, owner=OWNER, number=NUMBER).get("user")
-    p = u.get("projectV2") if u else None
-    if not p:
-        sys.exit(f"board.py: no project {OWNER}/#{NUMBER} — if it moved to an org, "
-                 "this script's user(login:) query needs to become organization(login:)")
-    fields = {f["name"]: f for f in p["fields"]["nodes"] if f.get("name")}
-    _cache_write(name, {"project": p, "fields": fields})
-    return p, fields
+
+    def _refill():
+        if not fresh:
+            # Another process may have refilled while this one waited on the lock
+            # (card #114) — re-check before paying for a live call of our own.
+            cached = _cache_read(name, sec)
+            if cached is not None:
+                return cached["project"], cached["fields"]
+        q = """query($owner:String!,$number:Int!){ user(login:$owner){ projectV2(number:$number){
+          id title
+          fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } }"""
+        try:
+            u = gh(q, owner=OWNER, number=NUMBER).get("user")
+        except RateLimitError as e:
+            stale = _stale_or_die(name, e, "project fields")
+            return stale["project"], stale["fields"]
+        p = u.get("projectV2") if u else None
+        if not p:
+            sys.exit(f"board.py: no project {OWNER}/#{NUMBER} — if it moved to an org, "
+                     "this script's user(login:) query needs to become organization(login:)")
+        fields = {f["name"]: f for f in p["fields"]["nodes"] if f.get("name")}
+        _cache_write(name, {"project": p, "fields": fields})
+        return p, fields
+
+    if not fresh:
+        return _with_lock(name, _refill)
+    return _refill()
+
+
+def _stale_or_die(name, err, what):
+    """`items()`/`project()`'s shared rate-limit fallback (card #114): with a cached
+    answer on file, however old, serve that — one stderr line naming its age — rather than
+    failing the whole poll on an account-wide outage nothing here can fix. With nothing
+    cached at all there is no honest fallback, so this exits exactly like `gh()` always
+    did on a hard failure."""
+    stale = _cache_read_any_age(name)
+    if stale is None:
+        sys.exit(f"board.py: gh failed: {err}")
+    path = _cache_path(name)
+    try:
+        age = int(time.time() - os.stat(path).st_mtime) if path else -1
+    except OSError:
+        age = -1
+    sys.stderr.write(f"board.py: rate limited; serving the cached {what}, {age}s old: {err}\n")
+    return stale
 
 
 def items(fresh=False):
@@ -250,7 +452,36 @@ def items(fresh=False):
         cached = _cache_read(name, sec)
         if cached is not None:
             return cached
-    q = """query($owner:String!,$number:Int!,$cursor:String){ rateLimit{ remaining resetAt limit }
+
+    def _refill():
+        if not fresh and sec > 0:
+            cached = _cache_read(name, sec)
+            if cached is not None:
+                return cached
+        if fresh:
+            # `show` is the one caller of `items(fresh=True)` (cmd_show), and its whole
+            # contract is to fail loud rather than ever serve a stale answer — the
+            # spawner's do-not-fail-open guards decide a card's in-flight state from this,
+            # and a silent stale read here is exactly the false "still in-flight" reading
+            # those guards exist to prevent (card #114: the fallback below is only safe on
+            # the ordinary cached/polling path, never here).
+            out = _items_live()
+        else:
+            try:
+                out = _items_live()
+            except RateLimitError as e:
+                return _stale_or_die(name, e, "board")
+        if sec > 0:
+            _cache_write(name, out)
+        return out
+
+    if not fresh and sec > 0:
+        return _with_lock(name, _refill)
+    return _refill()
+
+
+def _items_live():
+    q = """query($owner:String!,$number:Int!,$cursor:String){ rateLimit{ remaining resetAt limit cost }
       user(login:$owner){ projectV2(number:$number){
       items(first:100, after:$cursor){ pageInfo{ hasNextPage endCursor }
         nodes{ id
@@ -281,8 +512,6 @@ def items(fresh=False):
                 "stage": sel.get(STAGE_FIELD),
             })
         if not page["pageInfo"]["hasNextPage"]:
-            if sec > 0:
-                _cache_write(name, out)
             return out
         cursor = page["pageInfo"]["endCursor"]
 
@@ -661,17 +890,52 @@ def clear_stage(issue):
 SWEEP_MAX = 20
 
 
+def _sweep_interval_sec():
+    """0 means "no gating, run every call" — the same meaning `STAGE_SWEEP_SEC=0` already
+    has for spawn.sh's own per-lane gate (test-spawn.sh: "sweeps every poll"), so the two
+    layers agree: set it to 0 and both the per-lane call and this board-level stamp step
+    aside. An unset or unparseable value is the ordinary default, never "unlimited"."""
+    try:
+        v = int(os.environ.get("STAGE_SWEEP_SEC", "300"))
+    except ValueError:
+        return 300
+    return max(v, 0)
+
+
+def _sweep_stamp_name():
+    return f"sweep-{OWNER}-{NUMBER}.stamp"
+
+
 def cmd_sweep_stages():
     """Empty the Stage on every CLOSED card that still has one. `clear_stage` only runs
     for the card a tick was holding when it closed; a card that closes with no tick on it
     — Steve merging a parked card's PR, or closing a card by hand — kept its last Stage
     for good and sat in Done reading "Parked" (watcher#35, #36, #40, #43 and #44,
-    September 28, 2026). The spawner calls this every few minutes. Quiet — no Discord
-    post. One `items()` read; nothing else is fetched unless a card needs clearing."""
-    # fresh=True: a sweep must see the live board, not a cache up to BOARD_CACHE_SEC old —
-    # this runs at most every STAGE_SWEEP_SEC (spawn.sh), so paying for a live read every
-    # time costs nothing (card #98).
-    stale = [i for i in items(fresh=True) if i["state"] == "CLOSED" and i.get("stage")]
+    September 28, 2026). Quiet — no Discord post.
+
+    The Stage is the board's, not any one lane's, so this is a board-level sweep, not a
+    per-lane one (card #114): a stamp file under the cache dir, named for THIS board,
+    records when it was last actually run — every lane's spawner calls this on its own
+    STAGE_SWEEP_SEC clock, and whichever one lands first inside the interval does the
+    work; the other eight (riffmap's count, October 9, 2026) find the stamp fresh and
+    return immediately, never touching `items()` at all. The read itself is the ordinary
+    cache (not `fresh=True`, unlike before card #114): STAGE_SWEEP_SEC is comfortably
+    longer than BOARD_CACHE_SEC, so by the time this runs, some lane's own 60-second poll
+    has very likely already paid for a read this can just reuse."""
+    interval = _sweep_interval_sec()
+    stamp = _cache_path(_sweep_stamp_name()) if interval > 0 else None
+    if stamp:
+        try:
+            if time.time() - os.stat(stamp).st_mtime < interval:
+                return 0
+        except OSError:
+            pass
+        try:
+            open(stamp, "a").close()
+            os.utime(stamp, None)
+        except OSError:
+            pass
+    stale = [i for i in items() if i["state"] == "CLOSED" and i.get("stage")]
     if not stale:
         return 0
     proj, fields = project()
@@ -789,6 +1053,14 @@ def cmd_ratelimit():
     return 0
 
 
+def cmd_ledger():
+    """The ledger's last hour, by caller — never a call of its own, the same free ride
+    `ratelimit` gets. `{}` if nothing is on file yet (card #114). bin/floor.py's header
+    reads this to show the hour's spend beside the remaining-points line."""
+    print(json.dumps(_ledger_hour_summary()))
+    return 0
+
+
 def cmd_images(issue, *rest):
     """One image URL per line (board.py's `needs_steve_images`) — the same comment `ask`
     reads, for a caller that wants the mockup or screenshot it points at (bin/floor.py's
@@ -808,7 +1080,7 @@ def cmd_images(issue, *rest):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
-                            "dump", "ask", "images", "ratelimit"):
+                            "dump", "ask", "images", "ratelimit", "ledger"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
@@ -820,8 +1092,15 @@ if __name__ == "__main__":
                   "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),
                   "unclaim": lambda: cmd_unclaim(a[1]),
                   "ratelimit": lambda: cmd_ratelimit(),
+                  "ledger": lambda: cmd_ledger(),
                   "dump": lambda: cmd_dump(),
                   "ask": lambda: cmd_ask(a[1]),
                   "images": lambda: cmd_images(a[1], *a[2:])}[a[0]]())
     except IndexError:
         sys.exit(__doc__)
+    except RateLimitError as e:
+        # Every path with a sensible stale fallback (items(), project()) already caught
+        # this; reaching here means a mutation (move/stage/unclaim/sweep's own gh() calls)
+        # or a read with nothing cached yet hit the account's rate limit with nowhere safe
+        # to fall back to — exit 1 exactly like `gh()` always did on a hard failure.
+        sys.exit(f"board.py: gh failed: {e}")

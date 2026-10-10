@@ -77,24 +77,71 @@ from a short-lived file instead of a fresh query when one is warm enough: one fi
 board, under `WATCHER_CACHE_DIR` (default `/var/cache/watcher`, the one directory every
 lane and the floor service can both reach — falling back to `WATCHER_STATE_ROOT` or
 `~/.local/state/watcher` if that is not writable). `items()`'s TTL is `BOARD_CACHE_SEC`
-(default 45 seconds, a little under the lanes' own poll interval); `project()`'s is a fixed
-10 minutes, since a board's fields only change when Steve edits it, and a miss on a field
-or option name invalidates that cache and retries once live rather than waiting out the
-TTL. `BOARD_CACHE_SEC=0` turns the `items()`/`project()` cache off — reads and writes both
-— which is what every offline suite sets, so a test never touches a real directory. `show`
-always reads live, cache or not: it is what the spawner's own do-not-fail-open guards
-(`handle_exit`, `reconcile_stale_current`) decide a card's `in-flight` state from, and it
-is called once per claim and once per exit — never the hot polling path — so paying for a
-live read there costs nothing and a cached answer there is never the risk. `move`, `stage`,
-`unclaim` and `sweep-stages` invalidate the items cache only once their own mutation has
-landed, never before it — invalidating ahead of a mutation that has not landed yet leaves a
-window where a concurrent reader (another lane's poll, the floor page) can re-warm the
-cache with the stale, pre-mutation snapshot, which then serves for the rest of the TTL with
-nothing left to invalidate it again.
+(default 120 seconds; `project()`'s is a fixed 10 minutes, since a board's fields only
+change when Steve edits it, and a miss on a field or option name invalidates that cache and
+retries once live rather than waiting out the TTL). `BOARD_CACHE_SEC=0` turns the
+`items()`/`project()` cache off — reads and writes both — which is what every offline suite
+sets, so a test never touches a real directory. `show` always reads live, cache or not: it
+is what the spawner's own do-not-fail-open guards (`handle_exit`, `reconcile_stale_current`)
+decide a card's `in-flight` state from, and it is called once per claim and once per exit —
+never the hot polling path — so paying for a live read there costs nothing and a cached
+answer there is never the risk. `move`, `stage`, `unclaim` and `sweep-stages` invalidate the
+items cache only once their own mutation has landed, never before it — invalidating ahead of
+a mutation that has not landed yet leaves a window where a concurrent reader (another lane's
+poll, the floor page) can re-warm the cache with the stale, pre-mutation snapshot, which then
+serves for the rest of the TTL with nothing left to invalidate it again.
+
+**October 9, 2026 (card #114):** every board on the floor page read unreachable and every
+lane slept five minutes — the second time in two days ([#98](https://github.com/roloc/watcher/issues/98)
+was the first). The account had burned its full 5,000-point hour in nineteen minutes, about
+125 points a minute, and nothing on the box could say where they went: the cache from #98
+was live and deployed the whole time, and it still was not enough. Measured afterward, idle
+(no tick running): about 30 points a minute with the cache working as designed, against the
+91-points-a-minute figure above — the gap is three deploys' worth of lane restarts (35 in
+one window) each paying for a fresh first poll, and `sweep-stages` bypassing the cache
+entirely on a forced live read every `STAGE_SWEEP_SEC` **per lane** — nine lanes, about 108
+full board reads an hour the cache never saw. Three fixes:
+
+- **The old 45-second TTL was shorter than the lanes' own 60-second poll** — a lane's own
+  next poll was *always* a miss on its own last read, and only two different lanes landing
+  within 45 seconds of each other ever actually shared one. 120 seconds comfortably outlives
+  one poll interval.
+- **A cache miss takes an exclusive lock around its own refill** (`_with_lock`, POSIX
+  `fcntl.flock` — no shell `flock` binary, so this needs nothing extra on a Mac): a second
+  process racing the same miss (measured October 9: the same board read by two processes
+  within a second of each other, twice in two minutes) waits for the first's write and reads
+  that back, rather than paying for a live call of its own.
+- **`sweep-stages` is a board-level sweep, not a per-lane one**: a stamp file under the cache
+  dir, named for the board, remembers when it last actually ran. Every lane still calls it on
+  its own `STAGE_SWEEP_SEC` clock, but only the first one inside the interval does any work
+  at all — the rest find the stamp fresh and touch nothing, not even a cache read. The one
+  that does run reads the ordinary (now warmer) `items()` cache instead of forcing a live
+  fetch, since `STAGE_SWEEP_SEC` (five minutes) comfortably outlives `BOARD_CACHE_SEC`.
+
+**A rate-limited `gh` call no longer fails the poll.** `items()` and `project()` catch it and
+serve whatever is cached, however old — one stderr line naming its age — instead of exiting
+and leaving every lane with nothing to show. With nothing cached at all (a cold box, or a
+cache directory nothing can write to) this still exits 1, the same as any other `gh`
+failure; there is no honest fallback for that case.
+
+**The ledger.** Every real `gh api graphql` call that carries a `rateLimit` object (`items()`
+always does; `project()`'s own query was given one too) appends one line to
+`$WATCHER_CACHE_DIR/ledger.jsonl`: when, which caller, which kind of query, and the
+`cost`/`remaining`/`limit` GitHub returned. The caller comes from `WATCHER_LEDGER_CALLER`,
+an env var `spawn.sh` sets to `lane:<PROJECT_NAME>` for its own polling and to
+`tick:<PROJECT_NAME>:<card>` for the one tick it launches (so a lane's own poll and the card
+it is working never share a line), and `floor.py` sets to `floor` for the one subprocess call
+it makes that can trigger a live GraphQL call (`board.py dump`; its other calls are cache or
+`gh issue view` reads that never touch the ledger at all). Lines older than 24 hours are
+dropped the next time the file crosses 512KB, not on every append. `board.py ledger` sums the
+last hour by caller — never a call of its own, the same free ride `ratelimit` already gets —
+and the floor page's header shows it beside the remaining-points line, in red when the
+current pace would exhaust the account before the hour resets. The next time the hour runs
+out, one command on the box and one line on the floor say who spent what, instead of nothing.
 
 The account's remaining budget and reset time ride along for free on whichever query last
 asked for it (`items()`'s own GraphQL query includes `rateLimit{ remaining resetAt limit
-}`, itself free to ask for): `board.py ratelimit` prints the last cached value and never
+cost }`, itself free to ask for): `board.py ratelimit` prints the last cached value and never
 makes a call of its own. The floor page's header shows it, read the same way, so the next
 time a tick waits out the hourly reset Steve can see why from his phone instead of
 guessing.
@@ -168,12 +215,23 @@ sat in Done reading "Parked" that way (watcher [#35](https://github.com/roloc/wa
 [#43](https://github.com/roloc/watcher/issues/43), [#44](https://github.com/roloc/watcher/issues/44),
 September 28, 2026).
 
-So every five minutes (`STAGE_SWEEP_SEC`, an env knob like the In review limits) each
-lane's spawner runs `board sweep-stages`: one board read, and the Stage emptied on every
-closed card that still has one, at most 20 a run. It is quiet (no Discord post), it is
-board-wide rather than per lane (a second lane's sweep finds nothing left), and it is
-best-effort: a sweep that fails is one line in the journal, waits for its next turn, and
-never costs the poll. An open card is never touched — a parked card stays Parked.
+So every five minutes (`STAGE_SWEEP_SEC`, an env knob like the In review limits, exported by
+`spawn.sh` so `board.py` reads the same value) each lane's spawner calls `board
+sweep-stages`, and the Stage is emptied on every closed card that still has one, at most 20 a
+run. It is quiet (no Discord post), board-wide rather than per lane (a second lane's sweep
+finds nothing left to clear), and best-effort: a sweep that fails is one line in the journal,
+waits for its next turn, and never costs the poll. An open card is never touched — a parked
+card stays Parked.
+
+**The sweep itself is board-level, not per-lane (card #114).** Every lane still calls
+`sweep-stages` on its own `STAGE_SWEEP_SEC` clock, but `board.py` keeps a stamp file under
+the cache dir, named for the board: whichever lane's call lands first inside the interval
+does the real work, and every other lane's call in that same window finds the stamp fresh
+and returns immediately — no board read, no mutation check, nothing. Before this, nine lanes
+each sweeping on their own independent 300-second clock meant up to 108 full board reads an
+hour the cache never saw (`items(fresh=True)`, forced live every time); now the one lane that
+does run reads the ordinary `items()` cache, which by the time `STAGE_SWEEP_SEC` elapses has
+almost always already been kept warm by some lane's own 60-second poll.
 
 ## The awaiting-rebuild sweep
 

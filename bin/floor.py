@@ -112,6 +112,8 @@ ALLOWED_FIELDS = {
     # the account's GraphQL budget (card #98), read from board.py's own cache — never a
     # call of its own
     "github_remaining", "github_reset", "github_limit",
+    # this hour's spend by caller (card #114), from the ledger — same free ride
+    "github_points_per_min", "github_spend", "caller", "points",
     # the server room (October 9, 2026): the box itself, the tokens the lanes moved, and —
     # when the floor is given a Proxmox token — the lab's other boxes
     "server", "cpus", "load1", "mem_total", "mem_used", "disk_total", "disk_used", "uptime",
@@ -272,7 +274,11 @@ def fetch_board(owner, number, board_py=None, timeout=60):
     one GraphQL round trip for every field any lane's pill needs. Raises on failure; the
     caller renders that project with an empty board rather than crashing the whole page."""
     board_py = board_py or os.path.join(HERE, "board.py")
-    env = dict(os.environ, BOARD_OWNER=owner, BOARD_NUMBER=str(number))
+    # WATCHER_LEDGER_CALLER="floor" (card #114): the one board.py invocation this file
+    # makes that can actually trigger a live GraphQL call (the others below are cache or
+    # `gh issue view` reads that never touch the ledger at all) — so this is the one
+    # caller name the ledger needs from here.
+    env = dict(os.environ, BOARD_OWNER=owner, BOARD_NUMBER=str(number), WATCHER_LEDGER_CALLER="floor")
     r = subprocess.run([sys.executable, board_py, "dump"], capture_output=True, text=True,
                         env=env, timeout=timeout)
     if r.returncode != 0:
@@ -1047,7 +1053,7 @@ def make_card_lookup(repos_fn, fetcher=fetch_card, cache_sec=60, clock=time.time
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
                  images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
                  deploy_fn=None, deploy_repo=None, ratelimit_fn=None, box_stats_fn=None,
-                 proxmox_fn=None):
+                 proxmox_fn=None, ledger_fn=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -1167,6 +1173,16 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
         except Exception as e:
             print(f"floor: ratelimit unreadable: {e}", file=sys.stderr, flush=True)
 
+    # The hour's GraphQL spend by caller (card #114), beside the remaining-points line
+    # above: a failed read leaves the line blank, never a crash — the same shape every
+    # other best-effort reader on this page already has.
+    ledger = {}
+    if ledger_fn:
+        try:
+            ledger = ledger_fn() or {}
+        except Exception as e:
+            print(f"floor: ledger unreadable: {e}", file=sys.stderr, flush=True)
+
     # The server room. The box itself always; the lab's other boxes only when the floor
     # was given a Proxmox token, and a failed read leaves them out with one journal line.
     proxmox = []
@@ -1187,7 +1203,11 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
                    "needs_steve_total": needs_steve_total,
                    "github_remaining": rl.get("remaining"),
                    "github_reset": rl.get("resetAt"),
-                   "github_limit": rl.get("limit")},
+                   "github_limit": rl.get("limit"),
+                   "github_points_per_min": ledger.get("points_per_min"),
+                   "github_spend": [{"caller": c, "points": p} for c, p in
+                                     sorted((ledger.get("by_caller") or {}).items(),
+                                            key=lambda kv: kv[1], reverse=True)]},
         "projects": out_projects,
         "recent": recent[:RECENT_TOTAL],
         "wins": {"days": WINS_DAYS, "items": sorted(wins.values(), key=lambda w: w["when"], reverse=True)},
@@ -1271,6 +1291,25 @@ def board_ratelimit(board_py=None, timeout=10):
     board_py = board_py or os.path.join(HERE, "board.py")
     try:
         r = subprocess.run([sys.executable, board_py, "ratelimit"],
+                            capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if r.returncode != 0:
+        return {}
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {}
+
+
+def board_ledger(board_py=None, timeout=10):
+    """This hour's GraphQL spend by caller — `board.py ledger`, which only ever reads the
+    ledger file every real call already appended to (card #114): never a call of its own.
+    `{}` on any failure, the same shape `board_ratelimit` has — the header line then shows
+    nothing beside the remaining-points line, never a crash."""
+    board_py = board_py or os.path.join(HERE, "board.py")
+    try:
+        r = subprocess.run([sys.executable, board_py, "ledger"],
                             capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return {}
@@ -1731,6 +1770,7 @@ INDEX_HTML = """<!doctype html>
   <h1 id="box">The floor</h1>
   <div class="muted" id="clock"></div>
   <div class="muted" id="github-budget"></div>
+  <div class="muted" id="github-spend"></div>
   <button class="view-toggle" id="studio-btn" type="button">Studio</button>
 </header>
 <div class="alert" id="load-error" style="display:none">Can't reach the floor's own data right now — retrying&hellip;</div>
@@ -2146,6 +2186,28 @@ function render(state) {
     ghEl.textContent = `GitHub: ${state.header.github_remaining.toLocaleString()} / ${limitTxt} · resets ${resetTxt}`;
   } else {
     ghEl.textContent = "";
+  }
+
+  // This hour's spend by caller (card #114), from the ledger — same free ride as the
+  // line above. Red when the current pace would exhaust the remaining points before the
+  // hour resets (the October 9, 2026 outage: nothing on the page said where 5,000 points
+  // went in nineteen minutes).
+  const spendEl = document.getElementById("github-spend");
+  const spend = state.header.github_spend || [];
+  if (spend.length && state.header.github_points_per_min != null) {
+    const ppm = state.header.github_points_per_min;
+    const parts = spend.map(s => `${esc(s.caller)} ${Math.round(s.points)}`);
+    spendEl.textContent = `This hour: ${parts.join(" · ")} (${ppm.toFixed(1)} pts/min)`;
+    let hot = false;
+    if (ppm > 0 && state.header.github_remaining != null && state.header.github_reset) {
+      const minsToReset = (new Date(state.header.github_reset) - new Date(state.header.time)) / 60000;
+      const minsToExhaust = state.header.github_remaining / ppm;
+      hot = minsToExhaust < minsToReset;
+    }
+    spendEl.classList.toggle("alert", hot);
+  } else {
+    spendEl.textContent = "";
+    spendEl.classList.remove("alert");
   }
 
   const projects = document.getElementById("projects");
@@ -3628,7 +3690,7 @@ def main(argv):
                             images_fn=board_images, rounds_fn=board_rounds,
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=lambda: deploy_status(REPO_ROOT, deploy_state, deploy_repo),
-                            ratelimit_fn=board_ratelimit, box_stats_fn=box_stats,
+                            ratelimit_fn=board_ratelimit, ledger_fn=board_ledger, box_stats_fn=box_stats,
                             proxmox_fn=fetch_proxmox)
 
     def build_lanes():
