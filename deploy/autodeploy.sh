@@ -590,8 +590,17 @@ release_new() {
   # before this one), never the real remote. Left at that default, this release's own next
   # `git fetch origin` would fetch from wherever the pointer happens to be pointing by
   # then — itself, most of the time — and never see a commit newer than its own.
+  # The clone's own `origin/main` is copied from the SOURCE'S local `main` branch, not
+  # from the source's own `origin/main` (freshly fetched or not) — every release folder
+  # after the first is checked out detached and never advances its local `main`, so that
+  # branch, and anything cloned from it, drifts one release behind forever. Fetching once
+  # here, against the now-correct URL, is what makes this release's own `origin/main`
+  # agree with `$sha` instead of with whatever the chain behind it was last fetched to
+  # (card #112: the Ship desk read "checking <the previous commit>" for five minutes after
+  # every deploy, because the fresh release's own `origin/main` record was stale from the
+  # moment it was made, not because anything on the box was actually behind).
   real_origin="$(wgit 'remote get-url origin')"
-  if as_user "git clone -q '$WATCHER_DIR' '$dir' && git -C '$dir' remote set-url origin '$real_origin' && git -C '$dir' checkout -q --detach $sha" >&2; then
+  if as_user "git clone -q '$WATCHER_DIR' '$dir' && git -C '$dir' remote set-url origin '$real_origin' && git -C '$dir' fetch -q origin '$BRANCH' && git -C '$dir' checkout -q --detach $sha" >&2; then
     echo "$dir"
   else
     as_user "rm -rf '$dir'" >&2

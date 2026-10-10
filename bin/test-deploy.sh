@@ -178,6 +178,13 @@ check "the pointer is already flipped BEFORE install.sh runs (the floor page mus
       called "pointer=${T:0:12}"
 check "install.sh got each project once"               called "install riffmap watcher NO_PULL"
 check "no lane is ever restarted by an ordinary deploy" not_called "systemctl restart"
+# Card #112: the new release is cloned from the previous one, whose own local `main`
+# branch is frozen behind the target (it is checked out detached and never advances) —
+# without the fix, the fresh release's own `origin/main` copies that stale branch instead
+# of the commit it was actually just checked out to, and the floor page reads it as
+# "checking <the old commit>" until the next run happens to fetch again.
+check "...the fresh release's own origin/main already agrees with the commit it holds" \
+      [ "$(git -C "$RELEASES/${T:0:12}" rev-parse origin/main)" = "$T" ]
 check "no PAUSE is ever written by an ordinary deploy"  [ ! -e "$STATE/riffmap/PAUSE" ] && [ ! -e "$STATE/watcher/PAUSE" ]
 check "the deployed commit is recorded"                [ "$(cat "$TMP/dstate/deployed")" = "$T" ]
 check "a deploy that landed clears the step file"      [ ! -e "$TMP/dstate/step" ]
