@@ -878,7 +878,11 @@ try:
               b.eval("""(() => { const m = document.querySelector('.office-room.break [data-cookies]').getBoundingClientRect();
                       const es = [...document.querySelectorAll('.character[data-room="Break room"]')];
                       return es.length === 6 && es.every(e => e.classList.contains('eating') && e.querySelector('svg').innerHTML.includes('#c9915a')
-                          && Math.abs((e.getBoundingClientRect().left + e.getBoundingClientRect().right) / 2 - (m.left + m.right) / 2) < 300); })()"""))
+                          && Math.abs((e.getBoundingClientRect().left + e.getBoundingClientRect().right) / 2 - (m.left + m.right) / 2) < 200); })()"""))
+        check("it is a huddle, not the seat row: the six stand in two rows, and the three who sat far from the machine walked over",
+              b.eval("""(() => { const ys = new Set([...document.querySelectorAll('.character[data-room="Break room"]')].map(e => Math.round(e.getBoundingClientRect().bottom)));
+                      return ys.size === 2; })()""")
+              and b.eval("Object.entries(" + json.dumps(seats) + ").filter(([k, v]) => document.querySelector('.character[data-lane=\"' + k + '\"]').style.left + ' ' + document.querySelector('.character[data-lane=\"' + k + '\"]').style.top !== v).length") >= 5)
         check("a crowd, but nobody stands on anybody and every plate is readable (review of #119)",
               overlaps(b) == [], overlaps(b))
         check("the cookies landed on the break room floor, none outside the room",

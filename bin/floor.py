@@ -2589,8 +2589,8 @@ function characterSVG(pill, look) {
   // and the cookie is up at the mouth, a bite out of it — a sleeper wakes for one too (no
   // z's), which is why `sleepy` above looks at the cookie.
   const mug = look.cookie
-    ? `<path d="M18 11.5 a3 3 0 1 1 0.1 0 z" style="fill:#c9915a"/><circle cx="17.2" cy="11" r=".7" style="fill:#5b3a1a"/><circle cx="19.3" cy="12.4" r=".7" style="fill:#5b3a1a"/>
-       <circle cx="16.3" cy="10.2" r="1.6" style="fill:${look.skin}"/>`
+    ? `<circle cx="19" cy="11.5" r="3.6" style="fill:#c9915a"/><circle cx="18" cy="10.6" r=".8" style="fill:#5b3a1a"/><circle cx="20.4" cy="12.6" r=".8" style="fill:#5b3a1a"/><circle cx="19.8" cy="10" r=".6" style="fill:#5b3a1a"/>
+       <circle cx="16.6" cy="10" r="2" style="fill:${look.skin}"/>`
     : pill === "idle"
       ? `<rect x="20.5" y="19" width="5" height="5.5" rx="1" style="fill:#f3f4f6;opacity:.9"/>` : "";
   const glasses = look.glasses
@@ -2866,15 +2866,16 @@ function cookieTime() {
   }, window.__cookiePartyMs || COOKIE_PARTY_MS);
 }
 window.__cookieTime = cookieTime;
-// Where everyone stands at cookie time: a row in front of the machine, a seat's width
-// apart (the same spacing as everywhere, so nobody stands on anybody — review of
-// roloc/watcher#119 caught a tighter crowd with its plates stacked), the whole row shifted
-// into the room rather than each spot clamped on its own, and more rows when the room is
-// too narrow for one. Rows are counted so the room can grow to hold them.
+// Where everyone stands at cookie time: a huddle in front of the machine, at most four
+// across and as many rows as it takes, a seat's width apart (the same spacing as
+// everywhere, so nobody stands on anybody — review of roloc/watcher#119 caught a tighter
+// crowd with its plates stacked, and the usability pass caught a single row that looked
+// like nobody had moved). Each row is shifted into the room whole rather than clamped
+// spot by spot. Rows are counted so the room can grow to hold them for the party.
 function cookieSpots(br, n) {
   const cx = br.x + VENDING.x + VENDING.w / 2 + 40;
   const minX = br.x + ROOM_PAD + CHAR_W / 2, maxX = br.x + br.w - ROOM_PAD - CHAR_W / 2;
-  const perRow = Math.max(1, Math.floor((maxX - minX) / CHAR_W) + 1);
+  const perRow = Math.max(1, Math.min(4, Math.floor((maxX - minX) / CHAR_W) + 1));
   const spots = [];
   for (let i = 0; i < n; i++) {
     const row = Math.floor(i / perRow), col = i % perRow, inRow = Math.min(perRow, n - row * perRow);
