@@ -119,10 +119,11 @@ full board reads an hour the cache never saw. Three fixes:
   fetch, since `STAGE_SWEEP_SEC` (five minutes) comfortably outlives `BOARD_CACHE_SEC`.
 
 **A rate-limited `gh` call no longer fails the poll.** `items()` and `project()` catch it and
-serve whatever is cached, however old — one stderr line naming its age — instead of exiting
-and leaving every lane with nothing to show. With nothing cached at all (a cold box, or a
-cache directory nothing can write to) this still exits 1, the same as any other `gh`
-failure; there is no honest fallback for that case.
+serve whatever is cached, as long as it is no more than 30 minutes old — one stderr line
+naming its age — instead of exiting and leaving every lane with nothing to show. With
+nothing cached at all (a cold box, a cache directory nothing can write to), or nothing
+fresher than 30 minutes, this still exits 1, the same as any other `gh` failure; serving a
+board snapshot from the middle of last hour is not an honest stand-in for the live one.
 
 **The ledger.** Every real `gh api graphql` call that carries a `rateLimit` object (`items()`
 always does; `project()`'s own query was given one too) appends one line to

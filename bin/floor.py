@@ -2196,7 +2196,10 @@ function render(state) {
   const spend = state.header.github_spend || [];
   if (spend.length && state.header.github_points_per_min != null) {
     const ppm = state.header.github_points_per_min;
-    const parts = spend.map(s => `${esc(s.caller)} ${Math.round(s.points)}`);
+    // textContent (not innerHTML) below, so a caller name is never HTML-escaped: esc()
+    // here would show literal "&amp;" for a caller containing "&", the way every other
+    // plain-text line in this header is already written (ghEl, two lines up).
+    const parts = spend.map(s => `${s.caller} ${Math.round(s.points)}`);
     spendEl.textContent = `This hour: ${parts.join(" · ")} (${ppm.toFixed(1)} pts/min)`;
     let hot = false;
     if (ppm > 0 && state.header.github_remaining != null && state.header.github_reset) {

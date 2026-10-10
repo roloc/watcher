@@ -571,6 +571,17 @@ try:
 except SystemExit:
     died2 = True
 check("rate-limited with nothing cached at all: still exits, same as any other gh failure", died2)
+
+board.OWNER, board.NUMBER = "roloc", 113  # back to the board with a stale-but-present cache
+too_old = time.time() - (board.STALE_FALLBACK_MAX_SEC + 60)
+os.utime(_old_items_path, (too_old, too_old))
+try:
+    board.items()
+    died3 = False
+except SystemExit:
+    died3 = True
+check("rate-limited with a cache older than STALE_FALLBACK_MAX_SEC: still exits, not served "
+      "as current (reviewer: an unbounded stale serve is its own kind of wrong board state)", died3)
 board.subprocess.run = graphql_stub_run
 
 print("24. the closed-card Stage sweep is board-level, not per-lane (card #114): two "

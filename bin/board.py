@@ -57,11 +57,11 @@ on every append. `board.py ledger` sums the last hour by caller — never a call
 the same free-ride `ratelimit` already does.
 
 A `gh` call that fails because the account is rate-limited does not fail `items()` or
-`project()` outright: with a cached answer on file, however old, that is what gets served
-(one stderr line naming its age) rather than failing the whole poll — the exact shape of the
-October 9, 2026 outage (card #114), where a bad minute turned into every lane sleeping five
-minutes with nothing on file to say why. With no cached answer at all, this still exits 1
-the same as before.
+`project()` outright: with a cached answer on file no older than 30 minutes, that is what
+gets served (one stderr line naming its age) rather than failing the whole poll — the exact
+shape of the October 9, 2026 outage (card #114), where a bad minute turned into every lane
+sleeping five minutes with nothing on file to say why. With no cached answer at all, or
+nothing fresher than 30 minutes, this still exits 1 the same as before.
 
 Every failure exits 1 with a one-line `board.py: ...` message on stderr; only a
 successful command exits 0. A caller may therefore treat any non-zero exit as "do not
@@ -113,9 +113,10 @@ LEDGER_TRIM_BYTES = 512 * 1024  # trim on crossing this size, not on every appen
 class RateLimitError(Exception):
     """Raised by `gh()` when the account is rate-limited, instead of exiting the whole
     process (card #114): `items()`/`project()` catch it and fall back to whatever cache is
-    on file, however old, rather than failing the poll with nothing to serve. A caller with
-    no sensible stale fallback (a mutation, or a read with nothing cached yet) lets it
-    propagate to the top-level dispatch below, which exits 1 the same as `gh()` always did."""
+    on file, within STALE_FALLBACK_MAX_SEC, rather than failing the poll with nothing to
+    serve. A caller with no sensible stale fallback (a mutation, a read with nothing
+    cached yet, or nothing cached fresh enough) lets it propagate to the top-level
+    dispatch below, which exits 1 the same as `gh()` always did."""
 
 _cache_dir_cached = None
 _cache_dir_warned = False
@@ -333,10 +334,13 @@ def _ledger_line_ts(line):
 
 def _ledger_hour_summary():
     """`{"points_per_min": <float>, "by_caller": {<caller>: <points int>, ...}}` over the
-    ledger's last hour — `{}` if nothing is on file yet. `cost` is `None` for a line whose
-    query carried no rateLimit object (a mutation; card #114's own "How": those were never
-    the cost driver measured on October 9) and contributes nothing to the sum, the caller
-    still appearing with 0 if it made no other call."""
+    ledger's last hour — `{}` if nothing is on file yet. `points_per_min` divides by the
+    span actually covered (oldest line in the window to now), not a flat 60: a box that
+    only started ledgering a few minutes ago would otherwise read up to 12x low on a fixed
+    divisor, hiding exactly the spike this line exists to show. `cost` is `None` for a line
+    whose query carried no rateLimit object (a mutation; card #114's own "How": those were
+    never the cost driver measured on October 9) and contributes nothing to the sum, the
+    caller still appearing with 0 if it made no other call."""
     path = _cache_path(LEDGER_NAME)
     if not path:
         return {}
@@ -345,21 +349,27 @@ def _ledger_hour_summary():
             lines = f.readlines()
     except OSError:
         return {}
-    cutoff = time.time() - 3600
+    now = time.time()
+    cutoff = now - 3600
     by_caller = {}
+    oldest_ts = None
     for ln in lines:
         try:
             rec = json.loads(ln)
         except ValueError:
             continue
-        if rec.get("ts", 0) < cutoff:
+        ts = rec.get("ts", 0)
+        if ts < cutoff:
             continue
+        if oldest_ts is None or ts < oldest_ts:
+            oldest_ts = ts
         caller = rec.get("caller") or "unknown"
         by_caller[caller] = by_caller.get(caller, 0) + (rec.get("cost") or 0)
     if not by_caller:
         return {}
     total = sum(by_caller.values())
-    return {"points_per_min": total / 60, "by_caller": by_caller}
+    span_min = max((now - oldest_ts) / 60, 1)
+    return {"points_per_min": total / span_min, "by_caller": by_caller}
 
 
 def gh(query, **vars):
@@ -367,9 +377,14 @@ def gh(query, **vars):
     for k, v in vars.items():
         cmd += ["-F" if isinstance(v, int) else "-f", f"{k}={v}"]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        # A timeout (card #114, reviewer): items()/project() hold an exclusive lock
+        # across this call, so a `gh` that hangs — rather than fails fast — would block
+        # every other process racing the same cache miss, not just this one.
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
         sys.exit("board.py: `gh` is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        sys.exit("board.py: gh timed out")
     if r.returncode:
         err = r.stderr.strip()[:400]
         if "rate limit" in err.lower():
@@ -406,7 +421,8 @@ def project(fresh=False):
             cached = _cache_read(name, sec)
             if cached is not None:
                 return cached["project"], cached["fields"]
-        q = """query($owner:String!,$number:Int!){ user(login:$owner){ projectV2(number:$number){
+        q = """query($owner:String!,$number:Int!){ rateLimit{ remaining resetAt limit cost }
+          user(login:$owner){ projectV2(number:$number){
           id title
           fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } }"""
         try:
@@ -427,12 +443,16 @@ def project(fresh=False):
     return _refill()
 
 
+STALE_FALLBACK_MAX_SEC = 1800  # half the hourly reset window (card #114, reviewer)
+
+
 def _stale_or_die(name, err, what):
     """`items()`/`project()`'s shared rate-limit fallback (card #114): with a cached
-    answer on file, however old, serve that — one stderr line naming its age — rather than
-    failing the whole poll on an account-wide outage nothing here can fix. With nothing
-    cached at all there is no honest fallback, so this exits exactly like `gh()` always
-    did on a hard failure."""
+    answer on file no older than STALE_FALLBACK_MAX_SEC, serve that — one stderr line
+    naming its age — rather than failing the whole poll on an account-wide outage nothing
+    here can fix. With nothing cached at all, or nothing fresh enough to be an honest
+    stand-in for the live board, this exits exactly like `gh()` always did on a hard
+    failure — a card closed or moved an hour ago has no business still reading as current."""
     stale = _cache_read_any_age(name)
     if stale is None:
         sys.exit(f"board.py: gh failed: {err}")
@@ -441,6 +461,8 @@ def _stale_or_die(name, err, what):
         age = int(time.time() - os.stat(path).st_mtime) if path else -1
     except OSError:
         age = -1
+    if age < 0 or age > STALE_FALLBACK_MAX_SEC:
+        sys.exit(f"board.py: gh failed: {err} (cached {what} is {age}s old, too stale to serve)")
     sys.stderr.write(f"board.py: rate limited; serving the cached {what}, {age}s old: {err}\n")
     return stale
 
