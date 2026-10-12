@@ -411,6 +411,11 @@ unit names, canary or not — and that copy's own re-exec shim is what hands the
 say: a canary lane never follows `/opt/watcher`'s own pointer at all, it runs a second,
 independent checkout once it is in.
 
+The soak's quiet limit (`DEPLOY_CANARY_QUIET_MIN`) defaults to 30 minutes (card #132,
+October 12, 2026): a quiet Watcher board promotes a clean commit on its own after 30
+minutes with no canary ticks, rather than making a prompt change sit for hours just
+because nobody happened to hand the watcher a card.
+
 ## Dependencies
 
 Steve can hand over several cards at once and the prerequisite is worked first. The

@@ -37,7 +37,9 @@
 #      own lane(s) directly, on purpose: it is bake-testing a risky change on a small,
 #      consenting set of lanes, not an ordinary deploy. A run later sees the soak through:
 #      DEPLOY_CANARY_SOAK_TICKS clean ticks on those lanes promotes (falls through to step 4
-#      below); DEPLOY_CANARY_QUIET_MIN minutes with no canary work at all promotes anyway, so
+#      below); DEPLOY_CANARY_QUIET_MIN minutes (default 30 — Steve's call, October 12, 2026:
+#      a prompt change should not sit for an afternoon just because the Watcher board is
+#      empty) with no canary work at all promotes anyway, so
 #      a quiet Watcher board cannot hold every other project back forever; one tick that does
 #      not finish clean (killed, a subtype of error_during_execution, or parked after 2
 #      attempts) rolls the canary checkout back to the commit before it and holds this one
@@ -86,7 +88,7 @@ EVAL_PATHS="${DEPLOY_EVAL_PATHS:-commands agents docs evals bin/eval.sh CLAUDE.m
 # lane(s) reach first clears the way to promote.
 CANARY_DIR="${DEPLOY_CANARY_DIR:-/opt/watcher-canary}"
 CANARY_SOAK_TICKS="${DEPLOY_CANARY_SOAK_TICKS:-3}"
-CANARY_QUIET_MIN="${DEPLOY_CANARY_QUIET_MIN:-240}"
+CANARY_QUIET_MIN="${DEPLOY_CANARY_QUIET_MIN:-30}"
 
 # Every line goes to the journal, and to $DSTATE/history: a plain file the floor page's
 # Ship desk reads for its Peek (bin/floor.py). The page runs as the lanes' user, which
@@ -542,7 +544,7 @@ canary_stage() {
     say "canary: ${tgt:0:7} had $ticks clean tick(s) on the canary lane(s); promoting"
     return 0
   fi
-  if [ $(( $(date +%s) - ${since:-0} )) -ge $(( CANARY_QUIET_MIN * 60 )) ]; then
+  if [ -z "$(canary_busy)" ] && [ $(( $(date +%s) - ${since:-0} )) -ge $(( CANARY_QUIET_MIN * 60 )) ]; then
     say "canary: ${tgt:0:7} has been quiet on the canary lane(s) for over $CANARY_QUIET_MIN min; promoting anyway"
     return 0
   fi

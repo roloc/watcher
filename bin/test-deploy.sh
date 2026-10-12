@@ -412,6 +412,22 @@ echo "$T $(( $(date +%s) - 61 * 60 ))" > "$TMP/dstate/canary-soak"   # quiet for
 run
 check "canary D: a quiet canary promotes on time" [ "$(head_)" = "$T" ]
 
+# D2. The quiet clock does not promote while a canary tick is still running — "quiet" means
+# no canary work at all, and a tick in flight is work, same as case F's reasoning. Without
+# this, a quiet clock shorter than an ordinary tick promotes mid-tick, clears the soak
+# record, and a later failure on that same tick never rolls anything back.
+canary_fresh; OLD="$(canary_head)"; T="$(commit commands/watch.md canary-d2)"
+run   # the canary swap
+echo "$T $(( $(date +%s) - 61 * 60 ))" > "$TMP/dstate/canary-soak"   # quiet for 61 min > 60
+mkdir -p "$STATE/watcher/logs"; : > "$STATE/watcher/logs/still-running.json"
+echo 950 > "$STATE/watcher/current"   # tick_running("watcher") now true
+run
+check "canary D2: a busy canary is not promoted on the quiet clock alone" [ "$(head_)" != "$T" ]
+check "canary D2: …the canary checkout is still the one the tick is running on" [ "$(canary_head)" = "$T" ]
+echo '{"subtype":"success"}' > "$STATE/watcher/logs/still-running.json"; rm -f "$STATE/watcher/current"
+run   # the tick finished clean and it is still quiet: now it promotes
+check "canary D2: once the tick is gone, the quiet clock promotes" [ "$(head_)" = "$T" ]
+
 # E. A commit that skips the suite (nothing a model reads changed) promotes straight away,
 # canary lane configured or not — canary is additive, never a new gate of its own.
 canary_fresh; OLD_CANARY="$(canary_head)"; T="$(commit README.md canary-e)"
