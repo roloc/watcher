@@ -306,7 +306,7 @@ for i in "${!CASES[@]}"; do
   if [ -s "${results[i]}" ]; then
     read -r d_cases d_n d_fail < "${results[i]}"
   else
-    d_cases=0; d_n=1; d_fail=1
+    d_cases=1; d_n=1; d_fail=1
     say "$(basename "${CASES[$i]}" .sh): subshell" "FAIL — died without writing a result"
   fi
   cases=$((cases + d_cases))
