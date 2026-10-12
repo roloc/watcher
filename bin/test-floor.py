@@ -772,8 +772,17 @@ WAIT_LANES = []
 # No lock file at all yet: this box has never run the deployer.
 check("never having run at all: no alive line, not a crash", deploy_now()["alive"] is None)
 open(os.path.join(DS, "lock"), "w").close()
-os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 120, NOW.timestamp() - 120))
-check("between runs: checked 2m ago (the lock file's own mtime), not from the history",
+os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 1680, NOW.timestamp() - 1680))
+check("no last-run stamp yet (a box whose deployer predates card #129): falls back to the lock's own mtime",
+      deploy_now()["alive"] == {"running": False, "since_sec": 1680, "next_in_sec": 0, "stale": True},
+      deploy_now()["alive"])
+# Card #129's own incident: a 27-minute run leaves the lock (touched at its START, by the
+# `exec` that opens it) 28 minutes stale the moment it finishes, 2 minutes after that.
+# `last-run`, touched on exit, is what "checked ago" reads between runs now — the lock's
+# own mtime stops mattering once a run has ended.
+open(os.path.join(DS, "last-run"), "w").close()
+os.utime(os.path.join(DS, "last-run"), (NOW.timestamp() - 120, NOW.timestamp() - 120))
+check("between runs: checked 2m ago (last-run's own mtime, from a run that ended 2m ago) — not 28m stale from the lock's own start time",
       deploy_now()["alive"] == {"running": False, "since_sec": 120, "next_in_sec": 180, "stale": False},
       deploy_now()["alive"])
 # RUNNING here stands for deploy_service_running()'s own answer, true for the WHOLE length
@@ -781,14 +790,15 @@ check("between runs: checked 2m ago (the lock file's own mtime), not from the hi
 # calls it "activating", never "active", for as long as autodeploy.sh is executing (found
 # in review, against the live box) — deploy_service_running (not systemctl_is_active) is
 # what tells "mid-run" from "between runs", a fact that section 17b below checks directly.
+os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 30, NOW.timestamp() - 30))
 RUNNING = True
-check("mid-run (the oneshot unit is activating): running now, no next-check countdown",
-      deploy_now()["alive"] == {"running": True, "since_sec": 120})
+check("mid-run (the oneshot unit is activating): running now, timed from THIS run's own start (the lock) — last-run's older stamp from the PREVIOUS run is ignored",
+      deploy_now()["alive"] == {"running": True, "since_sec": 30}, deploy_now()["alive"])
 RUNNING = False
-os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 900, NOW.timestamp() - 900))
+os.utime(os.path.join(DS, "last-run"), (NOW.timestamp() - 900, NOW.timestamp() - 900))
 check("older than two timer periods: stale",
       deploy_now()["alive"] == {"running": False, "since_sec": 900, "next_in_sec": 0, "stale": True})
-os.utime(os.path.join(DS, "lock"), (NOW.timestamp() - 120, NOW.timestamp() - 120))
+os.utime(os.path.join(DS, "last-run"), (NOW.timestamp() - 120, NOW.timestamp() - 120))
 
 check("no step file yet: no step, not a crash", deploy_now()["step"] is None)
 with open(os.path.join(DS, "step"), "w") as f:
@@ -850,10 +860,10 @@ check("live: no step, nobody waited on, no lands-by — only the alive line, so 
           "alive": {"running": False, "since_sec": 120, "next_in_sec": 180, "stale": False},
           "step": None, "waiting_for": [], "lands_by": None})
 # Leave DS exactly as section 17 above left it (held/T="58", evals/T="fail 1") for the
-# `dstate()`/`state17` code below, which this block's own `reset()` and lock/step files
-# must not disturb.
+# `dstate()`/`state17` code below, which this block's own `reset()` and lock/last-run/step
+# files must not disturb.
 reset()
-os.remove(os.path.join(DS, "lock")); os.remove(os.path.join(DS, "step"))
+os.remove(os.path.join(DS, "lock")); os.remove(os.path.join(DS, "last-run")); os.remove(os.path.join(DS, "step"))
 open(os.path.join(DS, "evals", T), "w").write("fail 1")
 open(os.path.join(DS, "held", T), "w").write("58")
 

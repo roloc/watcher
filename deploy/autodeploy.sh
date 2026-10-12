@@ -791,4 +791,12 @@ $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -
 
 exec 9> "$DSTATE/lock"
 flock -n 9 || { say "another run is in progress"; exit 0; }
+# Card #129: the lock's own mtime is truncated at the START of every run (the `exec` above),
+# so the floor page's Ship desk — which reads it as "when last checked" between runs — read
+# a run that just took 27 minutes as 27 minutes stale the moment it finished. `last-run` is
+# touched on exit instead, in a trap so a run that errors out still leaves one; `deploy_alive`
+# (bin/floor.py) reads it for "checked ago" between runs and keeps the lock's own mtime for
+# "started ago" while a run is active, where only the start time means anything. Best effort,
+# like every other write under $DSTATE: a failure here must never fail a deploy.
+trap 'touch "$DSTATE/last-run" 2>/dev/null || true' EXIT
 main

@@ -148,6 +148,11 @@ fresh
 run
 check "nothing new: no install, no restart"            not_called "install"
 check "nothing new: says it is live"                   grep -q "live at" "$TMP/out"
+# Card #129: every real run touches last-run on exit, even one that finds nothing to do —
+# the floor page's Ship desk reads it for "checked ago" between runs, never the lock's own
+# start-of-run mtime (which made a long run read as stale for its own length, the moment it
+# finished).
+check "nothing new: last-run is still touched on exit" [ -f "$TMP/dstate/last-run" ]
 
 # 2. CI still running
 fresh; T="$(commit commands/watch.md v2)"
@@ -188,6 +193,9 @@ check "...the fresh release's own origin/main already agrees with the commit it 
 check "no PAUSE is ever written by an ordinary deploy"  [ ! -e "$STATE/riffmap/PAUSE" ] && [ ! -e "$STATE/watcher/PAUSE" ]
 check "the deployed commit is recorded"                [ "$(cat "$TMP/dstate/deployed")" = "$T" ]
 check "a deploy that landed clears the step file"      [ ! -e "$TMP/dstate/step" ]
+# Card #129: last-run is touched on this run's own exit too, whatever the run actually did —
+# the floor page reads it, never the lock (which only ever says when THIS run started).
+check "a landed deploy also touches last-run on exit"  [ -f "$TMP/dstate/last-run" ]
 
 # 4. Steve's own PAUSE is never touched by a deploy — nothing here writes or removes a
 # PAUSE file for a stable lane any more, hand-made or not.

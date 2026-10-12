@@ -400,7 +400,8 @@ def _read(path):
 # `deploy_service_running`, below, is the dedicated check: "activating" (or "reloading")
 # counts as running, same as "active" would for a long-lived unit. The lock file's own
 # mtime (`exec 9> "$DSTATE/lock"` touches it at the START of every run, whether or not that
-# run finds anything new to do) is "when it was last checked" either way.
+# run finds anything new to do) is "when it was last checked" while mid-run; `deploy_alive`,
+# below, reads `last-run` instead once a run has ended (card #129).
 DEPLOY_SERVICE_UNIT = "watcher-deploy.service"
 # deploy/watcher-deploy.timer's own OnUnitInactiveSec. A constant, not a live systemd read:
 # the timer's own schedule only changes with a commit to that file, which this mirrors.
@@ -424,21 +425,35 @@ def deploy_service_running(unit=DEPLOY_SERVICE_UNIT, timeout=5):
 
 def deploy_alive(deploy_state, now, running_fn, period_sec=DEPLOY_TIMER_SEC):
     """live | between runs, for the Ship desk's freshness line — None when the deployer has
-    never run on this box at all (no lock file yet). `since_sec` is always how long ago the
-    lock file was last touched; `next_in_sec`/`stale` only mean anything between runs (mid-
-    run, there is no "next" to count down to — the desk reads "running now" instead).
-    `running_fn` is `() -> bool|None` — `deploy_service_running`, above, in production."""
+    never run on this box at all (no lock file yet). Mid-run, `since_sec` is how long ago
+    the lock file was truncated (the run's own start — there is no "next" to count down to;
+    the desk reads "running now" instead). Between runs, `since_sec`/`next_in_sec`/`stale`
+    come from `last-run` instead (card #129): the lock is only ever touched at a run's
+    START, so reading it between runs made a run that took longer than the timer's own
+    period read as overdue for the length of that run, the moment it finished — `last-run`
+    is touched on exit (deploy/autodeploy.sh), so its mtime is when the last run ENDED.
+    A box whose deployer predates card #129 (lock exists, `last-run` never written yet)
+    falls back to the lock's own mtime, same as before. `running_fn` is
+    `() -> bool|None` — `deploy_service_running`, above, in production."""
     try:
         mtime = os.path.getmtime(os.path.join(deploy_state, "lock"))
     except OSError:
         return None
     running = bool(running_fn()) if running_fn else False
-    since = max(now.timestamp() - mtime, 0)
-    out = {"running": running, "since_sec": int(since)}
-    if not running:
-        out["next_in_sec"] = max(int(period_sec - since), 0)
-        out["stale"] = since > 2 * period_sec
-    return out
+    if running:
+        since = max(now.timestamp() - mtime, 0)
+        return {"running": True, "since_sec": int(since)}
+    try:
+        last_run = os.path.getmtime(os.path.join(deploy_state, "last-run"))
+    except OSError:
+        last_run = mtime
+    since = max(now.timestamp() - last_run, 0)
+    return {
+        "running": False,
+        "since_sec": int(since),
+        "next_in_sec": max(int(period_sec - since), 0),
+        "stale": since > 2 * period_sec,
+    }
 
 
 def read_deploy_step(deploy_state):
