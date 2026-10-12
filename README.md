@@ -289,7 +289,9 @@ run is one step, idempotent, so an interrupted one is picked up by the next:
 2. `verify` green on that exact commit (pending: wait).
 3. The replay suite (`bin/eval.sh`) green on it, **in a scratch clone at that commit**,
    before anything goes live. Skipped when the commits touch nothing a model reads
-   (`commands/ agents/ docs/ evals/ bin/eval.sh CLAUDE.md`). One failure is retried.
+   (`commands/ agents/ docs/ evals/ bin/eval.sh CLAUDE.md`). One failure is retried —
+   the retry reruns only the case(s) that failed, named on `bin/eval.sh`'s own
+   `failed cases:` line, not the whole suite.
 4. **The canary stage** (card #46), only for a commit that touches what a model reads and
    a project that has opted a lane into it (`LANE_CHANNEL=canary` — the Watcher board's own
    lane is the first): `/opt/watcher-canary`, a second checkout, moves onto the commit
