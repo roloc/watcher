@@ -15,7 +15,7 @@ name: Hygiene sweep
 
 on:
   schedule:
-    - cron: '0 13 * * 1'   # Monday, 07:00 Central daylight / 08:00 standard — after riffmap's two
+    - cron: '0 13 * * 1'   # Monday, 08:00 Central daylight / 07:00 standard — after riffmap's two
   workflow_dispatch: {}
 
 permissions:

@@ -24,9 +24,9 @@ of a weekly finding: say so in a comment here and file that card.
 in `.github/workflows/ci.yml` stays green. Nothing here touches what a model reads, so the
 deployer ships it without the replay suite, by itself, once the lanes are idle.
 
-**Where to look when it is done** (the Done comment names it): nothing on the floor page
-— the next Monday's run under Actions → Hygiene sweep says "Clean", and no new hygiene
-card appears on the board.
+**Where to look when it is done** (the Done comment names it): this card — the merged PR
+linked from it, and the comment listing every branch deleted. Nothing on the floor page.
+The later confirmation is that no new hygiene card appears on the board the next Monday.
 
 **Depends on:** nothing. **Part of:** the weekly hygiene routine — README, "The weekly
 hygiene card".

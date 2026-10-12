@@ -63,7 +63,7 @@ names_open_card() {
   [ -z "$n" ] && return 1
   [ "$REMOTE" = 0 ] && return 0
   st="$(gh issue view "$n" --repo "$REPO" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
-  [ "$st" = "OPEN" ]
+  [ "$st" != "CLOSED" ]   # open, or unreadable: kept either way
 }
 
 # ---------------------------------------------------------------- 1. stale branches
@@ -85,7 +85,7 @@ if [ "$REMOTE" = 1 ]; then
     n="$(printf '%s' "$b" | grep -oE '^card-[0-9]+' | tr -dc '0-9')"
     if [ -n "$n" ]; then
       st="$(gh issue view "$n" --repo "$REPO" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
-      [ "$st" = "OPEN" ] && continue
+      [ "$st" = "CLOSED" ] || continue   # open, or unreadable: a card we cannot read is not a card we delete for
     fi
     ahead="$(git rev-list --count "origin/main..origin/$b" 2>/dev/null || echo '?')"
     stale="$stale

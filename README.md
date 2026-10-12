@@ -271,7 +271,8 @@ Three rules keep it cheap:
 - **Done is machine-checkable.** `bin/hygiene.sh` exits 0 on `main`. A finding that is
   legitimately not debt is kept in the shape the sweep recognises — a branch named
   `card-<n>-…` while card n is open, a skip or a TODO naming an open card (`#n`) on its
-  line — so the script itself stops listing it; nothing is "allowed" anywhere else.
+  line — so the script itself stops listing it; nothing is "allowed" anywhere else. A
+  `card-<n>` branch is listed again the week after card n closes, which is the point.
 - **A finding that recurs becomes a gate.** Two sweeps running with the same section means
   the check belongs in `ci.yml`, where a PR cannot land it. The sweep should shrink.
 
