@@ -262,12 +262,12 @@ fi
 # sum the results, so the output reads exactly as a sequential run would. EVAL_JOBS=1 still
 # runs one case at a time.
 JOBS_CAP="${EVAL_JOBS:-4}"
+case "$JOBS_CAP" in ''|*[!0-9]*|0) JOBS_CAP=4 ;; esac
 JOBDIR="$(mktemp -d)"
 trap 'rm -rf "$JOBDIR"' EXIT
 
 logs=()
 results=()
-pids=()
 
 run_job() {
   local f="$1" i="$2"
@@ -286,7 +286,6 @@ run_job() {
     run_case "$f"
     printf '%s %s %s\n' "$cases" "$n" "$fail" > "${results[i]}"
   ) > "${logs[i]}" 2>&1 &
-  pids[i]=$!
 }
 
 for i in "${!CASES[@]}"; do
@@ -297,9 +296,19 @@ for i in "${!CASES[@]}"; do
 done
 wait
 
+# A case's subshell can die without ever reaching its own printf (a signal, an OOM kill, a
+# `set -u` trip inside the case file) — that must count as a failure, same as it exiting
+# bin/eval.sh entirely used to before any of this ran in a subshell at all. Never read a
+# missing or empty result file as "no change since last case", which would silently score
+# a dead case as a pass.
 for i in "${!CASES[@]}"; do
   cat "${logs[i]}"
-  read -r d_cases d_n d_fail < "${results[i]}"
+  if [ -s "${results[i]}" ]; then
+    read -r d_cases d_n d_fail < "${results[i]}"
+  else
+    d_cases=0; d_n=1; d_fail=1
+    say "$(basename "${CASES[$i]}" .sh): subshell" "FAIL — died without writing a result"
+  fi
   cases=$((cases + d_cases))
   n=$((n + d_n))
   [ "$d_fail" != 0 ] && fail=1
