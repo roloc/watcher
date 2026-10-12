@@ -608,6 +608,21 @@ now run in the tick:
 - **A documentation card**: write it and ship it as an ordinary docs-only PR, which gets
   no `reviewer` pass and has CI as its gate. That is a normal merge, not an exception.
 
+**A measurement that runs long writes its record as it goes, never only at the end.** The
+tick dies at a wall-clock ceiling with no warning — 150 minutes by default (`TICK_TIMEOUT`,
+`bin/spawn.sh`) — and a run killed mid-write-up loses the write-up outright, not just the
+last few minutes of measuring (riffmap #679, twice on October 9, 2026: one tick died
+writing the findings entry after every measurement had already finished, the next died
+re-recording a baseline). So write the findings entry and the card's `🤖 FYI:` comment
+**before** the last run, with whatever is already measured, then append the rest — never
+run everything first and write up after. Track your own elapsed time against the ceiling
+(your claim comment carries the start — `gh issue view <n> --json comments`, then `date
+-u`); past four-fifths of it — about 120 minutes against the 150-minute default — stop
+queuing further runs and get the record into a postable state with what you have, even if
+a run you meant to include is still missing. This changes nothing about a
+card the offline checks can't finish at all: that is still a live-run cost question for
+Stuck, not a reason to race the clock.
+
 If the offline harness itself is red before you change anything, that is **Stuck** — you
 are measuring a broken tree and the number would be a lie.
 
