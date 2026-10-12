@@ -8,6 +8,8 @@
 #
 #   bin/eval.sh                 # every case in evals/cases/, exit 0 iff all pass
 #   bin/eval.sh <name>...       # only the named case(s) (the file's basename, no .sh)
+#   EVAL_JOBS=<n> bin/eval.sh   # how many cases run at once (default 4); EVAL_JOBS=1 is
+#                                 the old one-at-a-time run.
 #
 # WHERE THIS RUNS: never CI (`.github/workflows/ci.yml`'s own header explains why — PR code
 # never runs on the box holding credentials) and never as part of an ordinary tick's turns.
@@ -253,12 +255,54 @@ else
   for f in "$EVALS"/cases/*.sh; do CASES+=("$f"); done
 fi
 
-for f in "${CASES[@]}"; do
+# Each case already builds its own scratch dir, its own bare $ORIGIN and its own fake board
+# state — nothing is shared between cases but this loop. So run up to EVAL_JOBS of them at
+# once, each in its own subshell writing its own log and a one-line result (its own deltas
+# to $cases/$n/$fail); once every case has finished, print the logs back in case order and
+# sum the results, so the output reads exactly as a sequential run would. EVAL_JOBS=1 still
+# runs one case at a time.
+JOBS_CAP="${EVAL_JOBS:-4}"
+JOBDIR="$(mktemp -d)"
+trap 'rm -rf "$JOBDIR"' EXIT
+
+logs=()
+results=()
+pids=()
+
+run_job() {
+  local f="$1" i="$2"
+  logs[i]="$JOBDIR/$i.log"
+  results[i]="$JOBDIR/$i.result"
+
   if [ ! -f "$f" ]; then
-    flunk "$(basename "$f" .sh)" "no such case file: $f"
-    continue
+    (
+      flunk "$(basename "$f" .sh)" "no such case file: $f"
+      printf '%s %s %s\n' "$cases" "$n" "$fail" > "${results[i]}"
+    ) > "${logs[i]}" 2>&1
+    return
   fi
-  run_case "$f"
+
+  (
+    run_case "$f"
+    printf '%s %s %s\n' "$cases" "$n" "$fail" > "${results[i]}"
+  ) > "${logs[i]}" 2>&1 &
+  pids[i]=$!
+}
+
+for i in "${!CASES[@]}"; do
+  while [ "$(jobs -rp | wc -l)" -ge "$JOBS_CAP" ]; do
+    sleep 0.5
+  done
+  run_job "${CASES[$i]}" "$i"
+done
+wait
+
+for i in "${!CASES[@]}"; do
+  cat "${logs[i]}"
+  read -r d_cases d_n d_fail < "${results[i]}"
+  cases=$((cases + d_cases))
+  n=$((n + d_n))
+  [ "$d_fail" != 0 ] && fail=1
 done
 
 echo "$cases case(s), $n check(s), $([ "$fail" = 0 ] && echo "all passed" || echo "SOME FAILED")"
