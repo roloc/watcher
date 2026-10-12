@@ -11,6 +11,11 @@
 #   EVAL_JOBS=<n> bin/eval.sh   # how many cases run at once (default 4); EVAL_JOBS=1 is
 #                                 the old one-at-a-time run.
 #
+# On any failure the last line is `failed cases: <name> <name>...`, by file name (not a
+# case's own check labels) — what `deploy/autodeploy.sh`'s `evals_state` passes back in as
+# this script's own arguments on a second attempt, so a flake costs one case, not a full
+# rerun. See the comment next to that logic for the trade this makes.
+#
 # WHERE THIS RUNS: never CI (`.github/workflows/ci.yml`'s own header explains why — PR code
 # never runs on the box holding credentials) and never as part of an ordinary tick's turns.
 # It runs by hand, and from the deployer (`deploy/autodeploy.sh`, and `deploy/rollout.sh`,
@@ -301,6 +306,7 @@ wait
 # bin/eval.sh entirely used to before any of this ran in a subshell at all. Never read a
 # missing or empty result file as "no change since last case", which would silently score
 # a dead case as a pass.
+failed_names=()
 for i in "${!CASES[@]}"; do
   cat "${logs[i]}"
   if [ -s "${results[i]}" ]; then
@@ -311,8 +317,15 @@ for i in "${!CASES[@]}"; do
   fi
   cases=$((cases + d_cases))
   n=$((n + d_n))
-  [ "$d_fail" != 0 ] && fail=1
+  if [ "$d_fail" != 0 ]; then
+    fail=1
+    failed_names+=("$(basename "${CASES[$i]}" .sh)")
+  fi
 done
 
 echo "$cases case(s), $n check(s), $([ "$fail" = 0 ] && echo "all passed" || echo "SOME FAILED")"
+# Card #131: the deployer's second attempt reruns only the case(s) named here, by file name —
+# a case's own check labels (e.g. "usability-sliver:") are not its file name, so this is the
+# one line that can tell a caller what to pass back to `bin/eval.sh <name>...`.
+[ "$fail" != 0 ] && echo "failed cases: ${failed_names[*]}"
 exit "$fail"

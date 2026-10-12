@@ -300,7 +300,7 @@ check_state() {
 
 # evals_state <cur> <sha>: pass | fail, running the suite if this commit has no result yet.
 evals_state() {
-  local cur="$1" sha="$2" rec="$DSTATE/evals/$2" tries scratch log
+  local cur="$1" sha="$2" rec="$DSTATE/evals/$2" tries scratch log cmd retry_cases
   if [ "$EVALS" != 1 ]; then echo pass; return; fi
   # shellcheck disable=SC2086
   if [ -z "$(wgit "diff --name-only $cur $sha -- $EVAL_PATHS")" ]; then echo pass; return; fi
@@ -309,8 +309,19 @@ evals_state() {
   scratch="$SCRATCH_ROOT/${sha:0:12}"; log="$DSTATE/evals/$sha.log"
   as_user "rm -rf '$scratch' && mkdir -p '$SCRATCH_ROOT' && git clone -q --shared '$WATCHER_DIR' '$scratch' && git -C '$scratch' checkout -q --detach $sha" >&2 \
     || { say "could not make a scratch clone at ${sha:0:7}; trying again next run" >&2; echo pending; return; }
+  # Card #131: a second attempt reruns only the case(s) bin/eval.sh's own "failed cases: …"
+  # line named on attempt 1 (read from $log before this attempt overwrites it) — a flake
+  # costs one case, not the other ~14. That is a real trade: a flake elsewhere on attempt 2
+  # goes unseen, on purpose, in exchange for not spending 20+ minutes re-proving cases that
+  # already passed. An attempt-1 log with no such line (it died before printing it, or
+  # predates this) reruns everything, same as always.
+  cmd="bin/eval.sh"
+  if [ "$tries" -ge 1 ]; then
+    retry_cases="$(grep '^failed cases: ' "$log" 2>/dev/null | tail -1 | sed 's/^failed cases: //')"
+    [ -n "$retry_cases" ] && cmd="bin/eval.sh $(q $retry_cases)"
+  fi
   say "running the replay suite on ${sha:0:7} (attempt $((tries+1)) of 2)" >&2
-  if as_user "cd '$scratch' && bin/eval.sh" > "$log" 2>&1; then
+  if as_user "cd '$scratch' && $cmd" > "$log" 2>&1; then
     echo pass > "$rec"; say "replay suite passed on ${sha:0:7}" >&2
   else
     tries=$((tries+1)); echo "fail $tries" > "$rec"

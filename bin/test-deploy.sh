@@ -90,11 +90,19 @@ cat > "$SEED/deploy/install.sh" <<'EOF'
 # served one release behind every deploy).
 echo "install $* NO_PULL=${INSTALL_NO_PULL:-0} DIR=${WATCHER_DIR:-} pointer=$(basename "$(readlink -f "$TMP/opt/watcher" 2>/dev/null)")" >> "$CALLS"
 EOF
-# The replay suite: logs the commit it ran at and the box's HEAD at that moment.
+# The replay suite: logs the commit it ran at, the box's HEAD at that moment, and its own
+# argv (so a case can check which case name(s) a retry attempt was called with). On failure
+# it prints a "failed cases: <name>" line the way the real bin/eval.sh does (card #131);
+# $TMP/eval-fail-case names which case, defaulting to "a-case".
 cat > "$SEED/bin/eval.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "eval at $(git rev-parse HEAD) box $(git -C "$TMP/opt/watcher" rev-parse HEAD)" >> "$CALLS"
-[ -f "$TMP/eval-fails" ] && { echo "  a case   FAIL — it closed the card"; exit 1; }
+echo "eval.sh args: ${*:-(none)}" >> "$CALLS"
+if [ -f "$TMP/eval-fails" ]; then
+  echo "  a case   FAIL — it closed the card"
+  echo "failed cases: $(cat "$TMP/eval-fail-case" 2>/dev/null || echo "a-case")"
+  exit 1
+fi
 echo "  a case   ok"; exit 0
 EOF
 chmod +x "$SEED"/deploy/*.sh "$SEED"/bin/*.sh
@@ -124,8 +132,8 @@ head_() { git -C "$BOX" rev-parse HEAD; }
 fresh() {  # a clean slate between cases: the box a plain checkout at origin/main — as if
            # freshly installed, never yet deployed by this card's own code — no releases,
            # no state, idle lanes.
-  rm -rf "$TMP/dstate" "$STATE" "$TMP/eval-fails" "$TMP/labels" "$TMP/next-issue" "$TMP/board-fails" \
-         "$RELEASES" "$BOX"
+  rm -rf "$TMP/dstate" "$STATE" "$TMP/eval-fails" "$TMP/eval-fail-case" "$TMP/labels" \
+         "$TMP/next-issue" "$TMP/board-fails" "$RELEASES" "$BOX"
   git clone -q "$ORIGIN" "$BOX"
   printf 'riffmap\nriffmap-design\nwatcher\n' > "$TMP/active"
   echo "completed success" > "$TMP/ci"
@@ -233,6 +241,28 @@ check "a third run files no second card"               not_called "issue create"
 echo deploy-anyway > "$TMP/labels"; run
 check "deploy-anyway: the held commit ships"           [ "$(head_)" = "$T" ]
 check "deploy-anyway: the step file is cleared once it lands" [ ! -e "$TMP/dstate/step" ]
+
+# 7a. Card #131: the second attempt reruns only the case bin/eval.sh named as failed on the
+# first, not the whole suite.
+fresh; touch "$TMP/eval-fails"; echo "the-flaky-case" > "$TMP/eval-fail-case"
+T="$(commit commands/watch.md v7a)"
+run
+check "attempt 1: ran with no case names (the whole suite)" called_exact "eval.sh args: (none)"
+rm -f "$TMP/eval-fails"
+run
+check "attempt 2: called with exactly the failed case's name" called_exact "eval.sh args: the-flaky-case"
+check "…and it deploys once that retry passes"         [ "$(head_)" = "$T" ]
+rm -f "$TMP/eval-fail-case"
+
+# 7b. Card #131: an attempt-1 log with no "failed cases:" line (it died before printing one,
+# or predates this) falls back to a full rerun on attempt 2, same as before this card.
+fresh; touch "$TMP/eval-fails"; T="$(commit commands/watch.md v7b)"
+run
+printf 'eval at %s box %s\n  a case   FAIL — it closed the card\n' "$T" "$T" > "$TMP/dstate/evals/$T.log"
+run
+check "attempt 2: no summary line to read, so it reruns everything" called_exact "eval.sh args: (none)"
+check "…and still held, since the suite still fails"   [ "$(count 'gh issue create')" = 1 ]
+rm -f "$TMP/eval-fails" "$TMP/labels"
 
 # 8. Nothing a model reads changed: no suite
 fresh; touch "$TMP/eval-fails"; T="$(commit README.md docs-only)"
