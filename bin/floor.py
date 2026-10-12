@@ -3168,12 +3168,21 @@ function computeStudio(state) {
   const breakers = lanes.filter(l => l.pill === "idle").sort((a, b) => a.lane.localeCompare(b.lane));
   const sleepers = lanes.filter(l => l.pill === "sleeping");
   const needs = lanes.filter(l => l.pill === "needs_steve");
+  // A ship station with nothing to watch — CI green, no deploy running — is idle the same
+  // way a lane with nothing to pick up is, so it goes on break too (card #126). Counted
+  // here, off `projects` directly, since the room sizing below needs the count before the
+  // `ships` array itself exists (built later, alongside each team room); the count has to
+  // stay the same whether or not a party is on, or the room's seats (`seatBreakRoom`'s own
+  // `breakSpot`, keyed by seat index) would shuffle themselves every time one starts or ends.
+  // Same count the `idleShips` filter below gets from the `ships` array: `teams` (and so
+  // `ships`) is built from this same `projects` list, one team room per project, in order.
+  const idleShipCount = projects.filter(p => shipState(p.ship).pill === "ok").length;
   const rooms = [];
 
   // The top row: the break room and Steve's office, a hallway between, as tall as the fuller.
   const breakW = Math.round((inner - VHALL) * 0.52), bossW = inner - VHALL - breakW;
-  const nBreak = breakers.length + sleepers.length + BREAK_EXTRA;
-  const crowd = partyOn() ? cookieSpots({x: EDGE, w: breakW}, breakers.length + sleepers.length) : null;
+  const nBreak = breakers.length + sleepers.length + idleShipCount + BREAK_EXTRA;
+  const crowd = partyOn() ? cookieSpots({x: EDGE, w: breakW}, breakers.length + sleepers.length + idleShipCount) : null;
   const breakRows = Math.max(rowsFor(nBreak, breakW), crowd ? crowd.rows : 1);
   const breakH = BREAK.padTop + (breakRows - 1) * BREAK.rowH + BREAK.padBottom;
   // The in-tray sits in front of his desk, between it and anyone waiting: as tall as a
@@ -3237,16 +3246,32 @@ function computeStudio(state) {
       me.pos = me.home; me.away = false; me.room = r.name;
     });
     const s = spots[ordered.length];
-    ships.push({name: r.name, ship: r.project.ship, pos: {x: s.x, y: s.y}, room: r.name});
+    const home = {x: s.x, y: s.y};
+    const idle = shipState(r.project.ship).pill === "ok";
+    // "ship:" + name is this ship's own seat key in the break room's bookkeeping, apart
+    // from any lane's — never a DOM dataset, only how `seatBreakRoom` and `wander` tell
+    // occupants apart.
+    ships.push({name: r.name, ship: r.project.ship, home, pos: home, room: r.name, away: false, idle, lane: "ship:" + r.name});
   }
   const bg = gridSpots(breakRoom, nBreak, BREAK);
-  const {seatOf, couch} = seatBreakRoom(breakers, sleepers, bg.spots, bg.perRow, bg.rows);
+  const idleShips = ships.filter(s => s.idle);
+  const {seatOf, couch} = seatBreakRoom([...breakers, ...idleShips], sleepers, bg.spots, bg.perRow, bg.rows);
   const guests = [...breakers, ...sleepers];
   guests.forEach((l, i) => {
     const s = crowd ? {x: crowd.spots[i].x, y: breakRoom.y + BREAK.padTop + crowd.spots[i].row * BREAK.rowH}
                     : bg.spots[seatOf[l.lane]];
     l.pos = {x: s.x, y: s.y}; l.away = true; l.room = breakRoom.name;
     l.cookie = !!crowd;
+  });
+  // A ship stands with the crowd at cookie time too — its own seat is no longer kept
+  // clear of the huddle once everyone leaves it for the vending machine (review of #126:
+  // the dock hand and a lane crowding the machine stood in the same spot) — but it never
+  // gets a cookie: there is no art for one in its hand, so `cookie` is left unset.
+  idleShips.forEach((s, i) => {
+    const j = guests.length + i;
+    const spot = crowd ? {x: crowd.spots[j].x, y: breakRoom.y + BREAK.padTop + crowd.spots[j].row * BREAK.rowH}
+                       : bg.spots[seatOf[s.lane]];
+    s.pos = {x: spot.x, y: spot.y}; s.away = true; s.room = breakRoom.name;
   });
   if (couch.length) {
     const first = bg.spots[couch[0]], last = bg.spots[couch[couch.length - 1]];
@@ -3318,7 +3343,8 @@ function renderRooms(office, state) {
 
 function renderRoomDesks(lanes, ships) {
   const shelves = (ships || []).map(s =>
-    `<div class="desk-set shelf" data-ship="${esc(s.name)}" style="left:${s.pos.x}px;top:${s.pos.y + 10}px">${shelfSVG()}</div>`);
+    `<div class="desk-set shelf" data-ship="${esc(s.name)}" style="left:${s.home.x}px;top:${s.home.y + 10}px">${shelfSVG()}</div>`
+    + (s.away ? `<div class="desk-tag" data-ship="${esc(s.name)}" style="left:${s.home.x}px;top:${s.home.y}px">Ship · out</div>` : ""));
   const furniture = lanes.map(l => (l.kind === "Triage"
     ? `<div class="desk-set" style="left:${l.home.x}px;top:${l.home.y + 10}px">${counterSVG()}</div>`
     : `<div class="desk-set${l.pill === "working" ? " lit" : ""}" data-lane="${esc(l.lane)}"
@@ -3457,7 +3483,7 @@ function renderShipDock(ships) {
       shipEls[s.name] = el;
     }
     const st = shipState(s.ship);
-    el.innerHTML = shipCharacterSVG(st.mode, st.pill, laneLook("ship:" + s.name)) + plateHTML("Ship", s.name, false);
+    el.innerHTML = shipCharacterSVG(st.mode, st.pill, laneLook("ship:" + s.name)) + plateHTML("Ship", s.name, s.away);
     moveCharacter(el, s.pos, s.room);
   }
   for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }

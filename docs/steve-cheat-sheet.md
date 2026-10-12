@@ -39,7 +39,9 @@ and the **server room** at the end. Every board's room has a desk per bot (its s
 and scanning while it works), the counter by the door for triage, the ship station on a
 shelf, and the board's counts on the whiteboard. Hands up at a desk is paused. An idle bot
 walks out of its door, down the hallway and into the break room, and wanders about there with
-a mug until a card comes; its empty desk says whose it is. A bot that fell asleep after a
+a mug until a card comes; its empty desk says whose it is. The ship station does the same once
+there is nothing for it to watch — green build, nothing being shipped — and comes back the
+moment there is. A bot that fell asleep after a
 failure naps on the couch. A bot that needs you walks to your office and waves in front of
 your desk, holding up the picture its card is waiting on, and the light over your door turns
 red the moment anyone does (amber when something is paused, asleep or blocked; green when all

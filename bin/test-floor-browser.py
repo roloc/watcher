@@ -842,9 +842,12 @@ try:
               info(b, "alpha-triage")[:2] == ["idle", "Break room"], info(b, "alpha-triage"))
         check("the mug is drawn (the pose says idle, not just the dark screen)",
               b.eval("document.querySelector('.character[data-lane=\"alpha-design\"] svg').innerHTML.includes('f3f4f6')"))
-        check("their desks are still in alpha's room, each tagged as theirs and out",
-              b.eval("[...document.querySelectorAll('.desk-tag')].map(t => t.dataset.lane + ':' + t.textContent).sort()")
-              == ["alpha-design:Design · out", "alpha-triage:Triage · out"])
+        check("their desks are still in alpha's room, each tagged as theirs and out — and so "
+              "is alpha's ship shelf, since its own CI has nothing to show right now and its "
+              "dock hand has gone on break the same way (card #126)",
+              b.eval("[...document.querySelectorAll('.desk-tag')]"
+                     ".map(t => (t.dataset.lane || ('ship:' + t.dataset.ship)) + ':' + t.textContent).sort()")
+              == ["alpha-design:Design · out", "alpha-triage:Triage · out", "ship:alpha:Ship · out"])
         check("the break room has a couch, a coffee machine (steaming), windows and plants",
               b.eval("""(() => { const r = document.querySelector('.office-room.break');
                       return !!r.querySelector('.couch') && !!r.querySelector('.prop .steam')
@@ -903,11 +906,20 @@ try:
                       const c = document.querySelector('.character[data-ship="' + n + '"] svg');
                       return c && !c.innerHTML.includes('desk-top') && c.innerHTML.includes('#ffd33d')
                           && !!document.querySelector('.desk-set.shelf[data-ship="' + n + '"]'); })"""))
-        check("a ship shelf stands in each board's own room",
+        check("a ship's shelf still stands in its own board's room, even once its dock hand leaves it",
               b.eval("""['riffmap', 'riffmap-site', 'watcher'].every(n => {
-                      const s = document.querySelector('.character[data-ship="' + n + '"]').getBoundingClientRect();
+                      const s = document.querySelector('.desk-set.shelf[data-ship="' + n + '"]').getBoundingClientRect();
                       const r = document.querySelector('.office-room[data-room="' + n + '"]').getBoundingClientRect();
                       return s.left >= r.left && s.right <= r.right && s.bottom <= r.bottom + 1 && s.top >= r.top; })"""))
+        check("CI is green and nothing is shipping on any of the three, so every dock hand has gone "
+              "on break instead of standing at an empty shelf all day (card #126)",
+              b.eval("""['riffmap', 'riffmap-site', 'watcher'].every(n => {
+                      const s = document.querySelector('.character[data-ship="' + n + '"]').getBoundingClientRect();
+                      const r = document.querySelector('.office-room[data-room="Break room"]').getBoundingClientRect();
+                      return s.left >= r.left && s.right <= r.right && s.bottom <= r.bottom + 1 && s.top >= r.top; })"""))
+        check("...and its shelf is tagged as out, the same way an idle lane's desk is",
+              b.eval("""['riffmap', 'riffmap-site', 'watcher'].every(n =>
+                      document.querySelector('.desk-tag[data-ship="' + n + '"]')?.textContent === 'Ship · out')"""))
         check("a lane's plate is readable: no plate is covered by another character",
               b.eval("""(() => {
                 const plates = [...document.querySelectorAll('.character .plate')].map(p => p.getBoundingClientRect());
@@ -923,9 +935,24 @@ try:
         settled(b)
         after = positions(b)
         moved = sorted(k for k in before if before[k] != after[k])
-        check("exactly one idle lane moved", len(moved) == 1
-              and b.eval(f"document.querySelector('.character[data-lane=\"{moved[0]}\"]').dataset.pill") == "idle", moved)
-        check("...to another spot in the break room", info(b, moved[0])[1] == "Break room", info(b, moved[0]))
+        check("exactly one occupant moved", len(moved) == 1, moved)
+        # `positions()` keys a ship "ship:" + its name (never a real lane's own key), so a
+        # wander that happens to land on one — it shares the break room's seats with every
+        # idle lane now — is told apart the same way, not assumed to always be a lane.
+        mover = moved[0] if moved else ""
+        mover_ship = mover[len("ship:"):] if mover.startswith("ship:") else None
+        check("...and it was idle (a lane with nothing to pick up, or a ship with nothing to watch)",
+              bool(moved) and (
+                  b.eval(f'document.querySelector(\'.character[data-ship="{mover_ship}"]\')') is not None
+                  if mover_ship else
+                  b.eval(f'document.querySelector(\'.character[data-lane="{mover}"]\').dataset.pill') == "idle"),
+              mover)
+        check("...to another spot in the break room",
+              (b.eval(f"""(() => {{ const e = document.querySelector('.character[data-ship=\"{mover_ship}\"]');
+                      const r = e.getBoundingClientRect(), br = document.querySelector('.office-room.break').getBoundingClientRect();
+                      return r.left >= br.left - 1 && r.right <= br.right + 1 && r.bottom > br.top && r.bottom <= br.bottom + 1; }})()""")
+               if mover_ship else info(b, mover)[1] == "Break room"),
+              mover)
         check("and still nobody stands on anybody", overlaps(b) == [], overlaps(b))
         check("a working lane never wanders (riffmap-site-design is where it was)",
               before["riffmap-site-design"] == after["riffmap-site-design"])
