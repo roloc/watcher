@@ -1,0 +1,69 @@
+name: Hygiene sweep
+
+# The weekly debt sweep. `bin/hygiene.sh` looks for what accumulates *between* PRs —
+# abandoned branches, skipped cases, old TODOs, orphan scripts, dead doc links, stale
+# paths in the tick-loaded docs — and this files one card with the report when it finds
+# any, or files nothing when the repo is clean. The card lands in Backlog through the
+# board's Auto-add; Steve moves it to Ready and the watcher's own lane clears it like any
+# other card. Mechanical checks only, on purpose: a judgment finding is a card somebody
+# files with evidence, not a weekly pass. README, "The weekly hygiene card", is the
+# contract. Same shape as riffmap's (https://github.com/roloc/riffmap/pull/711) and
+# riffmap-site's (https://github.com/roloc/riffmap-site/pull/54).
+#
+# Runs GitHub-hosted, never on CI_RUNNER: this job needs `issues: write`, which a PR runner
+# should never hold, and the ci box has no `gh`. One short run a week.
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'   # Monday, 08:00 Central daylight / 07:00 standard — after riffmap's two
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  sweep:
+    # A scheduled run executes main's copy already; workflow_dispatch from a branch would
+    # otherwise sweep that branch and file a card about it.
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the branch and TODO checks read history
+
+      - name: Sweep
+        id: sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          bin/hygiene.sh > report.md
+          status=$?
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          cat report.md
+          if [ "$status" -eq 2 ]; then echo "::error::hygiene.sh could not run"; exit 2; fi
+
+      - name: File the card, or refresh the open one
+        if: steps.sweep.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          today="$(date +%Y-%m-%d)"
+          existing="$(gh issue list --repo "$repo" --state open --search '"Weekly hygiene sweep" in:title author:app/github-actions' --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            { echo "Re-swept $today — the list as it stands now (the card body is last week's):"; echo; cat report.md; } > comment.md
+            gh issue comment "$existing" --repo "$repo" --body-file comment.md
+            echo "Refreshed the open hygiene card #$existing"
+            exit 0
+          fi
+          cat bin/hygiene-card.md report.md > body.md
+          url="$(gh issue create --repo "$repo" --title "Weekly hygiene sweep — $today" --body-file body.md)"
+          echo "Filed $url — the board's Auto-add puts it in Backlog"

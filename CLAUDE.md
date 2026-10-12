@@ -96,6 +96,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   reruns on every deploy, so merging that config file is what turns detection on).
   `bash bin/test-detect.sh` is its offline suite (CI runs it); run it after touching
   `detect.sh`. Detail in `docs/how-it-works.md`, "Watching the product".
+- `bin/hygiene.sh` — the weekly debt sweep, run by `.github/workflows/hygiene.yml` on
+  Mondays; it files one card when it finds something and nothing when it does not. A
+  hygiene card is mechanical only: clear the sections it lists and nothing else, delete a
+  branch with `gh api -X DELETE …/git/refs/heads/<branch>` and list it in a comment, and
+  "done" is `bin/hygiene.sh` exiting 0 on `main`. README, "The weekly hygiene card".
 
 ## Rules for editing this repo
 

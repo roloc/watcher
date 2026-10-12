@@ -50,7 +50,7 @@ jobs:
       # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/shim/claude bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh; do
+          for f in bin/spawn.sh bin/shim/claude bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 

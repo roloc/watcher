@@ -27,6 +27,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
     bin/doctor.sh         read-only sanity check that a project is wired up; deploy/install.sh and
                           bin/spawn.sh both run it before a lane's first tick (see "Add a project")
+    bin/hygiene.sh        the weekly debt sweep: stale branches, old TODOs, orphan scripts, dead doc
+                          links; .github/workflows/hygiene.yml files one card from it on Mondays (see "The weekly hygiene card")
     deploy/add-project.sh the dozen hand steps of putting a new project on the watcher, as one
                           idempotent script — run from Steve's Mac, never by a tick (see below)
     templates/project-CLAUDE.md  the section a project's own CLAUDE.md needs for /watch to run
@@ -245,6 +247,37 @@ nothing beyond bash and python3.
 
 Deploying is deliberately not a CI job: it would need a runner on the agents box. CI's
 `verify` is instead the first thing the box's deployer checks — see below.
+
+## The weekly hygiene card
+
+Debt that lives *between* PRs — an abandoned branch, a skipped case, a TODO nobody filed, a
+script nothing runs, a link to a file that moved — is invisible to CI, which only ever sees
+one PR. `bin/hygiene.sh` sweeps for it; `.github/workflows/hygiene.yml` runs the sweep
+every Monday and files **one** card, `Weekly hygiene sweep — <date>`, with the report as
+its body — or files nothing when the sweep is clean. Auto-add lands it in **Backlog**;
+Steve moves it to **Ready** when he wants the week's debt paid, and the watcher's own lane
+works it like any other card. While a hygiene card is open the next sweep comments the
+fresh list on it instead of filing a second one. The same routine runs on riffmap
+([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711)) and riffmap-site
+([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)); the script is
+one script with each repo's paths.
+
+Three rules keep it cheap:
+
+- **Mechanical only.** A check is in the script because a human can verify its finding in
+  seconds and the fix is a deletion or a one-line edit. "Is this script bad?" is not a
+  check; it is a card somebody files with evidence. The reviewer blocks a hygiene PR that
+  reaches past the list.
+- **Done is machine-checkable.** `bin/hygiene.sh` exits 0 on `main`. A finding that is
+  legitimately not debt is kept in the shape the sweep recognises — a branch named
+  `card-<n>-…` while card n is open, a skip or a TODO naming an open card (`#n`) on its
+  line — so the script itself stops listing it; nothing is "allowed" anywhere else. A
+  `card-<n>` branch is listed again the week after card n closes, which is the point.
+- **A finding that recurs becomes a gate.** Two sweeps running with the same section means
+  the check belongs in `ci.yml`, where a PR cannot land it. The sweep should shrink.
+
+Run it by hand from any checkout: `bin/hygiene.sh` (needs `gh`), or
+`bin/hygiene.sh --no-remote` to skip the branch check.
 
 ## Deploys happen by themselves
 
