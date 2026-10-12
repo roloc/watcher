@@ -55,6 +55,9 @@ as_user() { su - "$RUN_AS" -c "$1"; }
 mkdir -p "$DSTATE"
 exec 9> "$DSTATE/lock"
 flock -n 9 || { say "deploy/autodeploy.sh is mid-run; try again in a few minutes"; exit 1; }
+# Card #129: same stamp deploy/autodeploy.sh touches on exit, so the floor page's Ship desk
+# reads a manual rollout's own end time too, not just the timer's.
+trap 'touch "$DSTATE/last-run" 2>/dev/null || true' EXIT
 
 as_user "git -C '$WATCHER_DIR' fetch -q origin '$BRANCH'"
 SHA="$(as_user "git -C '$WATCHER_DIR' rev-parse 'origin/$BRANCH'")"
