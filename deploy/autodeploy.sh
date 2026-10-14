@@ -83,6 +83,10 @@ SELF_PROJECT="${DEPLOY_PROJECT:-watcher}"
 EVALS="${DEPLOY_EVALS:-1}"                     # 0 skips the replay suite entirely
 # What a model reads: a commit range touching none of these skips the suite.
 EVAL_PATHS="${DEPLOY_EVAL_PATHS:-commands agents docs evals bin/eval.sh CLAUDE.md}"
+# Card #140: the replay suite's own ledger — one line per case per run, pass/fail, turns and
+# quota, next to the per-commit logs already under $DSTATE/evals (mkdir -p below makes the
+# directory). Nothing else should need to override this.
+EVAL_LEDGER_PATH="${DEPLOY_EVAL_LEDGER:-$DSTATE/evals/ledger.tsv}"
 # The canary checkout (card #46) — see bin/spawn.sh's own default for WATCHER_CANARY_DIR,
 # which this must match. SOAK_TICKS and QUIET_MIN are read together: whichever the canary
 # lane(s) reach first clears the way to promote.
@@ -114,6 +118,10 @@ q() { local out="" w; for w in "$@"; do out+="$(printf '%q' "$w") "; done; print
 wgit() { as_user "git -C '$WATCHER_DIR' $1"; }
 cgit() { as_user "git -C '$CANARY_DIR' $1"; }
 mkdir -p "$DSTATE/evals" "$DSTATE/held"
+# Card #140: the ledger append happens inside the scratch clone, as $RUN_AS (as_user), not
+# as this script's own root — so that one subdirectory has to be writable by that user. This
+# script still writes its own rec/log files here directly, as root, same as always.
+chown "$RUN_AS" "$DSTATE/evals" 2>/dev/null || true
 
 # say_once <key> <line>: journal a waiting line once per state, not once per run.
 say_once() {
@@ -323,7 +331,7 @@ evals_state() {
     [ -n "$retry_cases" ] && cmd="bin/eval.sh $(q $retry_cases)"
   fi
   say "running the replay suite on ${sha:0:7} (attempt $((tries+1)) of 2)" >&2
-  if as_user "cd '$scratch' && $cmd" > "$log" 2>&1; then
+  if as_user "cd '$scratch' && EVAL_LEDGER='$EVAL_LEDGER_PATH' $cmd" > "$log" 2>&1; then
     echo pass > "$rec"; say "replay suite passed on ${sha:0:7}" >&2
   else
     tries=$((tries+1)); echo "fail $tries" > "$rec"

@@ -366,7 +366,14 @@ its own board"). The three things that make a loop editing itself safe enough:
 - **The deploy is the gate.** A merge lands on `main`; `main` goes live only through
   `deploy/autodeploy.sh`, which ships a commit once `verify` passed on it and the replay
   suite passed on it in a scratch clone (the new prompts, tested before any lane uses
-  them). Since card #106, it never waits for a lane to go idle either: `/opt/watcher` is a
+  them). Since card #140, that run also appends one line per case to a plain ledger at
+  `/var/lib/watcher-deploy/evals/ledger.tsv` — timestamp, commit, pass/fail with its check
+  counts, turns and cost, wall seconds — so a future prompt change can be judged against a
+  real trend (`happy-path` went from 31 turns to 29) instead of only this run's pass/fail;
+  the suite's own last line already names any case whose turns grew past 1.5x what the
+  ledger had on record for it.
+
+  Since card #106, it never waits for a lane to go idle either: `/opt/watcher` is a
   symlink — the pointer — onto one of its own release folders under
   `/opt/watcher-releases/<sha>`, each a full clone made once and never touched again. A
   deploy clones the new commit into its own folder, installs from there, and flips the

@@ -10,6 +10,13 @@
 #   bin/eval.sh <name>...       # only the named case(s) (the file's basename, no .sh)
 #   EVAL_JOBS=<n> bin/eval.sh   # how many cases run at once (default 4); EVAL_JOBS=1 is
 #                                 the old one-at-a-time run.
+#   EVAL_LEDGER=<path> bin/eval.sh   # append one tab-separated line per case to <path>:
+#                                 timestamp, commit, case name, pass/fail with check counts,
+#                                 num_turns, total_cost_usd, wall seconds. Unset (the
+#                                 default) writes nothing — a hand run, CI and the nested
+#                                 tick on the watcher's own board never touch any file by
+#                                 accident. The last line names any case whose turns grew
+#                                 past 1.5x what <path> already had on record for it.
 #
 # On any failure the last line is `failed cases: <name> <name>...`, by file name (not a
 # case's own check labels) — what `deploy/autodeploy.sh`'s `evals_state` passes back in as
@@ -62,7 +69,7 @@
 # genuinely on the same box as the real `gh` login these fixtures must never touch.
 set -uo pipefail
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 EVALS="$REPO/evals"
 export FAKEHUB_PY="$EVALS/fakehub.py"
@@ -85,10 +92,10 @@ MAX_BUDGET="${EVAL_MAX_BUDGET_USD:-3}"
 # commands/triage.md's own recipe) has the same env shape as production, not a guess.
 EVAL_GH_REPO="${EVAL_GH_REPO:-fixture-org/fixture-repo}"
 
-fail=0; n=0; cases=0
+fail=0; n=0; cases=0; flunks=0
 say()   { printf '  %-66s %s\n' "$1" "$2"; }
 pass()  { n=$((n+1)); say "$1" "ok"; }
-flunk() { n=$((n+1)); fail=1; say "$1" "FAIL${2:+ — $2}"; }
+flunk() { n=$((n+1)); fail=1; flunks=$((flunks+1)); say "$1" "FAIL${2:+ — $2}"; }
 
 # --- helpers a case's case_setup() calls -------------------------------------------------
 
@@ -159,6 +166,52 @@ result_field() {
     "import json,sys; print(json.load(sys.stdin).get('$1',''))" 2>/dev/null
 }
 
+# --- the ledger (card #140) ----------------------------------------------------------------
+#
+# Three plain functions, never a subshell of their own, so bin/test-eval-ledger.sh can source
+# this file (the BASH_SOURCE guard at the bottom keeps that from also running every case) and
+# call them directly against a scratch ledger and fake numbers — no live tick involved.
+
+# ledger_prev_turns <ledger> <name> — the num_turns field of <name>'s most recent line in
+# <ledger>, or "" when the file is missing or has no line for <name>. A case's run_case below
+# always calls this against the snapshot taken before the current run's own appends (never
+# the live ledger) — comparing a case to the entry it is about to write would always read as
+# no growth.
+ledger_prev_turns() {
+  local ledger="$1" name="$2"
+  [ -f "$ledger" ] || return 0
+  awk -F'\t' -v n="$name" '$3==n{t=$5} END{if (t!="") print t}' "$ledger"
+}
+
+# ledger_regressed <ledger> <name> <turns> — prints "<name>: <prev> -> <turns> turns" and
+# returns 0 when <turns> is more than 1.5x the last run <ledger> has on record for <name>;
+# prints nothing and returns 1 otherwise, including a case's first-ever run (nothing to
+# regress against yet).
+ledger_regressed() {
+  local ledger="$1" name="$2" turns="$3" prev
+  prev="$(ledger_prev_turns "$ledger" "$name")"
+  case "$prev" in ''|*[!0-9]*) return 1 ;; esac
+  case "$turns" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "$((turns * 2))" -gt "$((prev * 3))" ]; then
+    printf '%s: %s -> %s turns\n' "$name" "$prev" "$turns"
+    return 0
+  fi
+  return 1
+}
+
+# ledger_append <ledger> <name> <pass|fail> <passed> <total> <turns> <cost> <seconds> — one
+# tab-separated line: UTC timestamp, the commit under test, case name, pass/fail with check
+# counts, num_turns, total_cost_usd, wall seconds the tick ran. One printf per line (short,
+# O_APPEND): cases run in parallel (card #130) and must never read-modify-write this file.
+ledger_append() {
+  local ledger="$1" name="$2" verdict="$3" passed="$4" total="$5" turns="$6" cost="$7" secs="$8"
+  local ts commit
+  ts="$(date -u +%FT%TZ)"
+  commit="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  printf '%s\t%s\t%s\t%s %s/%s\t%s\t%s\t%s\n' \
+    "$ts" "$commit" "$name" "$verdict" "$passed" "$total" "$turns" "$cost" "$secs" >> "$ledger"
+}
+
 # --- the driver ----------------------------------------------------------------------------
 
 run_case() {
@@ -222,7 +275,8 @@ run_case() {
   # when it runs low needs a cap it can actually run into). Unset means the suite default.
   local turns="${CASE_MAX_TURNS:-$MAX_TURNS}" budget="${CASE_MAX_BUDGET_USD:-$MAX_BUDGET}"
 
-  local out="$TMP/result.json" err="$TMP/result.stderr" rc=0
+  local out="$TMP/result.json" err="$TMP/result.stderr" rc=0 t0 t1 elapsed
+  t0="$(date +%s)"
   ( cd "$WORKTREE" && \
     PATH="$EVALS/stub-bin:$PATH" \
     CLAUDE_CONFIG_DIR="$cfg" \
@@ -235,6 +289,8 @@ run_case() {
       --output-format json \
     > "$out" 2> "$err" )
   rc=$?
+  t1="$(date +%s)"
+  elapsed=$((t1 - t0))
 
   if [ "$rc" = 124 ]; then
     flunk "$name: tick" "timed out after ${CASE_TIMEOUT}s — see $err"
@@ -245,6 +301,18 @@ run_case() {
   case_check
   if [ -n "$had_browser" ]; then export BROWSE_BROWSER="$old_browser"; else unset BROWSE_BROWSER; fi
 
+  if [ -n "${EVAL_LEDGER:-}" ]; then
+    local num_turns total_cost verdict passed reg
+    num_turns="$(result_field num_turns)"
+    total_cost="$(result_field total_cost_usd)"
+    verdict="pass"; [ "$fail" != 0 ] && verdict="fail"
+    passed=$((n - flunks))
+    if reg="$(ledger_regressed "${LEDGER_SNAPSHOT:-/dev/null}" "$name" "$num_turns")"; then
+      echo "REGRESSION: $reg"
+    fi
+    ledger_append "$EVAL_LEDGER" "$name" "$verdict" "$passed" "$n" "$num_turns" "$total_cost" "$elapsed"
+  fi
+
   if [ -n "${EVAL_KEEP:-}" ]; then
     echo "  (kept: $TMP)"
   else
@@ -252,6 +320,11 @@ run_case() {
   fi
   unset -f case_setup case_check
 }
+
+# Everything above is just function and variable definitions — safe to `source` (card #140's
+# bin/test-eval-ledger.sh does exactly that, to reach ledger_append/ledger_regressed without
+# running any case for real). Only a direct run of this file gets past here.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
 
 CASES=()
 if [ $# -gt 0 ]; then
@@ -269,7 +342,12 @@ fi
 JOBS_CAP="${EVAL_JOBS:-4}"
 case "$JOBS_CAP" in ''|*[!0-9]*|0) JOBS_CAP=4 ;; esac
 JOBDIR="$(mktemp -d)"
-trap 'rm -rf "$JOBDIR"' EXIT
+# A snapshot of the ledger as it stood before this run's own appends — always created, even
+# with no EVAL_LEDGER or no prior file, so run_case's lookup (${LEDGER_SNAPSHOT:-/dev/null})
+# always has a real, empty-or-not file rather than branching on whether one exists.
+LEDGER_SNAPSHOT="$(mktemp)"
+[ -n "${EVAL_LEDGER:-}" ] && [ -f "$EVAL_LEDGER" ] && cp "$EVAL_LEDGER" "$LEDGER_SNAPSHOT"
+trap 'rm -rf "$JOBDIR" "$LEDGER_SNAPSHOT"' EXIT
 
 logs=()
 results=()
@@ -307,8 +385,12 @@ wait
 # missing or empty result file as "no change since last case", which would silently score
 # a dead case as a pass.
 failed_names=()
+regressions=()
 for i in "${!CASES[@]}"; do
   cat "${logs[i]}"
+  while IFS= read -r rline; do
+    case "$rline" in "REGRESSION: "*) regressions+=("${rline#REGRESSION: }") ;; esac
+  done < "${logs[i]}"
   if [ -s "${results[i]}" ]; then
     read -r d_cases d_n d_fail < "${results[i]}"
   else
@@ -328,4 +410,13 @@ echo "$cases case(s), $n check(s), $([ "$fail" = 0 ] && echo "all passed" || ech
 # a case's own check labels (e.g. "usability-sliver:") are not its file name, so this is the
 # one line that can tell a caller what to pass back to `bin/eval.sh <name>...`.
 [ "$fail" != 0 ] && echo "failed cases: ${failed_names[*]}"
+# Card #140: a case whose turns grew past 1.5x what $EVAL_LEDGER had on record for it, named
+# here in plain words — visible even on an otherwise all-green run.
+if [ "${#regressions[@]}" -gt 0 ]; then
+  joined="${regressions[0]}"
+  for r in "${regressions[@]:1}"; do joined="$joined; $r"; done
+  echo "turns grew more than 1.5x since last run: $joined"
+fi
 exit "$fail"
+
+fi
