@@ -487,7 +487,7 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   call, capturing its output, and paste the block and the output (trimmed to the last 40
   lines) under `## Verify` in the PR body (write the updated body to a file first, then
   `gh pr edit <pr> --body-file <that file>`). **Non-zero exit: never merge.** That is
-  **Stuck** (§4) — name the failing check in plain words above the fold, same as a red CI
+  **Stuck** (§4) — describe the failing check in plain words above the fold, same as a red CI
   twice, and put the block and its output under `<details>` same as any other exact error
   — and never edit the block to make it pass; a block that is wrong is a question for
   Steve, not something you rewrite. A zero exit (or a `verify: none` whose reason holds
