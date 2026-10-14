@@ -230,6 +230,25 @@ def gh_pr_comment(argv, cwd):
     save(d)
 
 
+def gh_pr_edit(argv, cwd):
+    pos, flags = parse_flags(argv)
+    d = load()
+    if pos:
+        pr = d["prs"][pos[0].lstrip("#")]
+    else:
+        branch = current_branch(cwd)
+        cands = [p for p in d["prs"].values() if p["head"] == branch and p["state"] == "OPEN"]
+        if not cands:
+            die(f"no open pull requests found for branch {branch!r}")
+        pr = cands[0]
+    if "body" in flags or "body-file" in flags:
+        pr["body"] = body_of(flags)
+    if "title" in flags:
+        pr["title"] = flags["title"]
+    save(d)
+    print(pr["url"])
+
+
 def gh_pr_checks(argv):
     if CI_FAIL_ONCE and not os.environ.get("FAKEHUB_CI_FAILED_ONCE_MARKER_SEEN"):
         # Not wired to a real second run across processes; today's cases never set
@@ -331,6 +350,7 @@ GH_DISPATCH = {
     ("pr", "create"): lambda argv, cwd: gh_pr_create(argv, cwd),
     ("pr", "list"): lambda argv, cwd: gh_pr_list(argv, cwd),
     ("pr", "comment"): lambda argv, cwd: gh_pr_comment(argv, cwd),
+    ("pr", "edit"): lambda argv, cwd: gh_pr_edit(argv, cwd),
     ("pr", "checks"): lambda argv, cwd: gh_pr_checks(argv),
     ("pr", "merge"): lambda argv, cwd: gh_pr_merge(argv, cwd),
     ("label", "list"): lambda argv, cwd: gh_label_list(argv),

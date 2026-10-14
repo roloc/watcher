@@ -93,6 +93,14 @@ this change and what it found; a screen change where it did not, or cannot say, 
 blocking — check it yourself only to confirm the change is a screen change, never to
 substitute for the pass itself.
 
+**A PR with no verify record is blocking, the same category as weakening the merge gate.**
+The tick's invocation hands you the card's `## Verify` block and its output — or
+`verify: none` and the reason — alongside the plan. A code PR with no `## Verify` block at
+all, a `verify: none` with no reason, or a `## Verify` whose own pasted output does not
+show a zero exit, is blocking: you do not re-run the block yourself, you read what it
+already printed. A docs-only PR is unaffected — it gets no review in the first place
+(above), and `verify: none — docs only` is implied for it.
+
 Then the project's own standing traps, which its `CLAUDE.md` lists.
 
 ## Output

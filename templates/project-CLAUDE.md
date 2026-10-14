@@ -18,6 +18,16 @@ though a human reading the file would say it obviously does.
   name the command(s).> A red check you could have caught in a few seconds locally is a
   wasted round trip.
 
+- **A card's Verification can carry a ` ```verify ` block** — shell lines, run from the
+  worktree root once CI is green, that prove the card done; the tick pastes the block and
+  its output on the PR under `## Verify`, and a non-zero exit cannot merge
+  (`commands/watch.md` §§2–3). Write one on a card for anything the board can prove by
+  running something, or the line `verify: none — <reason>` when nothing runnable does (a
+  decision doc, a mockup). A card that carries neither still works — the tick writes one
+  from the card's own words before touching a file — but a block written on the card is
+  the contract: the tick never edits it to make it pass. Nothing to fill in here; this
+  mechanism is the same for every project.
+
 - **Reading the project's own data.** <How is a tick allowed to look at what the card is
   about — a live page, a meeting, a record, a screenshot? Name the exact mechanism (a
   read-only share-link form, an API a bot token can call, a fixtures directory) and, if

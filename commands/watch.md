@@ -88,6 +88,17 @@ PR body and for `reviewer`, not for him:
 - Risk: <the one thing most likely to go wrong>
 ```
 
+**The `Test:` line ends in a block the loop can run, not a sentence it has to judge.**
+The card's own body may carry a fenced block opening with ` ```verify ` — shell lines, run
+from the worktree root — or the line `verify: none — <reason>` when nothing runnable
+proves the card (a decision doc, a mockup, a relabel). When the card has neither, write
+one yourself, from the card's own words, as the last thing you do here, before the first
+edit, and carry it into the `Test:` line and forward into the PR body (§3). A block you
+wrote is a claim, the same as the rest of the plan; a block Steve wrote is the contract,
+and §3 never edits it to make it pass — a block that is wrong is a question for Steve, not
+something you rewrite to get green. A docs-only card needs no block: `verify: none — docs
+only` is implied.
+
 **`You get` comes first, and it names a place the asker can actually open.** A card is a
 request from a person who will go and use the result, so before anything else, say what
 that person ends up with and where they find it: a page and what is on it, a message in
@@ -124,13 +135,12 @@ output is the doc itself.
 
 Build and test locally before opening the PR. **If the change touches a screen, call
 `usability` first** — as soon as its shots exist (its own invocation details are under "A
-change to a screen ships with its picture," below) — and only then run `reviewer` once on
-the branch when the change touches source or scripts, handing it the plan when you wrote
-one, and whether `usability` ran and what it found. Fix what either marks blocking, take
-or leave the nits. Docs-only changes get no review, unless they touch the merge gate (the
-CI workflow, a hook, the reviewer, or what the project's `CLAUDE.md` names as its gate) —
-those always get `reviewer`; a docs-only change never gets `usability` either, since it
-touches no screen.
+change to a screen ships with its picture," below). Fix what it marks blocking, take or
+leave the nits. `reviewer` still runs once, but not yet: §3 calls it after CI is green and
+the verify block has run, so it reads the real result instead of a promise. Docs-only
+changes get no review, unless they touch the merge gate (the CI workflow, a hook, the
+reviewer, or what the project's `CLAUDE.md` names as its gate) — those always get
+`reviewer`; a docs-only change never gets `usability` either, since it touches no screen.
 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
@@ -452,26 +462,40 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   did in the sentence that started it.)
 - Wait for the project's **required CI check** (its `CLAUDE.md` names it) **in the
   foreground** — `gh pr checks <pr> --watch --interval 60 --fail-fast` blocks until it
-  finishes — then `gh pr merge --squash --delete-branch`. **Always pass `--interval 60`**:
-  left at its own default, `--watch` polls GraphQL every 10 seconds, which is 90 queries
-  for one ordinary 15-minute CI run — most of an hour's GraphQL budget on watching a check
-  box turn green (card #98). 60 seconds costs the same wait a tenth of the points and
-  still notices CI finish within a minute. **You do the merging.** **Never end your turn to
-  wait** — not for CI, not for a subagent, not for anything: headless, ending the turn ends
-  the process, the PR stays open, the card stays in-flight and the work is lost (three cards
-  on the first night, watcher#4). **Backgrounding the wait is the same mistake**: a
-  `gh pr checks --watch` or `gh run watch` started as a background task, followed by ending
-  the turn "to be notified when it finishes", never gets that notification — the process is
-  gone — and the spawner has to release the card and spend a second tick merging a PR that
-  was already green (riffmap#305, September 14, 2026). Run the wait in the foreground and
-  keep the turn. Subagents run in the foreground only. `main` requires 0
-  approvals; CI is the required check; `reviewer`, and `usability` for a screen change,
-  are the only other gates and each runs once. If you changed code after a pass and the
-  change is more than the fix it asked for, run that one pass once more on that fix only.
+  finishes — then run the verify block and `reviewer`, below, before merging. **Always
+  pass `--interval 60`**: left at its own default, `--watch` polls GraphQL every 10 seconds,
+  which is 90 queries for one ordinary 15-minute CI run — most of an hour's GraphQL budget
+  on watching a check box turn green (card #98). 60 seconds costs the same wait a tenth of
+  the points and still notices CI finish within a minute. **You do the merging.** **Never
+  end your turn to wait** — not for CI, not for a subagent, not for anything: headless,
+  ending the turn ends the process, the PR stays open, the card stays in-flight and the
+  work is lost (three cards on the first night, watcher#4). **Backgrounding the wait is the
+  same mistake**: a `gh pr checks --watch` or `gh run watch` started as a background task,
+  followed by ending the turn "to be notified when it finishes", never gets that
+  notification — the process is gone — and the spawner has to release the card and spend a
+  second tick merging a PR that was already green (riffmap#305, September 14, 2026). Run
+  the wait in the foreground and keep the turn. Subagents run in the foreground only.
+  `main` requires 0 approvals; CI is the required check; `reviewer`, and `usability` for a
+  screen change, are the only other gates and each runs once.
+- **Once CI is green, run the verify block before `reviewer`.** The block is the one the
+  card carried, or the one you wrote into the plan (§2) — a fenced ` ```verify ` block of
+  shell lines, or `verify: none — <reason>`. Run it from the worktree root in one Bash
+  call, capturing its output, and paste the block and the output (trimmed to the last 40
+  lines) under `## Verify` in the PR body: `gh pr edit <pr> --body-file /tmp/card-<n>-pr-
+  body.md` with the updated body written there first. **Non-zero exit: never merge.** That
+  is **Stuck** (§4), with the output above the fold, the same as CI failing twice — and
+  never edit the block to make it pass; a block that is wrong is a question for Steve, not
+  something you rewrite. A zero exit (or a `verify: none` whose reason holds up) is what
+  lets you call `reviewer` — now, on the pushed branch, handing it the plan, whether
+  `usability` ran and what it found, and the verify block's own output, so it reads the
+  real result instead of a promise. Fix what it marks blocking, push, wait for CI again,
+  re-run the block, and call `reviewer` once more on that fix only; take or leave the nits.
+  Then `gh pr merge --squash --delete-branch`.
 - **`main` may move under you** while you work — the other lane merges its own PRs, and so
   does Steve. Before merging, and again if the merge is refused as not mergeable:
   `git fetch origin && git -c merge.conflictStyle=diff3 merge origin/main`. If git merges
-  it cleanly, push, wait for CI again, then merge. If it leaves conflict markers, read
+  it cleanly, push, wait for CI again, re-run the verify block and update `## Verify`, then
+  merge. If it leaves conflict markers, read
   every hunk — `diff3` shows three blocks: yours, the base both branches started from, and
   main's — and sort the conflict into one of two kinds:
   - **Additive: both sides added, nobody rewrote.** In every hunk each side is the base
@@ -480,7 +504,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     sides so each could append after it). The two additions are different things — two
     entries in a list of mockups, two sections at the end of a doc, two test cases — not
     two versions of one thing. Resolve it yourself: the base text, then main's addition,
-    then yours; delete the markers; commit the merge; push; wait for CI; merge. Leave one
+    then yours; delete the markers; commit the merge; push; wait for CI; re-run the verify
+    block and update `## Verify`; merge. Leave one
     comment **on the PR, not on the card** — `gh pr comment <pr> --body "🤖 FYI: merged
     main; kept both sides of an additive conflict in <file>."` It is a note about the
     merge, for whoever reads the PR later; the card is where Steve reads, and it needs
