@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Tell Steve's Discord channel when a card is stuck or something broke. Nothing else.
+"""Tell Steve's Discord channel when a card is stuck, something broke, or Monday's digest
+is due. Nothing else.
 
 Imported by `board.py`; never called by a tick directly. Every message names the card
 and links to it, so Steve can tap through from his phone. Configuration is one env var:
@@ -10,15 +11,21 @@ and links to it, so Steve can tap through from his phone. Configuration is one e
 
 What gets posted (and by whom):
 
-    stuck      `board move`   — the card landed in Stuck - Needs help: the alert
-    released   `board notify` — a run died holding the card; the spawner released it
-    breach     `board notify` — the product detector filed a card for a large breach
+    stuck      `board move`         — the card landed in Stuck - Needs help: the alert
+    released   `board notify`       — a run died holding the card; the spawner released it
+    breach     `board notify`       — the product detector filed a card for a large breach
+    digest     `metrics.py --post`  — the Monday digest: the loop's own numbers, per lane,
+                                      for the week that just ended
 
-That is the whole list. A card changing column, crossing into a new stage, shipping or
-being closed posts nothing: the floor page shows all of that live, and a channel that
-repeats it is a channel nobody reads when the alert comes (October 1, 2026: "Can we only
-hit the discord when something is stuck or broken?"). Nothing is posted per tick or per
-poll either. A post that fails (network, a bad URL, Discord down) prints one
+That is the whole list, plus the one exception `bin/metrics.py`'s own header always named
+as a possibility: "a weekly Discord digest is a separate decision" — watcher#139 is that
+decision, made once and run on a fixed Monday schedule rather than per event, same as
+`stuck`/`released`/`breach` are each tied to one event. A card changing column, crossing
+into a new stage, shipping or being closed still posts nothing: the floor page shows all
+of that live, and a channel that repeats it is a channel nobody reads when the alert comes
+(October 1, 2026: "Can we only hit the discord when something is stuck or broken?").
+Nothing is posted per tick or per poll either, and the digest is the one post with no
+single card behind it. A post that fails (network, a bad URL, Discord down) prints one
 `notify: ...` line on stderr and returns — a notification is never allowed to fail a
 board command.
 
@@ -36,6 +43,7 @@ TIMEOUT_SEC = 8
 # Discord embed colors (decimal RGB). One per meaning, so the color says it before the text.
 RED = 0xE74C3C       # stuck: Steve has to act
 ORANGE = 0xE67E22    # broken: a run died, a product check crossed its limit
+NEUTRAL = 0x95A5A6   # digest: a status report, neither an alert nor something broken
 
 
 def webhook_url():
@@ -84,6 +92,16 @@ def build(kind, card, detail="", pr=None, board_url=""):
         embed = {"title": label, "url": url, "color": ORANGE,
                  "description": (detail or "A product check crossed its limit. "
                                            "The card has the numbers.") + pr_line}
+    elif kind == "digest":
+        # No single card is behind this one: `detail` is the whole FYI-shaped message
+        # (bin/metrics.py's format_digest()), so it goes in the embed description verbatim
+        # rather than being folded into `content` the way the other kinds' short lines are.
+        content = "📊 Weekly digest."
+        # Discord rejects an embed over 4096 chars outright (a 400, logged and nothing
+        # else, per this module's own contract) rather than truncating it for us, the way
+        # it handles `content` past 2000 — so this one guards itself the same way.
+        embed = {"title": card.get("title") or "Weekly digest", "url": url, "color": NEUTRAL,
+                 "description": (detail or "No ticks this week.")[:4096]}
     else:
         return None
 

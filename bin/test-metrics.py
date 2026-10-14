@@ -4,6 +4,7 @@ writes its own fixture log files under a throwaway directory and reads them back
 
     python3 bin/test-metrics.py      # exit 0 = all cases hold
 """
+import contextlib
 import io
 import json
 import os
@@ -15,6 +16,13 @@ from datetime import datetime, timedelta, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import metrics  # noqa: E402
+import notify   # noqa: E402
+
+# Offline, always: no webhook configured, and notify.send raises if anything ever tries to
+# reach the network — --post's digest kind must stay a no-op here the same way it would on
+# a box with no DISCORD_WEBHOOK_URL set (board#139's own convention: unset = silent no-op).
+os.environ.pop("DISCORD_WEBHOOK_URL", None)
+notify.send = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("test-metrics.py must never hit the network"))
 
 fails = 0
 count = 0
@@ -259,6 +267,132 @@ if last_week_row is not None:
 
 shutil.rmtree(WSTATE, ignore_errors=True)
 shutil.rmtree(STATE, ignore_errors=True)
+
+print("10. the Monday digest: one bullet per lane, this week's numbers with last week's "
+      "in parentheses — the two most recently CLOSED weeks, never the one still open")
+DSTATE = tempfile.mkdtemp(prefix="watcher-metrics-test-digest-")
+
+
+def dig_write(lane, issue, when, **kw):
+    logs = os.path.join(DSTATE, lane, "logs")
+    os.makedirs(logs, exist_ok=True)
+    path = os.path.join(logs, f"card-{issue}-{when}.json")
+    d = {"subtype": kw.get("subtype", "success"), "total_cost_usd": kw.get("cost", 1.0),
+         "num_turns": kw.get("turns", 5), "duration_ms": kw.get("duration_ms", 60000)}
+    if d["subtype"] == "success":
+        d["result"] = report_lines(issue, kw.get("outcome"), kw.get("ended_in"), kw.get("needs_steve", "no"))
+    with open(path, "w") as f:
+        json.dump(d, f)
+
+
+# "The week just ended" relative to the real NOW is NOW's own calendar week minus one, and
+# "the week before that" is minus two.
+WEEK_JUST_ENDED = (metrics.week_start(NOW) - timedelta(days=1)).strftime(TS_FMT)
+WEEK_BEFORE_THAT = (metrics.week_start(NOW) - timedelta(days=8)).strftime(TS_FMT)
+# The regression this section exists to catch (found in review): a tick from the STILL
+# OPEN current week must never be folded into "the week just ended" just because
+# `weekly_breakdown`'s own last bucket has no upper bound — digest_line must read it from
+# a bucket that does, by discarding the open week rather than reporting from it.
+THIS_WEEK_STILL_OPEN = ts(0)
+
+dig_write("lane-busy", 60, WEEK_JUST_ENDED, outcome="merged", ended_in="Done", turns=4)
+dig_write("lane-busy", 61, WEEK_JUST_ENDED, outcome="stuck", ended_in="Stuck - Needs help",
+          needs_steve="yes — which mockup?")
+dig_write("lane-busy", 62, WEEK_JUST_ENDED, subtype="error_during_execution")
+dig_write("lane-busy", 63, WEEK_BEFORE_THAT, outcome="merged", ended_in="Done", turns=8)
+dig_write("lane-busy", 64, WEEK_BEFORE_THAT, subtype="error_max_turns")
+dig_write("lane-busy", 65, THIS_WEEK_STILL_OPEN, outcome="merged", ended_in="Done", turns=99)
+dig_write("lane-busy", 66, THIS_WEEK_STILL_OPEN, subtype="error_max_turns")
+# lane-quiet: no logs at all — a lane with zero ticks this week (card #139 names this case
+# explicitly), and the digest must say so instead of dividing by zero.
+os.makedirs(os.path.join(DSTATE, "lane-quiet"), exist_ok=True)
+
+busy_dir = os.path.join(DSTATE, "lane-busy")
+quiet_dir = os.path.join(DSTATE, "lane-quiet")
+
+busy_line = metrics.digest_line("lane-busy", metrics.load_lane(busy_dir), now=NOW)
+check("busy lane: this week's 3 ticks, 2 last week (the 2 open-week ticks excluded)",
+      "**lane-busy**: **3** ticks (2)" in busy_line, busy_line)
+check("busy lane: first-pass rate, both weeks 100% (one Done, first try, each week)",
+      "**100%** first-pass (100%)" in busy_line, busy_line)
+check("busy lane: 1 parked this week (the Stuck-with-a-question tick), 0 last week",
+      "**1** parked (0)" in busy_line, busy_line)
+check("busy lane: median turns of the one shipped card each week, 4 this week, 8 last "
+      "(not the open week's 99-turn card)",
+      "**4** median turns (8)" in busy_line, busy_line)
+check("busy lane: 1 death each week (not the open week's extra death)",
+      "**1** death (1)" in busy_line, busy_line)
+
+quiet_line = metrics.digest_line("lane-quiet", metrics.load_lane(quiet_dir), now=NOW)
+check("a zero-tick lane says so instead of a divide-by-zero",
+      quiet_line == "**lane-quiet**: **0** ticks this week (0 last week)", quiet_line)
+
+digest_text = metrics.format_digest([busy_dir, quiet_dir], now=NOW)
+check("starts with the FYI line, no question, no letters (this is a report, not an ask)",
+      digest_text.startswith("🤖 **FYI:** the loop's numbers for the week just ended."))
+check("one bullet per lane, in the order given",
+      digest_text.index("lane-busy") < digest_text.index("lane-quiet"))
+check("the digest text (built from NOW, not a pre-shifted anchor) matches the lane calls above",
+      "**lane-busy**: **3** ticks (2)" in digest_text and
+      "**lane-quiet**: **0** ticks this week (0 last week)" in digest_text, digest_text)
+
+print("11. default_dirs(): every lane under WATCHER_STATE_ROOT, for the service that runs "
+      "with no <state-dir> named on the line")
+DROOT = tempfile.mkdtemp(prefix="watcher-metrics-test-root-")
+os.makedirs(os.path.join(DROOT, "alpha"))
+os.makedirs(os.path.join(DROOT, "beta"))
+with open(os.path.join(DROOT, "not-a-lane.txt"), "w") as f:
+    f.write("stray file, not a lane dir")
+old_root = os.environ.get("WATCHER_STATE_ROOT")
+os.environ["WATCHER_STATE_ROOT"] = DROOT
+check("picks up every subdirectory, ignores a stray file, sorted",
+      metrics.default_dirs() == [os.path.join(DROOT, "alpha"), os.path.join(DROOT, "beta")],
+      str(metrics.default_dirs()))
+
+print("12. CLI: --digest with no dirs reads WATCHER_STATE_ROOT; --post with no --digest "
+      "is rejected; --post with no webhook configured stays offline")
+buf3 = io.StringIO()
+with contextlib.redirect_stdout(buf3):
+    metrics.main(["--digest"])
+check("--digest alone (no dirs) discovered alpha and beta from WATCHER_STATE_ROOT",
+      "alpha" in buf3.getvalue() and "beta" in buf3.getvalue(), buf3.getvalue())
+if old_root is None:
+    os.environ.pop("WATCHER_STATE_ROOT", None)
+else:
+    os.environ["WATCHER_STATE_ROOT"] = old_root
+
+try:
+    metrics.main(["--post", busy_dir])
+    check("--post without --digest is rejected", False)
+except SystemExit as e:
+    check("--post without --digest is rejected", "needs --digest" in str(e))
+
+buf4 = io.StringIO()
+with contextlib.redirect_stdout(buf4):
+    metrics.main(["--digest", "--post", busy_dir, quiet_dir])  # no DISCORD_WEBHOOK_URL: must not touch the network
+check("--digest --post with no webhook still prints the digest (the off switch is silent, not mute)",
+      "lane-busy" in buf4.getvalue())
+
+EMPTY_ROOT = tempfile.mkdtemp(prefix="watcher-metrics-test-emptyroot-")
+old_root2 = os.environ.get("WATCHER_STATE_ROOT")
+os.environ["WATCHER_STATE_ROOT"] = EMPTY_ROOT
+buf5 = io.StringIO()
+with contextlib.redirect_stdout(buf5):
+    try:
+        metrics.main(["--digest"])
+        exited = False
+    except SystemExit:
+        exited = True
+check("a box with no lane yet is a quiet week, not a failed unit (no SystemExit, no usage dump)",
+      not exited and "nothing to report" in buf5.getvalue(), buf5.getvalue())
+if old_root2 is None:
+    os.environ.pop("WATCHER_STATE_ROOT", None)
+else:
+    os.environ["WATCHER_STATE_ROOT"] = old_root2
+shutil.rmtree(EMPTY_ROOT, ignore_errors=True)
+
+shutil.rmtree(DSTATE, ignore_errors=True)
+shutil.rmtree(DROOT, ignore_errors=True)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")
 sys.exit(fails)

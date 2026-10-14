@@ -69,7 +69,7 @@ os.environ["DISCORD_MENTION"] = "<@123>"
 sent.clear()
 notify.post("stuck", CARD)
 check("DISCORD_MENTION is prepended to the alert", last()["content"].startswith("<@123> 🚨"))
-for kind in ("released", "breach"):
+for kind in ("released", "breach", "digest"):
     sent.clear()
     notify.post(kind, CARD)
     check(f"...but not to '{kind}': broken is a line, stuck is the ping",
@@ -87,6 +87,27 @@ notify.post("breach", CARD, detail="Health probes failing: now 1, averaging 0.75
 check("a product breach: says something broke, carries the detector's line, orange",
       "Something broke" in last()["content"]
       and "averaging 0.7500" in embed()["description"] and embed()["color"] == notify.ORANGE)
+
+print("3b. the Monday digest: no single card behind it, so the text is the whole message")
+DIGEST_TEXT = ("🤖 **FYI:** the loop's numbers for the week just ended.\n"
+               "- **riffmap**: **12** ticks (9), **82%** first-pass (75%), **2** parked (3), "
+               "**46** median turns (51), **0** deaths (1)")
+sent.clear()
+notify.post("digest", {"number": 0, "title": "Weekly digest", "url": ""}, detail=DIGEST_TEXT)
+check("neutral color: a report, not an alert and not something broken",
+      embed()["color"] == notify.NEUTRAL)
+check("the digest text lives in the embed description, verbatim",
+      embed()["description"] == DIGEST_TEXT)
+check("content stays short — the digest's own bullets never get truncated by the 1900 cut",
+      len(last()["content"]) < 50)
+sent.clear()
+notify.post("digest", {"number": 0, "title": "Weekly digest", "url": ""})
+check("no text on file -> says there were no ticks, rather than an empty embed",
+      "No ticks this week" in embed()["description"])
+sent.clear()
+notify.post("digest", {"number": 0, "title": "Weekly digest", "url": ""}, detail="x" * 5000)
+check("the embed description is capped at Discord's own 4096 limit, same as content's 1900",
+      len(embed()["description"]) == 4096)
 
 print("4. off switch, and everything that is not stuck or broken")
 saved = os.environ.pop("DISCORD_WEBHOOK_URL")

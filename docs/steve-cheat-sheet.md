@@ -165,15 +165,16 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 
 ## What the Discord messages mean
 
-Discord only speaks when a card is **stuck** or something **broke**. Every message links
-to the card. Everything else — a card starting, each step, a card shipping — is on the
-floor page, not in the channel.
+Discord only speaks when a card is **stuck**, something **broke**, or it's **Monday
+morning**. Every message but the Monday one links to a card. Everything else — a card
+starting, each step, a card shipping — is on the floor page, not in the channel.
 
 | Message starts with | Meaning | You need to do |
 |---|---|---|
 | 🚨 **Needs Steve:** | a card is in Stuck; the ask is in the message | open the card, pick A, B or C, move it back to In progress |
 | ⚠️ #n: the run ended without finishing | the tick died; it will be retried once | nothing, unless it comes back as 🚨 |
 | 📉 **Something broke:** | a product check failed; a card with the numbers is in Backlog | open the link in the message and look; move the card to In progress to have it fixed |
+| 📊 Weekly digest | Monday morning's numbers, per lane — ticks, first-pass rate, parks, turns, deaths, this week next to last | nothing |
 
 To turn it off, remove `DISCORD_WEBHOOK_URL` from `/etc/watcher/env` on the box and
 restart the unit. To get pinged on 🚨 only, set `DISCORD_MENTION` there to your Discord
@@ -206,8 +207,7 @@ user mention (`<@your-id>`) or `@here`.
 
 ## How well the bots are doing
 
-A report, run by hand, adds up what every past run already said about itself. **It never
-posts anywhere on its own** — nothing pings you about it; you ask for it when you want it.
+A report adds up what every past run already said about itself.
 
 - **First-pass merge rate** — of the cards that made it all the way to Done, how many did
   it in one run, no do-overs.
@@ -219,16 +219,23 @@ posts anywhere on its own** — nothing pings you about it; you ask for it when 
 - **Time from start to Done** — the typical and the worst wall-clock time, including any
   stretch a card spent sitting in Stuck waiting on you.
 
+**Every Monday, the short version lands in Discord on its own** — one line per lane, this
+week's ticks, first-pass rate, parks, turns and deaths, last week's number next to each
+(card #139). The full report above is still something you ask for; nothing pings you for
+that one.
+
 <details><summary>Command (on the box)</summary>
 
 ```
 python3 /opt/watcher/bin/metrics.py ~watcher/.local/state/watcher/riffmap
 python3 /opt/watcher/bin/metrics.py ~watcher/.local/state/watcher/riffmap ~watcher/.local/state/watcher/riffmap-design --weeks 4
+python3 /opt/watcher/bin/metrics.py --digest          # the Monday shape, printed instead of posted
 ```
 
 One state directory per lane (riffmap, riffmap-design, riffmap-triage, watcher); give it
 several to see them side by side. `--weeks N` sets how many weeks the weekly table covers
-(default 8).
+(default 8). `--digest` with no state directory reads every lane on the box; add `--post`
+to send it to Discord by hand instead of waiting for Monday.
 
 </details>
 

@@ -32,8 +32,10 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `notify`). It posts when a card is stuck or something broke, and for nothing else.
   `python3 bin/test-notify.py` is its offline test; run it after touching either file.
 - `bin/metrics.py` — a read-only weekly report over a lane's own tick logs (first-pass
-  merge rate, park rate, deaths, turns/quota and time to Done), run by hand, never by the
-  loop. `python3 bin/test-metrics.py` is its offline test; run it after touching the file.
+  merge rate, park rate, deaths, turns/quota and time to Done). Run by hand for the full
+  report; `--digest` (one bullet per lane, CI runs this suite) is also what
+  `watcher-metrics.timer` runs unattended every Monday, piped to Discord with `--post`.
+  `python3 bin/test-metrics.py` is its offline test; run it after touching the file.
 - `bin/tail.sh` and `bin/tail.py` — run by hand, on the box: which card a lane holds and
   what its tick is doing right now, decoded live from the tick's own session transcript
   (not the lane's own coarser `journalctl` line — see `bin/tail.sh`'s header). Read-only;
@@ -123,10 +125,12 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 - No permission prompts exist on the box. Nothing in the tick may depend on one.
 - Discord is a repeater, never a record: a post happens after the board change lands, a
   failed post is one stderr line and nothing else, and no message goes out per poll or
-  per tick. **It is for stuck and broken only** — a move to Stuck, a run that died, a card
-  the detector filed. A new kind of post needs one of those two words to be true of it;
-  progress belongs on the floor page (October 1, 2026). The webhook URL is a secret; it
-  lives in `/etc/watcher/env`, never in git.
+  per tick. **It is for stuck, broken, and the Monday digest only** — a move to Stuck, a
+  run that died, a card the detector filed, or `bin/metrics.py --post`'s weekly numbers
+  (card #139, the one post on a clock instead of an event, named as a future possibility
+  in `metrics.py`'s own header since it was written). A new kind of post needs one of
+  those three to be true of it; progress belongs on the floor page (October 1, 2026). The
+  webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
 - American English in every file. Dates like September 7, 2026.
 
 ## When the watcher works its own board

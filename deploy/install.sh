@@ -129,6 +129,12 @@ install -m 644 "$WATCHER_DIR/deploy/watcher@.service" /etc/systemd/system/watche
 # Enabled here, so a box set up from scratch deploys itself from its first boot.
 install -m 644 "$WATCHER_DIR/deploy/watcher-deploy.service" /etc/systemd/system/watcher-deploy.service
 install -m 644 "$WATCHER_DIR/deploy/watcher-deploy.timer" /etc/systemd/system/watcher-deploy.timer
+# The Monday digest (bin/metrics.py --digest --post, card #139): the loop's own numbers,
+# per lane, in Discord, once a week. Installed and enabled for every box, the same as
+# watcher-deploy.timer above — DISCORD_WEBHOOK_URL unset in /etc/watcher/env is its own
+# off switch, not a reason to leave the timer off.
+install -m 644 "$WATCHER_DIR/deploy/watcher-metrics.service" /etc/systemd/system/watcher-metrics.service
+install -m 644 "$WATCHER_DIR/deploy/watcher-metrics.timer" /etc/systemd/system/watcher-metrics.timer
 # The detector (bin/detect.sh, card #36): the unit is installed for every box, but an
 # instance only starts for a project that carries its own projects/<name>.detect.env —
 # merging that file is what turns detection on, below, the same as a lane's own .env.
@@ -140,6 +146,9 @@ systemctl daemon-reload
 systemctl is-enabled --quiet watcher-deploy.timer 2>/dev/null \
   || systemctl enable --now watcher-deploy.timer >/dev/null 2>&1 \
   || echo "warning: could not enable watcher-deploy.timer" >&2
+systemctl is-enabled --quiet watcher-metrics.timer 2>/dev/null \
+  || systemctl enable --now watcher-metrics.timer >/dev/null 2>&1 \
+  || echo "warning: could not enable watcher-metrics.timer" >&2
 for f in "$WATCHER_DIR"/projects/*.detect.env; do
   [ -f "$f" ] || continue
   p="$(basename "$f" .detect.env)"

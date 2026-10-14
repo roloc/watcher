@@ -1,0 +1,24 @@
+# The Monday digest (bin/metrics.py --digest --post, card #139): the loop's own numbers,
+# per lane, posted to Discord once a week so a rule change is judged by the next week's
+# table instead of by memory. One instance for the whole box, like watcher-deploy.service —
+# not a `watcher@` lane, it holds no card and does no work. No [Install] section: it is
+# driven by watcher-metrics.timer, never enabled on its own, the same shape
+# watcher-deploy.service and watcher-detect@.service already use.
+[Unit]
+Description=Monday digest: the loop's own numbers, per lane, in Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=watcher
+Group=watcher
+WorkingDirectory=/opt/watcher
+EnvironmentFile=/etc/watcher/env
+Environment=HOME=/home/watcher
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# No <state-dir> arguments: metrics.py --digest reads every lane under
+# WATCHER_STATE_ROOT (default ~/.local/state/watcher) by itself when none are given.
+# DISCORD_WEBHOOK_URL unset in /etc/watcher/env is --post's own off switch — the same as
+# every other notify.py caller, never a reason to skip running this unit.
+ExecStart=/opt/watcher/bin/metrics.py --digest --post

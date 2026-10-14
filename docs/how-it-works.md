@@ -15,8 +15,8 @@ short version.
 | **Usability** | `agents/usability.md` | a subagent the tick calls once, on a screen change only, before `reviewer` | a second read-only pass that never sees the code: only the card's ask and the PR's pictures, blocking when the person the card names could not do the thing from a phone shot |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
-| **Discord** | `bin/notify.py` | imported by the board CLI | posts to Steve's channel when a card is stuck or something broke, and for nothing else — when a webhook is configured |
-| **Metrics** | `bin/metrics.py` | run by hand, on the box | read-only report over a lane's own logs: first-pass merge rate, park rate, deaths, turns/quota and time to Done, per week |
+| **Discord** | `bin/notify.py` | imported by the board CLI, and by `bin/metrics.py --post` | posts to Steve's channel when a card is stuck, something broke, or the Monday digest is due, and for nothing else — when a webhook is configured |
+| **Metrics** | `bin/metrics.py` | `--digest`/`--post`: `watcher-metrics.timer`, every Monday; otherwise run by hand | read-only report over a lane's own logs: first-pass merge rate, park rate, deaths, turns/quota and time to Done, per week; `--digest` is the one-bullet-per-lane shape the Monday post sends |
 | **Floor page** | `bin/floor.py` | `watcher-floor.service`, always on | live, read-only page: what every lane is working on, idle, needing Steve, paused or asleep after a failure, plus recent ticks across every project; a Peek button on every lane's desk opens that lane's session — live while it works, its last one when it does not — decoded the same way `bin/tail.sh` decodes it; the ship station's Peek lists every step CI ran on main's newest commit, the commits before it, and the deployer's last lines (from its `history` file) — and, while a deploy is in progress, which step it is on, how fresh its last check was, which lane(s) it is waiting on (a link to each card, and its watchdog deadline), and when it lands at the latest (card #105). Each board also gets a **Needs Steve strip**: every card Stuck on that board, whichever lane last touched it (not only the one a lane's own desk happens to show), with a carousel of every picture its Needs Steve comments have shown — flip through with arrows, a swipe or the arrow keys, lettered by direction when the comment named one, newest round first, older rounds reachable past the last picture and marked with their own date. A **Studio** button shows the same data as a floor plan, drawn for a desk's browser (at least 960px; a phone pans it): the break room and Steve's office across the top with a hallway between, the main hallway, then a room per board with hallways between and the server room at the end. A board's room has a desk per lane (lit and scanning while it works), a counter for triage, the ship station on a shelf and the board's counts on a whiteboard; idle lanes walk out of the door and down the hallway to the break room (coffee machine, vending machine, couch, windows) and mill about there, a lane asleep after a failure naps on the couch, and a lane that needs Steve walks to his office and waves in front of his desk with its picture held up while the light over his door turns red. A ship station with nothing to watch (CI green, nothing deploying) goes on break the same way, leaving its shelf tagged "out" until there is something to watch again, and joins the crowd at cookie time too — just without a cookie in hand, since there is no picture of a dock hand eating one (card #126). His in-tray holds every Stuck card with the same carousel as the floor's strip. On his wall, two boards to click: the **bulletin board** (every card being worked and recently worked, each with a Peek that reads the card itself off GitHub through `/api/card.json`) and the **wins board** (every card a lane took to Done in the last seven days, by board, with its title from the board). Hover the **server room** for this box's load, memory, disk and uptime, the tokens every lane moved in the last day (from the tick logs' own `usage`), and — when `PROXMOX_URL` and `PROXMOX_TOKEN` are set in the box's `/etc/watcher/floor.env`, the floor service's own file, never `/etc/watcher/env`, which every lane's tick reads (`PROXMOX_VERIFY=0` for the lab's self-signed certificate) — every node and guest on the Proxmox host with its CPU and memory. Tap a character for a speech bubble, tap the bubble for its full Peek. `?demo=1` cycles a fixture through every state, for development and screenshots |
 | **A browser** | `bin/browse.py` | run by a tick or by hand | headless Chrome, for looking at a page the way its reader does: `check` (did the page's own code fail?), `text`, `shot`. `curl` fetches what the server sent; a page that draws itself is only seen by running it |
 | **Steve** | a human | GitHub, on his phone | moves cards, answers Stuck cards, owns every product decision |
@@ -565,30 +565,39 @@ money he had been charged (September 19, 2026). The number was never a bill.
 
 ## Discord
 
-Steve does not sit on the board; he gets pinged — **only when a card is stuck or
-something broke.** When `DISCORD_WEBHOOK_URL` is set (in `/etc/watcher/env` for the box, or
-in a project's env file), `board.py` posts to the channel **after** a change lands, so the
-board is always the record and Discord only ever repeats it. Every post names the card and
-links to it.
+Steve does not sit on the board; he gets pinged — **only when a card is stuck, something
+broke, or the Monday digest is due.** When `DISCORD_WEBHOOK_URL` is set (in
+`/etc/watcher/env` for the box, or in a project's env file), `board.py` posts to the
+channel **after** a change lands, so the board is always the record and Discord only ever
+repeats it. Every post names the card and links to it, except the digest, which has no
+single card behind it (below).
 
 | Event | Posted by | Looks like |
 |---|---|---|
 | **a move to Stuck** | the tick (comment first, then move), the spawner's park, or the deployer's held card | 🚨 **Needs Steve:** the ask, quoted from the card, red, with the PR when there is one; `DISCORD_MENTION` pings someone |
 | a run died holding the card | the spawner's sweeper or reconciliation | ⚠️ `the run ended without finishing`; the next poll may retry |
 | the product detector filed a card | `bin/detect.sh`, after the card lands in Backlog | 📉 **Something broke:** the metric, the reading and the average, and the page to look at |
+| the Monday digest | `bin/metrics.py --digest --post`, on `watcher-metrics.timer` | 📊 the loop's own numbers, per lane: ticks, first-pass rate, parks, median turns per shipped card and deaths for the week just ended, each with last week's number in parentheses |
 
-That is the whole list. A card changing column, crossing into a new stage, shipping, or
-being closed by hand posts nothing, and neither does a run that ended with its PR open
-(the next poll merges it): the floor page shows all of that live. Until October 1, 2026
-every one of them posted, and Steve asked for the channel back: "Now that we have the
-floor page I don't think we need to be so verbose to discord. Can we only hit the discord
-when something is stuck or broken?" A channel that repeats every step is a channel nobody
-is reading when the alert comes.
+That is the whole list, plus the one exception `bin/metrics.py`'s own header always named
+as a possibility ("a weekly Discord digest is a separate decision") — card
+[#139](https://github.com/roloc/watcher/issues/139) is that decision, made once and run on
+a fixed schedule rather than per event, the way `stuck`/`released`/`breach` each are. A
+card changing column, crossing into a new stage, shipping, or being closed by hand posts
+nothing, and neither does a run that ended with its PR open (the next poll merges it): the
+floor page shows all of that live. Until October 1, 2026 every one of them posted, and
+Steve asked for the channel back: "Now that we have the floor page I don't think we need to
+be so verbose to discord. Can we only hit the discord when something is stuck or broken?"
+A channel that repeats every step is a channel nobody is reading when the alert comes.
 
-Nothing is posted per poll, per tick, or for a quiet tick. A post that fails is one line
-on stderr and nothing else — a notification can never fail a board command or a tick.
-`python3 bin/test-notify.py` checks the shapes offline; `python3 bin/notify.py stuck 1
-"smoke test" https://example.com` sends one by hand.
+Nothing is posted per poll, per tick, or for a quiet tick, and the digest is the one post
+on a clock instead of an event — `watcher-metrics.timer` fires Monday 06:00 Central
+(`OnCalendar=Mon 12:00 UTC`), not persistent, so a box that was off over the weekend does
+not post late on Tuesday. A post that fails is one line on stderr and nothing else — a
+notification can never fail a board command or a tick. `python3 bin/test-notify.py` checks
+the shapes offline; `python3 bin/notify.py stuck 1 "smoke test" https://example.com` sends
+one by hand, and `python3 bin/metrics.py --digest --post` sends the digest for whatever
+lanes are under `WATCHER_STATE_ROOT`.
 
 ## Watching the product
 

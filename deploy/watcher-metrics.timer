@@ -1,0 +1,14 @@
+# Monday 06:00 Central = 12:00 UTC, year-round (Central shifts between CST and CDT, UTC
+# does not — close enough for a weekly FYI). No Persistent: a box that was off over the
+# weekend posts nothing extra on Tuesday, it just waits for the next Monday — and running
+# late would also break format_digest()'s own "the week just ended" framing, which assumes
+# `now` is still Monday morning (bin/metrics.py's format_digest docstring).
+[Unit]
+Description=Monday digest: the loop's own numbers, per lane, in Discord
+
+[Timer]
+OnCalendar=Mon 12:00 UTC
+Persistent=false
+
+[Install]
+WantedBy=timers.target

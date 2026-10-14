@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
-"""Read-only report: how the loop is actually doing, per lane, per week.
+"""Read-only report by default: how the loop is actually doing, per lane, per week.
 
 Every tick writes its own log under the lane's state directory
 (`logs/card-<n>-<ts>.json` — `subtype`, `total_cost_usd`, `num_turns`, `result`, the
 tick's own five-line report as free text — `how-it-works.md`, "State on disk"). Nobody
 adds those up, so whether a rule change helped is answered from memory, not from data
-(watcher#37). This script only reads; it posts nothing anywhere, on its own or otherwise —
-a weekly Discord digest is a separate decision.
+(watcher#37).
 
     python3 bin/metrics.py <state-dir> [<state-dir> ...] [--weeks N]
+    python3 bin/metrics.py [<state-dir> ...] --digest [--post]
 
     python3 bin/metrics.py ~/.local/state/watcher/riffmap
     python3 bin/metrics.py ~/.local/state/watcher/riffmap ~/.local/state/watcher/riffmap-design --weeks 4
+    python3 bin/metrics.py --digest --post
 
 Each `<state-dir>` is one lane's `WATCHER_STATE` (`~/.local/state/watcher/<project>`).
-Giving it several prints one section each, so a weekly digest across a project's lanes is
-one command. `--weeks` (default 8) sets how many calendar weeks the weekly table covers.
+Giving it several prints one section each, so a report across a project's lanes is one
+command. `--weeks` (default 8) sets how many calendar weeks the weekly table covers.
+
+`--digest` prints one bullet per lane instead — this week's numbers, last week's in
+parentheses (card #139) — the shape `docs/talking-to-steve.md` wants for anything Steve
+reads. `--post` sends that same text to Discord through `bin/notify.py`'s `digest` kind;
+with no `DISCORD_WEBHOOK_URL` configured that is a silent no-op, same as every other post
+`notify.py` makes. Posting is the only thing this script ever writes anywhere; without
+`--post` it only prints, exactly as it always has. With `--digest` and no `<state-dir>`
+given, it reads every lane under `WATCHER_STATE_ROOT` (default `~/.local/state/watcher`)
+instead — this is what `deploy/watcher-metrics.service` runs, unattended, every Monday.
 
 What it reports, per lane:
 
@@ -54,6 +64,8 @@ import re
 import statistics
 import sys
 from datetime import datetime, timedelta, timezone
+
+import notify  # bin/notify.py, beside this file
 
 LOG_RE = re.compile(r'^card-(\d+)-(\d{8}T\d{6}Z)\.json$')
 TS_FMT = '%Y%m%dT%H%M%SZ'
@@ -277,7 +289,7 @@ def weekly_breakdown(ticks, weeks, now=None):
         return len(starts) - 1
 
     rows = [{"ticks": 0, "died": 0, "done": 0, "first_pass": 0,
-             "tick_parked": 0, "spawner_parked": 0} for _ in starts]
+             "tick_parked": 0, "spawner_parked": 0, "ship_turns": []} for _ in starts]
 
     for t in ticks:
         b = bucket(t.ts)
@@ -295,6 +307,12 @@ def weekly_breakdown(ticks, weeks, now=None):
                 rows[b]["done"] += 1
                 if recs[0] is done_at:
                     rows[b]["first_pass"] += 1
+                # the digest's turns-median is per week, so it needs the whole episode's
+                # turns summed the same way shipped_stats() does for the all-time report —
+                # attributed to the week of the Done tick, same as "done" and "first_pass".
+                episode = [r for r in recs if r.ts <= done_at.ts]
+                rows[b]["ship_turns"].append(
+                    sum(r.turns for r in episode if r.turns is not None))
         for r in recs:
             if r.ended_in == "Stuck - Needs help" and (r.needs_steve or "").lower().startswith("yes"):
                 b = bucket(r.ts)
@@ -366,8 +384,61 @@ def report(lane, ticks, weeks, out=sys.stdout):
     p()
 
 
+def digest_line(lane, ticks, now=None):
+    """One bullet: `lane`'s numbers for the week just ended, last week's in parentheses
+    (card #139). Reads `weekly_breakdown`'s LAST TWO FULLY CLOSED weeks — `rows[-2]` and
+    `rows[-3]` from a 3-week breakdown — never `rows[-1]`: that bucket's own `bucket()`
+    has no upper bound (by design, for a live report ending today), so a tick from the
+    still-open current week would otherwise land in "the week just ended" and inflate it
+    — worse, differently each time it is run, since more of the current week accumulates
+    between one run and the next (found in review: a real run on this box showed 63 ticks
+    for a week that in fact had 40). `rows[-2]` and `rows[-3]` both have a real upper
+    bound (the next bucket's start), so neither ever absorbs the open week, however many
+    hours into Monday `watcher-metrics.timer` actually fires."""
+    _, rows = weekly_breakdown(ticks, 3, now=now)
+    this_row, last_row = rows[-2], rows[-3]
+    if this_row["ticks"] == 0:
+        return f"**{lane}**: **0** ticks this week ({last_row['ticks']} last week)"
+
+    def pct(row):
+        return f"{100 * row['first_pass'] / row['done']:.0f}%" if row["done"] else "–"
+
+    def turns_med(row):
+        return f"{statistics.median(row['ship_turns']):.0f}" if row["ship_turns"] else "–"
+
+    def parked(row):
+        return row["tick_parked"] + row["spawner_parked"]
+
+    def deaths(row):
+        return "death" if row["died"] == 1 else "deaths"
+
+    return (f"**{lane}**: **{this_row['ticks']}** ticks ({last_row['ticks']}), "
+            f"**{pct(this_row)}** first-pass ({pct(last_row)}), "
+            f"**{parked(this_row)}** parked ({parked(last_row)}), "
+            f"**{turns_med(this_row)}** median turns ({turns_med(last_row)}), "
+            f"**{this_row['died']}** {deaths(this_row)} ({last_row['died']})")
+
+
+def format_digest(dirs, now=None):
+    lines = ["🤖 **FYI:** the loop's numbers for the week just ended."]
+    for d in dirs:
+        lane = os.path.basename(os.path.normpath(d))
+        lines.append("- " + digest_line(lane, load_lane(d), now=now))
+    return "\n".join(lines)
+
+
+def default_dirs():
+    """Every lane under `WATCHER_STATE_ROOT` (default `~/.local/state/watcher`, the same
+    default `bin/detect.sh` and `deploy/autodeploy.sh` read) — what `--digest` covers when
+    `deploy/watcher-metrics.service` runs it with no `<state-dir>` named on the line."""
+    root = os.environ.get("WATCHER_STATE_ROOT") or os.path.expanduser("~/.local/state/watcher")
+    return sorted(d for d in glob.glob(os.path.join(root, "*")) if os.path.isdir(d))
+
+
 def main(argv):
     weeks = 8
+    digest = False
+    do_post = False
     dirs = []
     i = 0
     while i < len(argv):
@@ -382,13 +453,37 @@ def main(argv):
                 sys.exit(f"metrics.py: --weeks wants a number, got {argv[i]!r}")
             if weeks < 1:
                 sys.exit("metrics.py: --weeks must be at least 1")
+        elif a == "--digest":
+            digest = True
+        elif a == "--post":
+            do_post = True
         elif a in ("-h", "--help"):
             sys.exit(__doc__)
         else:
             dirs.append(a)
         i += 1
+    if not dirs and digest:
+        dirs = default_dirs()
+        if not dirs:
+            # The service's own run, not a usage error: a box with no lane under
+            # WATCHER_STATE_ROOT yet (nothing has ticked once) is not a broken systemd
+            # unit, it is a quiet week — exit 0, not the docstring dump below.
+            print("metrics.py: --digest found no lanes under WATCHER_STATE_ROOT; nothing to report")
+            return
     if not dirs:
         sys.exit(__doc__)
+    if do_post and not digest:
+        sys.exit("metrics.py: --post needs --digest")
+
+    if digest:
+        text = format_digest(dirs)
+        print(text)
+        if do_post and notify.enabled():
+            ok = notify.post("digest", {"number": 0, "title": "Weekly digest", "url": ""},
+                              detail=text)
+            sys.exit(0 if ok else 1)
+        return
+
     for d in dirs:
         lane = os.path.basename(os.path.normpath(d))
         report(lane, load_lane(d), weeks)
