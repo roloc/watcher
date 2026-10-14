@@ -233,8 +233,11 @@ def gh_pr_comment(argv, cwd):
 def gh_pr_edit(argv, cwd):
     pos, flags = parse_flags(argv)
     d = load()
-    if pos:
-        pr = d["prs"][pos[0].lstrip("#")]
+    if pos and pos[0].lstrip("#").isdigit():
+        n = pos[0].lstrip("#")
+        if n not in d["prs"]:
+            die(f"no such pull request #{n}")
+        pr = d["prs"][n]
     else:
         branch = current_branch(cwd)
         cands = [p for p in d["prs"].values() if p["head"] == branch and p["state"] == "OPEN"]

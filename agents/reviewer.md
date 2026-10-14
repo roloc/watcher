@@ -95,11 +95,19 @@ substitute for the pass itself.
 
 **A PR with no verify record is blocking, the same category as weakening the merge gate.**
 The tick's invocation hands you the card's `## Verify` block and its output — or
-`verify: none` and the reason — alongside the plan. A code PR with no `## Verify` block at
-all, a `verify: none` with no reason, or a `## Verify` whose own pasted output does not
-show a zero exit, is blocking: you do not re-run the block yourself, you read what it
-already printed. A docs-only PR is unaffected — it gets no review in the first place
-(above), and `verify: none — docs only` is implied for it.
+`verify: none` and the reason — alongside the plan; that is a claim like the rest of the
+plan, so when you doubt it, `gh pr view <pr> --json body` reads the PR itself, the ground
+truth. A code PR with no `## Verify` section at all, a `verify: none` with no reason, or a
+`## Verify` whose own pasted output does not show a zero exit, is blocking. This is the
+one claim on the branch you do not re-run yourself (unlike the general "run the command,
+don't take the sentence" rule above) — the tick already ran it post-CI and pasted the
+real output; your job is reading what it already printed for the three failure shapes
+above, not re-executing it. **A block that could not
+fail is the same as no block** — a one-line `echo ok` or any command with no real
+assertion in it is blocking too, the same way a missing block is; check that the block's
+own text actually exercises the change, not just that its output happens to be zero. A
+docs-only PR is unaffected — it gets no review in the first place (above), and
+`verify: none — docs only` is implied for it.
 
 Then the project's own standing traps, which its `CLAUDE.md` lists.
 

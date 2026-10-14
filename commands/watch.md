@@ -41,9 +41,11 @@ is enough — the spawner moves it to In progress and launches you; you never pi
 Waiting yourself.
 `in-flight` says a tick owns the card, Stage says what it is doing. Set it the moment you
 cross into each step, not afterwards — `board stage <n> Designing` (a decision or spec
-before code), `Building`, `Testing` (build and tests running), `Reviewing` (the `usability`
-and `reviewer` passes), `PR open` (pushed, waiting on CI), `Merging`, and `Parked` when you
-send it to Stuck. One command each; never skip one because the step was short.
+before code), `Building`, `Testing` (build and tests running), `Reviewing` (the
+`usability` pass, before the PR opens), `PR open` (pushed, waiting on CI), back to
+`Reviewing` (the verify block and `reviewer`, once CI is green — §3), `Merging`, and
+`Parked` when you send it to Stuck. One command each; never skip one because the step was
+short.
 
 **`in-flight` is a courtesy flag, not a lock.** Reading the board and adding the label are
 two calls with no compare-and-set, and `--add-label` succeeds silently on a label that is
@@ -88,16 +90,18 @@ PR body and for `reviewer`, not for him:
 - Risk: <the one thing most likely to go wrong>
 ```
 
-**The `Test:` line ends in a block the loop can run, not a sentence it has to judge.**
-The card's own body may carry a fenced block opening with ` ```verify ` — shell lines, run
-from the worktree root — or the line `verify: none — <reason>` when nothing runnable
-proves the card (a decision doc, a mockup, a relabel). When the card has neither, write
-one yourself, from the card's own words, as the last thing you do here, before the first
-edit, and carry it into the `Test:` line and forward into the PR body (§3). A block you
-wrote is a claim, the same as the rest of the plan; a block Steve wrote is the contract,
-and §3 never edits it to make it pass — a block that is wrong is a question for Steve, not
-something you rewrite to get green. A docs-only card needs no block: `verify: none — docs
-only` is implied.
+**What proves the card done is now a block the loop can run, not a sentence it has to
+judge.** The card's own body may carry a fenced block opening with ` ```verify ` — shell
+lines, run from the worktree root — or the line `verify: none — <reason>` when nothing
+runnable proves the card (a decision doc, a mockup, a relabel). When the card has
+neither, write one yourself, from the card's own words, as the last thing you do here,
+before the first edit; it goes forward into the PR body under `## Verify` (§3), next to
+the real file list and real check that `## Plan` already carries — the `Test:`
+line above stays in plain words, same as `You get` and `Risk`, never the block itself. A
+block you wrote is a claim, the same as the rest of the plan; a block Steve wrote is the
+contract, and §3 never edits it to make it pass — a block that is wrong is a question for
+Steve, not something you rewrite to get green. A docs-only card needs no block:
+`verify: none — docs only` is implied.
 
 **`You get` comes first, and it names a place the asker can actually open.** A card is a
 request from a person who will go and use the result, so before anything else, say what
@@ -481,16 +485,22 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   card carried, or the one you wrote into the plan (§2) — a fenced ` ```verify ` block of
   shell lines, or `verify: none — <reason>`. Run it from the worktree root in one Bash
   call, capturing its output, and paste the block and the output (trimmed to the last 40
-  lines) under `## Verify` in the PR body: `gh pr edit <pr> --body-file /tmp/card-<n>-pr-
-  body.md` with the updated body written there first. **Non-zero exit: never merge.** That
-  is **Stuck** (§4), with the output above the fold, the same as CI failing twice — and
-  never edit the block to make it pass; a block that is wrong is a question for Steve, not
-  something you rewrite. A zero exit (or a `verify: none` whose reason holds up) is what
+  lines) under `## Verify` in the PR body (write the updated body to a file first, then
+  `gh pr edit <pr> --body-file <that file>`). **Non-zero exit: never merge.** That is
+  **Stuck** (§4) — name the failing check in plain words above the fold, same as a red CI
+  twice, and put the block and its output under `<details>` same as any other exact error
+  — and never edit the block to make it pass; a block that is wrong is a question for
+  Steve, not something you rewrite. A zero exit (or a `verify: none` whose reason holds
+  up) is what
   lets you call `reviewer` — now, on the pushed branch, handing it the plan, whether
-  `usability` ran and what it found, and the verify block's own output, so it reads the
-  real result instead of a promise. Fix what it marks blocking, push, wait for CI again,
-  re-run the block, and call `reviewer` once more on that fix only; take or leave the nits.
-  Then `gh pr merge --squash --delete-branch`.
+  `usability` ran and what it found, and the verify block's own output (or point it at the
+  PR itself; `gh pr view <pr> --json body` is the ground truth, the invocation's own copy
+  is a convenience), so it reads the real result instead of a promise. A block that could
+  not fail (no real command, or one that always exits 0) is the same as no block — reject
+  it the same way you would a missing one, never treat a trivial pass as done. Fix what
+  `reviewer` marks blocking, push, wait for CI again, re-run the block, and call `reviewer`
+  once more on that fix only; take or leave the nits. Then `gh pr merge --squash
+  --delete-branch`.
 - **`main` may move under you** while you work — the other lane merges its own PRs, and so
   does Steve. Before merging, and again if the merge is refused as not mergeable:
   `git fetch origin && git -c merge.conflictStyle=diff3 merge origin/main`. If git merges
@@ -543,8 +553,10 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Stuck after that, so it does not rest there.
 - **Anything less than finished is Stuck (§4), never In review** — nobody reads In review
   as a queue, and "next tick needs to…" written on an In review card is a note to no one.
-  That covers: CI red twice; a blocking `reviewer` or `usability` finding you disagree
-  with; **`reviewer` has not run, or `usability` has not run on a screen change**;
+  That covers: CI red twice; a verify block that comes back non-zero (§3 — never merge on
+  that, never edit the block to make it pass); a blocking `reviewer` or `usability`
+  finding you disagree with; **`reviewer` has not run, or `usability` has not run on a
+  screen change**;
   **a Verification item you cannot do from this box** (a file that is not
   here, a machine you cannot reach) — say which, and ask whether to merge without it; and
   **running low on turns or budget**. Past roughly three quarters of either cap, stop
@@ -563,7 +575,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   told to resume, merged it in 25 minutes.)
 - **A card that arrives with its PR already open** (the branch has commits, `gh pr list`
   shows it) came back from In review or from Stuck. Read the last comments on the card and
-  the PR, then finish that PR — merge `origin/main`, fix what the comments name, run
+  the PR, then finish that PR — merge `origin/main`, fix what the comments name, re-run
+  the verify block if the code changed since it last ran and update `## Verify`, run
   `reviewer` if it never ran (and `usability` too, if the change touches a screen and it
   never ran), merge. Do not start over and do not open a second PR.
 

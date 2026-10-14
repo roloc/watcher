@@ -691,6 +691,14 @@ same way the deployer closes its own: a small script on a timer, no model, deter
 - **A screen change gets `usability`'s look too, before `reviewer`'s** — the one pass
   that never sees the diff, only the card's ask and the pictures. A screen change with no
   `usability` verdict is blocking, the same as one nobody ever rendered.
+- **Done is a block, not a sentence.** A card's Verification may be a fenced
+  ` ```verify ` block, or `verify: none — <reason>`; the tick writes one when the card
+  carries neither. It runs once CI is green, pastes itself and its output under
+  `## Verify` on the PR, and a non-zero exit never merges — never edited to pass. This is
+  what moves `reviewer`'s own call to after CI and the block, not before: it reads the
+  real result instead of a promise. A PR with no verify record, or one whose output shows
+  a non-zero exit, is blocking for `reviewer`, the same category as weakening the merge
+  gate.
 - Report the run's quota use, and never call it cost or spend (see "The dollar figure is
   quota, not a bill").
 
