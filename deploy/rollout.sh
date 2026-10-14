@@ -52,7 +52,13 @@ RUN_AS="${DEPLOY_USER:-watcher}"
 say() { printf '%s rollout: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 as_user() { su - "$RUN_AS" -c "$1"; }
 
-mkdir -p "$DSTATE"
+mkdir -p "$DSTATE/evals"
+# Card #140: the same ledger deploy/autodeploy.sh points the suite at, so a hand rollout's
+# cases land in the same trend rather than a gap in it. Chown the ledger FILE only, never
+# the directory — see autodeploy.sh's own comment on why.
+EVAL_LEDGER_PATH="${DEPLOY_EVAL_LEDGER:-$DSTATE/evals/ledger.tsv}"
+touch "$EVAL_LEDGER_PATH" 2>/dev/null || true
+chown "$RUN_AS" "$EVAL_LEDGER_PATH" 2>/dev/null || true
 exec 9> "$DSTATE/lock"
 flock -n 9 || { say "deploy/autodeploy.sh is mid-run; try again in a few minutes"; exit 1; }
 # Card #129: same stamp deploy/autodeploy.sh touches on exit, so the floor page's Ship desk
@@ -67,7 +73,7 @@ if [ "${EVAL_SKIP:-0}" = 1 ]; then
 else
   scratch="$SCRATCH_ROOT/${SHA:0:12}"
   say "running the replay suite on ${SHA:0:7} (bin/eval.sh, in a scratch clone)"
-  if ! as_user "rm -rf '$scratch' && mkdir -p '$SCRATCH_ROOT' && git clone -q --shared '$WATCHER_DIR' '$scratch' && git -C '$scratch' checkout -q --detach '$SHA' && cd '$scratch' && bin/eval.sh"; then
+  if ! as_user "rm -rf '$scratch' && mkdir -p '$SCRATCH_ROOT' && git clone -q --shared '$WATCHER_DIR' '$scratch' && git -C '$scratch' checkout -q --detach '$SHA' && cd '$scratch' && EVAL_LEDGER='$EVAL_LEDGER_PATH' bin/eval.sh"; then
     as_user "rm -rf '$scratch'"
     say "replay suite FAILED on ${SHA:0:7} — nothing on the box changed. Fix the prompts, or"
     say "re-run with EVAL_SKIP=1 if this is the known flake, not a real regression."

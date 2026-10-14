@@ -55,6 +55,9 @@ check "a real file with no line for this name: empty" [ -z "$(ledger_prev_turns 
 check "one line for the name: that line's turns" [ "$(ledger_prev_turns "$L" happy-path)" = 31 ]
 ledger_append "$L" happy-path pass 5 5 40 0.50 41
 check "two lines for the name: the latest, not the first" [ "$(ledger_prev_turns "$L" happy-path)" = 40 ]
+ledger_append "$L" happy-path fail 3 5 2 0.05 6
+check "a failed line (died early, at its own cap) is never the baseline" \
+  [ "$(ledger_prev_turns "$L" happy-path)" = 40 ]
 
 # --- ledger_regressed: the 1.5x line, and only that line -------------------------------------
 

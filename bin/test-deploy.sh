@@ -98,6 +98,7 @@ cat > "$SEED/bin/eval.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "eval at $(git rev-parse HEAD) box $(git -C "$TMP/opt/watcher" rev-parse HEAD)" >> "$CALLS"
 echo "eval.sh args: ${*:-(none)}" >> "$CALLS"
+echo "eval.sh EVAL_LEDGER=${EVAL_LEDGER:-(unset)}" >> "$CALLS"
 if [ -f "$TMP/eval-fails" ]; then
   echo "  a case   FAIL — it closed the card"
   echo "failed cases: $(cat "$TMP/eval-fail-case" 2>/dev/null || echo "a-case")"
@@ -184,6 +185,8 @@ check "green + suite: the pointer now resolves to exactly the target" [ "$(head_
 check "...as a symlink onto its own release folder"    [ -L "$BOX" ]
 check "...named by the target commit"                  [ "$(basename "$(readlink "$BOX")")" = "${T:0:12}" ]
 check "the suite ran at the target commit"             called "eval at $T"
+check "card #140: EVAL_LEDGER reaches the suite, pointed at this box's own ledger" \
+      called "eval.sh EVAL_LEDGER=$TMP/dstate/evals/ledger.tsv"
 check "…before the pointer moved (box still at the old commit)" called "box $OLD"
 check "install.sh ran without its own pull"            called "NO_PULL=1"
 check "...from the release folder, not the old pointer" called "DIR=$RELEASES/${T:0:12}"

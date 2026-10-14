@@ -119,9 +119,12 @@ wgit() { as_user "git -C '$WATCHER_DIR' $1"; }
 cgit() { as_user "git -C '$CANARY_DIR' $1"; }
 mkdir -p "$DSTATE/evals" "$DSTATE/held"
 # Card #140: the ledger append happens inside the scratch clone, as $RUN_AS (as_user), not
-# as this script's own root — so that one subdirectory has to be writable by that user. This
-# script still writes its own rec/log files here directly, as root, same as always.
-chown "$RUN_AS" "$DSTATE/evals" 2>/dev/null || true
+# as this script's own root. Chown the ledger FILE only, never the directory: $DSTATE/evals
+# also holds this script's own pass/fail record per commit (evals_state's $rec, written by
+# root) — owning the directory would let anything that runs as $RUN_AS, which includes every
+# lane and the suite's own live ticks, delete or rewrite that record.
+touch "$EVAL_LEDGER_PATH" 2>/dev/null || true
+chown "$RUN_AS" "$EVAL_LEDGER_PATH" 2>/dev/null || true
 
 # say_once <key> <line>: journal a waiting line once per state, not once per run.
 say_once() {

@@ -172,15 +172,18 @@ result_field() {
 # this file (the BASH_SOURCE guard at the bottom keeps that from also running every case) and
 # call them directly against a scratch ledger and fake numbers — no live tick involved.
 
-# ledger_prev_turns <ledger> <name> — the num_turns field of <name>'s most recent line in
-# <ledger>, or "" when the file is missing or has no line for <name>. A case's run_case below
-# always calls this against the snapshot taken before the current run's own appends (never
-# the live ledger) — comparing a case to the entry it is about to write would always read as
-# no growth.
+# ledger_prev_turns <ledger> <name> — the num_turns field of <name>'s most recent PASSING
+# line in <ledger>, or "" when the file is missing or has no such line. A case's run_case
+# below always calls this against the snapshot taken before the current run's own appends
+# (never the live ledger) — comparing a case to the entry it is about to write would always
+# read as no growth. Only a pass counts as a baseline: a failed run can die early (at its own
+# --max-turns ceiling, say) with an artificially low or high turn count that proves nothing
+# about the prompt, and taking it as the baseline would let every later run look like a
+# regression, or silence the alarm for good.
 ledger_prev_turns() {
   local ledger="$1" name="$2"
   [ -f "$ledger" ] || return 0
-  awk -F'\t' -v n="$name" '$3==n{t=$5} END{if (t!="") print t}' "$ledger"
+  awk -F'\t' -v n="$name" '$3==n && $4 ~ /^pass/ {t=$5} END{if (t!="") print t}' "$ledger"
 }
 
 # ledger_regressed <ledger> <name> <turns> — prints "<name>: <prev> -> <turns> turns" and
