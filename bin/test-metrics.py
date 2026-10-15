@@ -49,16 +49,17 @@ LOGS = os.path.join(STATE, "logs")
 os.makedirs(LOGS, exist_ok=True)
 
 
-def report_lines(issue, outcome, ended_in, needs_steve="no"):
+def report_lines(issue, outcome, ended_in, needs_steve="no", needs_label="Needs Steve"):
     return (f"- Card: #{issue} a title\n"
             f"- Outcome: {outcome}\n"
             f"- Ended in: {ended_in}\n"
             f"- Quota: ~$1.00 equivalent (subscription — not billed); project API spend none\n"
-            f"- Needs Steve: {needs_steve}\n")
+            f"- {needs_label}: {needs_steve}\n")
 
 
 def write_log(issue, when, subtype="success", cost=1.0, turns=5, duration_ms=60000,
-              outcome=None, ended_in=None, needs_steve="no", corrupt=False, empty=False):
+              outcome=None, ended_in=None, needs_steve="no", needs_label="Needs Steve",
+              corrupt=False, empty=False):
     path = os.path.join(LOGS, f"card-{issue}-{when}.json")
     if empty:
         open(path, "w").close()
@@ -70,7 +71,7 @@ def write_log(issue, when, subtype="success", cost=1.0, turns=5, duration_ms=600
     d = {"subtype": subtype, "total_cost_usd": cost, "num_turns": turns,
          "duration_ms": duration_ms}
     if subtype == "success" and ended_in is not None:
-        d["result"] = report_lines(issue, outcome, ended_in, needs_steve)
+        d["result"] = report_lines(issue, outcome, ended_in, needs_steve, needs_label)
     elif subtype == "success":
         d["result"] = f"Quiet tick: nothing claimable in In progress."
     else:
@@ -105,6 +106,12 @@ write_log(6, ts(140), outcome="declined (gated)", ended_in="Backlog")
 # #15: labeled awaiting-rebuild and left In progress on purpose (card #85) — in progress,
 # but not a failure, the same as #5's routing
 write_log(15, ts(135), outcome="awaiting rebuild", ended_in="In progress")
+
+# #16: card #155 renamed the report's own line to "Needs the owner:" going forward; a tick
+# parking itself after that ships must still count as a tick-initiated park.
+write_log(16, ts(130), outcome="stuck", ended_in="Stuck - Needs help",
+          needs_steve="yes — which of two mockups did they mean?",
+          needs_label="Needs the owner")
 
 # #7: died ticks, one per documented subtype
 path7 = write_log(7, ts(100), subtype="error_max_turns")
@@ -143,7 +150,7 @@ ticks = metrics.load_lane(STATE)
 issues = metrics.group_by_issue(ticks)
 
 print("1. loading tolerates every shape and ignores non-log files")
-check("16 real ticks loaded (15 cards' worth, #2 has two)", len(ticks) == 16, str(len(ticks)))
+check("17 real ticks loaded (16 cards' worth, #2 has two)", len(ticks) == 17, str(len(ticks)))
 check("a stray .stderr is skipped (no card #12)", 12 not in issues)
 check("a card-*.json that fails the filename regex is skipped too (no card #99)", 99 not in issues)
 check("empty file (#10) still counts as a died tick, subtype unknown",
@@ -166,7 +173,8 @@ check("#1 and #13 did it on the first tick, #2 needed a second", fp == 2, str(fp
 
 print("3. park rate: tick-initiated vs. spawner-inferred")
 tick_parked, spawner_parked = metrics.park_counts(issues)
-check("#3's own Stuck-with-a-question counts once", tick_parked == 1, str(tick_parked))
+check("#3's own Stuck-with-a-question counts once, #16's 'Needs the owner:' line counts too",
+      tick_parked == 2, str(tick_parked))
 check("#4's two consecutive no-progress ticks count as one spawner park",
       spawner_parked == 1, str(spawner_parked))
 check("#5 (routed) is not a park", metrics.group_by_issue(ticks)[5][0].non_terminal is False)
@@ -217,7 +225,7 @@ metrics.report("riffmap", ticks, 4, out=buf)
 text = buf.getvalue()
 check("names the lane", "## riffmap" in text)
 check("shows the first-pass rate", "First-pass merge rate: 2/3" in text)
-check("shows the park split", "1 by the tick itself" in text and "1 by the spawner" in text)
+check("shows the park split", "2 by the tick itself" in text and "1 by the spawner" in text)
 check("shows a per-shipped-card line", "Per shipped card (3)" in text)
 buf2 = io.StringIO()
 metrics.report("empty-lane", [], 4, out=buf2)

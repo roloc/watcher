@@ -32,7 +32,7 @@ What it reports, per lane:
 - **First-pass merge rate** — of the cards that ever reached Done, how many did on their
   very first tick.
 - **Park rate** — Stuck moves split by who made them: the tick itself, with a question
-  (`Ended in: Stuck - Needs help` and `Needs Steve: yes`), vs. the spawner's own two-attempt
+  (`Ended in: Stuck - Needs help` and `Needs the owner: yes`), vs. the spawner's own two-attempt
   rule. There is no "parked by the spawner" value to read directly (`watch.md`'s Outcome
   enum has none), so this is inferred after the fact: two consecutive ticks on the same
   card that neither shipped nor moved it anywhere, the same shape `bump_attempts` and
@@ -54,7 +54,7 @@ What it reports, per lane:
   here as well as in the park rate.
 
 A tick's own report (`watch.md`, "## Report") is the source for `Outcome`, `Ended in` and
-`Needs Steve`; a log whose `subtype` is not `success` has none of those and counts only
+`Needs the owner`; a log whose `subtype` is not `success` has none of those and counts only
 toward Deaths and the raw tick count. `/triage` ticks write a different report shape (no
 `Ended in`) and so never count toward anything but the raw tick count and Deaths either —
 this report is shaped for a build/watch lane.
@@ -74,7 +74,9 @@ TS_FMT = '%Y%m%dT%H%M%SZ'
 
 OUTCOME_RE = re.compile(r'^- Outcome:\s*(.+)$', re.M)
 ENDED_RE = re.compile(r'^- Ended in:\s*(.+)$', re.M)
-NEEDS_RE = re.compile(r'^- Needs Steve:\s*(.+)$', re.M)
+# Card #155 renamed the report's own line from "Needs Steve:" to "Needs the owner:" going
+# forward; every tick log already on disk still says the old form, so this matches either.
+NEEDS_RE = re.compile(r'^- Needs (?:Steve|the owner):\s*(.+)$', re.M)
 
 # `watch.md`'s "Ended in" enum. None of these five is a prefix of another (they all
 # diverge by the 4th character), so match order does not matter. Real logs routinely
