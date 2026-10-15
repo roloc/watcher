@@ -11,6 +11,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 os.environ["DISCORD_WEBHOOK_URL"] = "https://discord.example/webhook"
 os.environ.pop("DISCORD_MENTION", None)
+# Slack stays off for every case except section 8, which turns it on and off by hand —
+# cleared here rather than inherited, same reason as OWNER_LOGIN/BOARD_OWNER below.
+os.environ.pop("SLACK_WEBHOOK_URL", None)
+os.environ.pop("SLACK_MENTION", None)
 # This suite's own default (section 2's "Needs Steve:") assumes neither is set — true for a
 # real lane's own tick only when its project never sets OWNER_LOGIN/BOARD_OWNER, but NOT
 # true of the shell this suite happens to run in (this box's own watcher lane exports
@@ -31,7 +35,7 @@ CARD = {"number": 87, "title": "Add speaker names", "url": "https://github.com/o
 PR = {"url": "https://github.com/o/r/pull/90", "state": "OPEN"}
 
 sent = []
-notify.send = lambda url, payload: sent.append((url, payload)) or True
+notify.send = lambda url, payload, transport="discord": sent.append((url, payload, transport)) or True
 
 fails = 0
 count = 0
@@ -256,6 +260,55 @@ cleared.clear()
 board.project = lambda: ({"id": "P"}, {})
 board.items = lambda fresh=False: [card(35, "CLOSED", "Parked")]
 check("a board with no Stage field is a no-op", board.cmd_sweep_stages() == 0 and not cleared)
+
+print("8. Slack: the same three posts, picked by which webhook is set (card #159)")
+os.environ["SLACK_WEBHOOK_URL"] = "https://hooks.slack.com/services/T000/B000/xxxx"
+for kind in ("stuck", "released", "breach"):
+    sent.clear()
+    notify.post(kind, CARD, detail="Building", pr=PR, board_url="https://github.com/users/o/projects/1")
+    check(f"{kind}: both webhooks set -> posts to both, discord first",
+          [s[2] for s in sent] == ["discord", "slack"])
+    slack = sent[1][1]
+    check(f"{kind}: slack payload carries text and one mrkdwn section block",
+          "text" in slack and slack["blocks"][0]["text"]["type"] == "mrkdwn")
+    block = slack["blocks"][0]["text"]["text"]
+    check(f"{kind}: the card link and the ask share the one block",
+          CARD["url"] in block and "Building" in block)
+
+sent.clear()
+notify.post("stuck", CARD, detail="Needs Steve: pick where speaker names live.",
+            board_url="https://github.com/users/o/projects/1")
+slack = sent[1][1]
+block = slack["blocks"][0]["text"]["text"]
+check("stuck: slack's top line leads with the same ask Discord's content carries",
+      slack["text"].startswith("🚨 *Needs Steve:*"))
+check("stuck: the ask from the card is quoted in the block", "pick where speaker names live" in block)
+os.environ["SLACK_MENTION"] = "<!here>"
+sent.clear()
+notify.post("stuck", CARD)
+check("SLACK_MENTION is prepended to the Stuck alert, same as DISCORD_MENTION",
+      sent[1][1]["text"].startswith("<!here> 🚨"))
+sent.clear()
+notify.post("released", CARD)
+check("...but not to 'released': Slack mirrors Discord's own rule", "<!here>" not in sent[1][1]["text"])
+del os.environ["SLACK_MENTION"]
+
+sent.clear()
+notify.post("digest", {"number": 0, "title": "Weekly digest", "url": ""}, detail=DIGEST_TEXT)
+check("digest: posts to slack too", len(sent) == 2 and sent[1][2] == "slack")
+check("digest: the whole message lands in the one block, verbatim markdown aside",
+      notify._slack_mrkdwn(DIGEST_TEXT) in sent[1][1]["blocks"][0]["text"]["text"])
+
+print("8b. Slack on its own, and both off together")
+saved_discord = os.environ.pop("DISCORD_WEBHOOK_URL")
+sent.clear()
+notify.post("stuck", CARD)
+check("Discord unset, Slack set: only slack posts", [s[2] for s in sent] == ["slack"])
+del os.environ["SLACK_WEBHOOK_URL"]
+sent.clear()
+check("neither set: not enabled, nothing sent anywhere",
+      notify.enabled() is False and notify.post("stuck", CARD) is False and not sent)
+os.environ["DISCORD_WEBHOOK_URL"] = saved_discord
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES'}")
 sys.exit(fails)

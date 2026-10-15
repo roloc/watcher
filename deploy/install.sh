@@ -107,9 +107,10 @@ su - watcher -c "git -C '$WATCHER_DIR' config core.fileMode false" 2>/dev/null |
 
 install -d -m 750 -o root -g watcher /etc/watcher
 [ -f /etc/watcher/env ] || { echo "CLAUDE_CODE_OAUTH_TOKEN=" > /etc/watcher/env; chown root:watcher /etc/watcher/env; chmod 640 /etc/watcher/env; }
-# Discord is optional: an empty DISCORD_WEBHOOK_URL is the off switch. The line is added
-# once so the file documents itself; existing values are never touched.
+# Discord and Slack are both optional: an empty *_WEBHOOK_URL is the off switch for each.
+# The lines are added once so the file documents itself; existing values are never touched.
 grep -q '^DISCORD_WEBHOOK_URL=' /etc/watcher/env || echo "DISCORD_WEBHOOK_URL=" >> /etc/watcher/env
+grep -q '^SLACK_WEBHOOK_URL=' /etc/watcher/env || echo "SLACK_WEBHOOK_URL=" >> /etc/watcher/env
 # The floor page's own file: the server room's Proxmox readout (optional). Its own file, not
 # `env`, because `env` is every lane's environment and a Proxmox token has no business in a
 # tick (watcher-floor.service says why).
@@ -240,6 +241,8 @@ grep -qE '^CLAUDE_CODE_OAUTH_TOKEN=.+' /etc/watcher/env 2>/dev/null || MISSING+=
               /etc/watcher/env as CLAUDE_CODE_OAUTH_TOKEN=…")
 grep -qE '^DISCORD_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  Discord:    optional; put the channel's webhook in the same file as DISCORD_WEBHOOK_URL=…
               (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)")
+grep -qE '^SLACK_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  Slack:      optional; same alerts, to a channel's incoming webhook as SLACK_WEBHOOK_URL=…
+              (and SLACK_MENTION=<@your-id> to get pinged on Stuck alerts)")
 su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su - watcher; gh auth login   (the bot account); gh auth setup-git")
 # A browser for bin/browse.py: how a tick on any project looks at a page (the reviewer
 # too). Asked of browse.py itself, as the user the ticks run as, so this looks where a

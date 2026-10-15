@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Tell Steve's Discord channel when a card is stuck, something broke, or Monday's digest
-is due. Nothing else.
+"""Tell the owner's Discord channel, Slack channel, or both, when a card is stuck,
+something broke, or Monday's digest is due. Nothing else.
 
 Imported by `board.py`; never called by a tick directly. Every message names the card
-and links to it, so Steve can tap through from his phone. Configuration is one env var:
+and links to it, so the owner can tap through from their phone. Configuration is per
+transport — set either webhook, both, or neither:
 
-    DISCORD_WEBHOOK_URL   the channel's webhook. Unset or empty = every post is a no-op.
+    DISCORD_WEBHOOK_URL   the Discord channel's webhook. Unset or empty = no Discord post.
     DISCORD_MENTION       optional, prepended to Stuck alerts only — `<@123456789>`,
                           `<@&roleid>` or `@here` — so a parked card pings someone.
+    SLACK_WEBHOOK_URL     the Slack channel's incoming webhook. Unset or empty = no Slack
+                          post. Both set posts to both; neither set is a silent no-op.
+    SLACK_MENTION         optional; plays DISCORD_MENTION's part for Slack — `<@U…>` (a
+                          user) or `<!here>`.
     OWNER_LOGIN           optional; the GitHub login the Stuck alert's content line names
                           (card #154) — defaults to BOARD_OWNER, then to the word "Steve",
                           so a fork of this repo pings its own owner with no config at all.
@@ -37,24 +42,30 @@ board command.
 """
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
 
 TIMEOUT_SEC = 8
+SLACK_TEXT_MAX = 3000  # Slack's own limit on a section block's text field
 
 # Discord embed colors (decimal RGB). One per meaning, so the color says it before the text.
-RED = 0xE74C3C       # stuck: Steve has to act
+RED = 0xE74C3C       # stuck: the owner has to act
 ORANGE = 0xE67E22    # broken: a run died, a product check crossed its limit
 NEUTRAL = 0x95A5A6   # digest: a status report, neither an alert nor something broken
 
 
-def webhook_url():
+def discord_webhook_url():
     return (os.environ.get("DISCORD_WEBHOOK_URL") or "").strip()
 
 
+def slack_webhook_url():
+    return (os.environ.get("SLACK_WEBHOOK_URL") or "").strip()
+
+
 def enabled():
-    return bool(webhook_url())
+    return bool(discord_webhook_url() or slack_webhook_url())
 
 
 def needs_label():
@@ -69,8 +80,11 @@ def card_label(card):
     return f"#{card['number']} {card.get('title') or ''}".strip()
 
 
-def build(kind, card, detail="", pr=None, board_url=""):
-    """Return the webhook payload for one event, or None for a kind that is not posted.
+def _message(kind, card, detail="", pr=None, board_url=""):
+    """Return the transport-independent shape of one event, or None for a kind that is
+    not posted: the label, the card's url, the short lead line (Discord's `content`,
+    Slack's own top line) and the body under it. Both `build()` and `build_slack()` wrap
+    this the same way, so the two transports can never drift on what a post actually says.
 
     `card` is {"number", "title", "url"}; `detail` is the one line that varies (the
     Needs Steve ask, the spawner's reason, the detector's reading); `pr` is
@@ -84,38 +98,49 @@ def build(kind, card, detail="", pr=None, board_url=""):
         pr_line = f"\nPR: {pr['url']}" + (f" ({state})" if state else "")
 
     if kind == "stuck":
-        mention = (os.environ.get("DISCORD_MENTION") or "").strip()
-        content = f"🚨 **{needs_label()}:** {label} is stuck."
-        if mention:
-            content = f"{mention} {content}"
+        lead = f"🚨 **{needs_label()}:** {label} is stuck."
         ask = detail or "Read the last comment on the card."
-        desc = (f"{ask}\n\nOpen the card, reply **A**, **B** or **C**, then move it back to "
+        body = (f"{ask}\n\nOpen the card, reply **A**, **B** or **C**, then move it back to "
                 f"**In progress**.{pr_line}")
         if board_url:
-            desc += f"\nBoard: {board_url}"
-        embed = {"title": label, "url": url, "color": RED, "description": desc}
+            body += f"\nBoard: {board_url}"
     elif kind == "released":
-        content = f"⚠️ {label}: the run ended without finishing."
-        embed = {"title": label, "url": url, "color": ORANGE,
-                 "description": (detail or "Released; the next poll may retry once.") + pr_line}
+        lead = f"⚠️ {label}: the run ended without finishing."
+        body = (detail or "Released; the next poll may retry once.") + pr_line
     elif kind == "breach":
-        content = f"📉 **Something broke:** {label}"
-        embed = {"title": label, "url": url, "color": ORANGE,
-                 "description": (detail or "A product check crossed its limit. "
-                                           "The card has the numbers.") + pr_line}
+        lead = f"📉 **Something broke:** {label}"
+        body = (detail or "A product check crossed its limit. The card has the numbers.") + pr_line
     elif kind == "digest":
         # No single card is behind this one: `detail` is the whole FYI-shaped message
-        # (bin/metrics.py's format_digest()), so it goes in the embed description verbatim
-        # rather than being folded into `content` the way the other kinds' short lines are.
-        content = "📊 Weekly digest."
-        # Discord rejects an embed over 4096 chars outright (a 400, logged and nothing
-        # else, per this module's own contract) rather than truncating it for us, the way
-        # it handles `content` past 2000 — so this one guards itself the same way.
-        embed = {"title": card.get("title") or "Weekly digest", "url": url, "color": NEUTRAL,
-                 "description": (detail or "No ticks this week.")[:4096]}
+        # (bin/metrics.py's format_digest()), so it goes in the body verbatim rather than
+        # being folded into `lead` the way the other kinds' short lines are.
+        lead = "📊 Weekly digest."
+        body = detail or "No ticks this week."
+        label = card.get("title") or "Weekly digest"  # no real card behind this one
     else:
         return None
+    return {"kind": kind, "label": label, "url": url, "lead": lead, "body": body}
 
+
+def build(kind, card, detail="", pr=None, board_url=""):
+    """Return the Discord webhook payload for one event, or None for a kind that is not
+    posted."""
+    m = _message(kind, card, detail=detail, pr=pr, board_url=board_url)
+    if m is None:
+        return None
+    content = m["lead"]
+    if m["kind"] == "stuck":
+        mention = (os.environ.get("DISCORD_MENTION") or "").strip()
+        if mention:
+            content = f"{mention} {content}"
+    # Discord rejects an embed over 4096 chars outright (a 400, logged and nothing else,
+    # per this module's own contract) rather than truncating it for us, the way it
+    # handles `content` past 2000 — so the digest, the one body with no fixed length, has
+    # to guard itself the same way.
+    desc = m["body"][:4096] if m["kind"] == "digest" else m["body"]
+    embed = {"title": m["label"], "url": m["url"],
+             "color": {"stuck": RED, "released": ORANGE, "breach": ORANGE, "digest": NEUTRAL}[m["kind"]],
+             "description": desc}
     if not embed.get("url"):  # Discord rejects an empty url; a card we could not look up has none
         embed.pop("url", None)
     return {"content": content[:1900], "embeds": [embed],
@@ -123,18 +148,48 @@ def build(kind, card, detail="", pr=None, board_url=""):
             "allowed_mentions": {"parse": ["users", "roles", "everyone"]}}
 
 
+def _slack_mrkdwn(s):
+    # Discord's `**bold**` is Slack's `*bold*`; nothing else in these messages uses markdown.
+    return re.sub(r"\*\*(.+?)\*\*", r"*\1*", s)
+
+
+def build_slack(kind, card, detail="", pr=None, board_url=""):
+    """Return the Slack incoming-webhook payload for one event, or None for a kind that
+    is not posted. The embed's title, the ask, and the card link all fold into one
+    section block, with the same emoji lead Discord's `content` carries."""
+    m = _message(kind, card, detail=detail, pr=pr, board_url=board_url)
+    if m is None:
+        return None
+    lead = _slack_mrkdwn(m["lead"])
+    if m["kind"] == "stuck":
+        mention = (os.environ.get("SLACK_MENTION") or "").strip()
+        if mention:
+            lead = f"{mention} {lead}"
+    link = f"<{m['url']}|{m['label']}>" if m["url"] else m["label"]
+    body = _slack_mrkdwn(m["body"])
+    text = f"{lead}\n{link}\n{body}"[:SLACK_TEXT_MAX]
+    return {"text": lead[:SLACK_TEXT_MAX],
+            "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]}
+
+
 def post(kind, card, detail="", pr=None, board_url=""):
-    """Send one event. Returns True if Discord took it, False otherwise. Never raises."""
-    url = webhook_url()
-    if not url:
-        return False
-    payload = build(kind, card, detail=detail, pr=pr, board_url=board_url)
-    if payload is None:
-        return False
-    return send(url, payload)
+    """Send one event to every configured transport (Discord, Slack, both, or neither).
+    Returns True if at least one took it, False otherwise. Never raises."""
+    sent = False
+    discord_url = discord_webhook_url()
+    if discord_url:
+        payload = build(kind, card, detail=detail, pr=pr, board_url=board_url)
+        if payload is not None:
+            sent = send(discord_url, payload, transport="discord") or sent
+    slack_url = slack_webhook_url()
+    if slack_url:
+        payload = build_slack(kind, card, detail=detail, pr=pr, board_url=board_url)
+        if payload is not None:
+            sent = send(slack_url, payload, transport="slack") or sent
+    return sent
 
 
-def send(url, payload):
+def send(url, payload, transport="discord"):
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Content-Type": "application/json",
@@ -143,7 +198,7 @@ def send(url, payload):
         with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as r:
             if 200 <= r.status < 300:
                 return True
-            print(f"notify: discord answered {r.status}", file=sys.stderr)
+            print(f"notify: {transport} answered {r.status}", file=sys.stderr)
             return False
     except urllib.error.HTTPError as e:
         body = ""
@@ -151,9 +206,9 @@ def send(url, payload):
             body = e.read().decode("utf-8", "replace")[:200]
         except Exception:
             pass
-        print(f"notify: discord answered {e.code}: {body}", file=sys.stderr)
+        print(f"notify: {transport} answered {e.code}: {body}", file=sys.stderr)
     except Exception as e:  # DNS, timeout, refused — none of these may fail the caller
-        print(f"notify: discord post failed: {e}", file=sys.stderr)
+        print(f"notify: {transport} post failed: {e}", file=sys.stderr)
     return False
 
 
@@ -164,6 +219,6 @@ if __name__ == "__main__":
     kind, number, title, url = a[0], a[1], a[2], a[3]
     detail = a[4] if len(a) > 4 else ""
     if not enabled():
-        sys.exit("notify: DISCORD_WEBHOOK_URL is not set")
+        sys.exit("notify: neither DISCORD_WEBHOOK_URL nor SLACK_WEBHOOK_URL is set")
     ok = post(kind, {"number": number, "title": title, "url": url}, detail=detail)
     sys.exit(0 if ok else 1)

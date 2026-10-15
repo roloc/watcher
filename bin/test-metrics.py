@@ -20,8 +20,11 @@ import notify   # noqa: E402
 
 # Offline, always: no webhook configured, and notify.send raises if anything ever tries to
 # reach the network — --post's digest kind must stay a no-op here the same way it would on
-# a box with no DISCORD_WEBHOOK_URL set (board#139's own convention: unset = silent no-op).
+# a box with no DISCORD_WEBHOOK_URL/SLACK_WEBHOOK_URL set (board#139's own convention: unset
+# = silent no-op). Section 12b turns SLACK_WEBHOOK_URL on for one case with a recorder in
+# place of this stub, then restores both.
 os.environ.pop("DISCORD_WEBHOOK_URL", None)
+os.environ.pop("SLACK_WEBHOOK_URL", None)
 notify.send = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("test-metrics.py must never hit the network"))
 
 fails = 0
@@ -402,6 +405,25 @@ with contextlib.redirect_stdout(buf4):
     metrics.main(["--digest", "--post", busy_dir, quiet_dir])  # no DISCORD_WEBHOOK_URL: must not touch the network
 check("--digest --post with no webhook still prints the digest (the off switch is silent, not mute)",
       "lane-busy" in buf4.getvalue())
+
+print("12b. --post reaches Slack too, through the same notify.post entry (card #159)")
+slack_sent = []
+notify.send = lambda url, payload, transport="discord": slack_sent.append((url, payload, transport)) or True
+os.environ["SLACK_WEBHOOK_URL"] = "https://hooks.slack.com/services/T000/B000/xxxx"
+buf4b = io.StringIO()
+exit_code = None
+try:
+    with contextlib.redirect_stdout(buf4b):
+        metrics.main(["--digest", "--post", busy_dir, quiet_dir])
+except SystemExit as e:
+    exit_code = e.code
+check("--digest --post with SLACK_WEBHOOK_URL set exits 0 (the post succeeded)", exit_code == 0)
+check("...and reaches Slack, through notify.post's digest kind",
+      len(slack_sent) == 1 and slack_sent[0][2] == "slack")
+check("the digest text (lane-busy's numbers) lands in the slack block",
+      "lane-busy" in slack_sent[0][1]["blocks"][0]["text"]["text"])
+del os.environ["SLACK_WEBHOOK_URL"]
+notify.send = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("test-metrics.py must never hit the network"))
 
 EMPTY_ROOT = tempfile.mkdtemp(prefix="watcher-metrics-test-emptyroot-")
 old_root2 = os.environ.get("WATCHER_STATE_ROOT")

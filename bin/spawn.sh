@@ -29,6 +29,9 @@
 #                    alerts. Usually set once for the box in /etc/watcher/env instead
 #                    (see notify.py).
 #   DISCORD_MENTION  optional; who a Stuck alert pings (`<@id>`, `<@&roleid>`, `@here`)
+#   SLACK_WEBHOOK_URL  optional; the same alerts, to a Slack channel's incoming webhook
+#                    instead of or alongside Discord (both set posts to both; see notify.py).
+#   SLACK_MENTION    optional; plays DISCORD_MENTION's part for Slack (`<@U…>`, `<!here>`)
 #   LANE_AGENTS      optional; which cards THIS instance may pick, by `agent:` label. A
 #                    comma-separated list of agent names (`architect,designer`), or the
 #                    same list with a leading `!` for every card EXCEPT those
@@ -174,11 +177,12 @@ NEEDS_WHO="${NEEDS_WHO:-Steve}"
 # board.py call the tick makes would also read "lane:$PROJECT_NAME" and the ledger could
 # never tell a lane's own poll from the card it is working.
 export WATCHER_LEDGER_CALLER="lane:$PROJECT_NAME"
-# Discord is board.py's job (notify.py), and it only hears about a card that is stuck or a
-# run that broke: a `board move` to Stuck posts the alert by itself, from this script and
-# from inside the tick alike, so the webhook only has to reach board.py's environment. A
-# project file may set it; /etc/watcher/env usually does.
+# Discord/Slack is board.py's job (notify.py), and it only hears about a card that is
+# stuck or a run that broke: a `board move` to Stuck posts the alert by itself, from this
+# script and from inside the tick alike, so the webhook only has to reach board.py's
+# environment. A project file may set either or both; /etc/watcher/env usually does.
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}" DISCORD_MENTION="${DISCORD_MENTION:-}"
+export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}" SLACK_MENTION="${SLACK_MENTION:-}"
 # The repo the cards live in. `gh` infers a repo from the cwd, and this script's cwd is
 # /opt/watcher — a checkout of the WATCHER, not the project — so on the first night every
 # unclaim and sweeper comment hit the wrong repo and three finished cards sat in-flight

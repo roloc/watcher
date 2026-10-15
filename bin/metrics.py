@@ -20,8 +20,9 @@ command. `--weeks` (default 8) sets how many calendar weeks the weekly table cov
 
 `--digest` prints one bullet per lane instead — this week's numbers, last week's in
 parentheses (card #139) — the shape `docs/talking-to-the-owner.md` wants for anything the
-owner reads. `--post` sends that same text to Discord through `bin/notify.py`'s `digest` kind;
-with no `DISCORD_WEBHOOK_URL` configured that is a silent no-op, same as every other post
+owner reads. `--post` sends that same text through `bin/notify.py`'s `digest` kind, to
+Discord, Slack, or both, by whichever of `DISCORD_WEBHOOK_URL`/`SLACK_WEBHOOK_URL` is
+configured; with neither set that is a silent no-op, same as every other post
 `notify.py` makes. Posting is the only thing this script ever writes anywhere; without
 `--post` it only prints, exactly as it always has. With `--digest` and no `<state-dir>`
 given, it reads every lane under `WATCHER_STATE_ROOT` (default `~/.local/state/watcher`)

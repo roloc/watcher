@@ -42,12 +42,13 @@ to invalidate it a second time. `project()`
 field or option name invalidates it and retries once live — a column the owner just
 renamed is seen on that retry, not after the cache ages out on its own.
 
-Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), a move to Stuck posts the alert
-after it lands (with the ask taken from the card's latest `Needs @<login>` comment, or from
-`--why`), and `notify` posts the two things that mean something broke (a run that died
-holding a card, a product check the detector filed a card for). Every other `move`, and
-every `stage`, is silent: the floor page shows those. A failed post is one stderr line,
-never a non-zero exit — the board is the record, Discord is the pager.
+Discord/Slack: when DISCORD_WEBHOOK_URL and/or SLACK_WEBHOOK_URL is set (see notify.py),
+a move to Stuck posts the alert after it lands (with the ask taken from the card's latest
+`Needs @<login>` comment, or from `--why`), and `notify` posts the two things that mean
+something broke (a run that died holding a card, a product check the detector filed a
+card for). Every other `move`, and every `stage`, is silent: the floor page shows those.
+A failed post is one stderr line, never a non-zero exit — the board is the record, the
+channel is the pager.
 
 The ledger (card #114): every real `gh api graphql` call that carries a `rateLimit` object
 appends one line to `$WATCHER_CACHE_DIR/ledger.jsonl` — when, which caller (`WATCHER_LEDGER_CALLER`,

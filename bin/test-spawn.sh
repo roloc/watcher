@@ -20,7 +20,9 @@ set -uo pipefail
 # to the tick (so a card worktree's own `/etc/watcher/env` value reaches it), and the shim
 # section below asserts on an exact stub value for each — a real webhook URL leaking in from
 # this lane's own environment fails those cases on a correct tree, the same shape as #34.
-unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX OWNER_LOGIN DISCORD_WEBHOOK_URL DISCORD_MENTION
+# SLACK_WEBHOOK_URL and SLACK_MENTION (card #159) join for the identical reason: spawn.sh
+# exports both the same way.
+unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX OWNER_LOGIN DISCORD_WEBHOOK_URL DISCORD_MENTION SLACK_WEBHOOK_URL SLACK_MENTION
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPAWN="$HERE/spawn.sh"

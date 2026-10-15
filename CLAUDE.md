@@ -28,9 +28,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   the mockups and screenshots under a Stuck comment's `Look:` section, which `bin/floor.py`
   shows inline instead of making the owner click through to the card, card #91). `python3 bin/test-board.py`
   (CI runs it); run it after touching either of those two readers.
-- `bin/notify.py` — Discord posts, called only from `board.py` (a `move` to Stuck, and
-  `notify`). It posts when a card is stuck or something broke, and for nothing else.
-  `python3 bin/test-notify.py` is its offline test; run it after touching either file.
+- `bin/notify.py` — Discord and/or Slack posts, called only from `board.py` (a `move` to
+  Stuck, and `notify`). It posts when a card is stuck or something broke, and for nothing
+  else. `python3 bin/test-notify.py` is its offline test; run it after touching either file.
 - `bin/metrics.py` — a read-only weekly report over a lane's own tick logs (first-pass
   merge rate, park rate, deaths, turns/quota and time to Done). Run by hand for the full
   report; `--digest` (one bullet per lane, CI runs this suite) is also what
