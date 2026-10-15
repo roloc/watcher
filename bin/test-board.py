@@ -20,9 +20,9 @@ REAL_SUBPROCESS_RUN = subprocess.run  # captured before board.py's own stubbing 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-# board.py requires BOARD_OWNER at import time (card #157: no silent "roloc" default) —
-# every case below overrides board.OWNER/board.NUMBER per-board anyway, so this value
-# never matters past the import.
+# board.py requires BOARD_OWNER lazily, only where OWNER is actually used (card #157: no
+# silent "roloc" default) — every case below overrides board.OWNER/board.NUMBER per-board
+# anyway, so this value is just a harmless baseline.
 os.environ.setdefault("BOARD_OWNER", "test-owner")
 import board  # noqa: E402
 

@@ -20,9 +20,10 @@ and list every branch you deleted in one comment on this card.
 A section that comes back two sweeps running is a check that should be a CI gate instead
 of a weekly finding: say so in a comment here and file that card.
 
-**Verification.** `bin/hygiene.sh` exits 0 on `main` after the merge. Every offline suite
-in `.github/workflows/ci.yml` stays green. Nothing here touches what a model reads, so the
-deployer ships it without the replay suite, by itself, once the lanes are idle.
+**Verification.** `bin/hygiene.sh` exits 0 on `main` after the merge (by hand, export
+`GITHUB_REPOSITORY=<owner>/<repo>` first, or run it with `--no-remote`). Every offline
+suite in `.github/workflows/ci.yml` stays green. Nothing here touches what a model reads,
+so the deployer ships it without the replay suite, by itself, once the lanes are idle.
 
 **Where to look when it is done** (the Done comment names it): this card — the merged PR
 linked from it, and the comment listing every branch deleted. Nothing on the floor page.

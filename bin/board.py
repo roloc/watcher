@@ -982,6 +982,8 @@ def cmd_sweep_stages():
     cache (not `fresh=True`, unlike before card #114): STAGE_SWEEP_SEC is comfortably
     longer than BOARD_CACHE_SEC, so by the time this runs, some lane's own 60-second poll
     has very likely already paid for a read this can just reuse."""
+    _require_owner()  # before the stamp touch below: a missing OWNER must never leave a
+                       # fresh "sweep-None-N.stamp" that a later call reads as "just ran".
     interval = _sweep_interval_sec()
     stamp = _cache_path(_sweep_stamp_name()) if interval > 0 else None
     if stamp:

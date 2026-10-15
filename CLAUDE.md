@@ -110,7 +110,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   Mondays; it files one card when it finds something and nothing when it does not. A
   hygiene card is mechanical only: clear the sections it lists and nothing else, delete a
   branch with `gh api -X DELETE …/git/refs/heads/<branch>` and list it in a comment, and
-  "done" is `bin/hygiene.sh` exiting 0 on `main`. README, "The weekly hygiene card".
+  "done" is `bin/hygiene.sh` exiting 0 on `main` (by hand, that needs `GITHUB_REPOSITORY`
+  exported, or `--no-remote`). README, "The weekly hygiene card".
 
 ## Rules for editing this repo
 
@@ -191,7 +192,7 @@ above:
   merged with 115 such checks green and a `<script>` block that did not parse, so the page
   drew nothing at all.
 - **A symptom on the floor page is reproduced with `bin/browse.py`, never with `curl`.**
-  `python3 bin/browse.py check http://<box>:8787/` loads the live page the way a
+  `python3 bin/browse.py check http://localhost:8787/` loads the live page the way a
   browser does and prints every error its own code raised; `shot` gives you the picture.
   The page draws itself with a script, so `curl` returning 200 and a full document says the
   service is up and nothing about what the owner saw. A page you only fetched is a page you

@@ -4080,7 +4080,7 @@ def make_handler(cache, tail_lookup=None, ship_lookup=None, card_lookup=None):
 
 
 def main(argv):
-    host = "0.0.0.0"  # the box has no public interface; off-site reach is over whatever tunnel reaches it
+    host = "0.0.0.0"  # the box has no public interface; off-site reach is over WireGuard
     port = 8787
     projects_dir = os.path.join(REPO_ROOT, "projects")
     state_root = os.environ.get("WATCHER_STATE_ROOT") or os.path.expanduser("~/.local/state/watcher")

@@ -18,13 +18,14 @@ os.environ.pop("DISCORD_MENTION", None)
 os.environ.pop("OWNER_LOGIN", None)
 os.environ.pop("BOARD_OWNER", None)
 
-# board.py requires BOARD_OWNER at import time (card #157: no silent "roloc" default);
-# this suite tests notify.py's own fallback with it unset at CALL time, so it is set only
-# long enough for the import, then cleared again.
-os.environ["BOARD_OWNER"] = "test-owner"
 import notify  # noqa: E402
 import board   # noqa: E402
-os.environ.pop("BOARD_OWNER", None)
+# board.py requires OWNER lazily, only where it is actually used (card #157) — a move to
+# Stuck below calls announce(), which needs one for the board-URL it posts to Discord.
+# Set directly on the module, never through BOARD_OWNER in the environment: this suite
+# tests notify.py's own "Needs Steve:" fallback, which reads OWNER_LOGIN/BOARD_OWNER live
+# at call time, and those stay unset.
+board.OWNER = "test-owner"
 
 CARD = {"number": 87, "title": "Add speaker names", "url": "https://github.com/o/r/issues/87"}
 PR = {"url": "https://github.com/o/r/pull/90", "state": "OPEN"}
