@@ -64,6 +64,7 @@
 #   WATCHER_TAIL       tail.py invocation, `--path` mode only    (default: python3 <here>/tail.py)
 #                      — resolves a dead tick's own session transcript so it can be kept
 #                      beside the empty result log (card #143); see keep_transcript below.
+#   TRANSCRIPT_MAX_BYTES  cap on a kept transcript's copy, in bytes (default: 50MB; tests only)
 #   WATCHER_STATE      state dir                                (default: ~/.local/state/watcher/<name>)
 #   WATCHER_LOGS       log dir                                  (default: <state>/logs)
 #   WATCHER_SLEEP      when set, EVERY sleep uses this many seconds (tests: WATCHER_SLEEP=0);
@@ -1426,8 +1427,8 @@ except Exception:
     # transcript to explain what happened. Found from the newest card-<n>-*.json under
     # $WATCHER_LOGS, since this reconciliation (a LATER poll, possibly a whole new spawn.sh
     # process) never saw handle_exit's own $json/$ts.
-    local tsfile ts recon_subtype="unknown" transcript="" details_block=""
-    tsfile="$(ls "$WATCHER_LOGS"/card-"$n"-*.json 2>/dev/null | sort | tail -n1)"
+    local tsfile ts recon_subtype="unknown" transcript="" transcript_note="" details_block=""
+    tsfile="$(ls "$WATCHER_LOGS"/card-"$n"-*.json 2>/dev/null | sort | tail -n1)" || true
     if [ -n "$tsfile" ]; then
       ts="$(basename "$tsfile" .json)"; ts="${ts#card-$n-}"
       recon_subtype="$(json_field "$tsfile" 'd.get("subtype","unknown")')"; recon_subtype="${recon_subtype:-unknown}"
@@ -1435,14 +1436,17 @@ except Exception:
     if [ "$recon_subtype" != success ] && [ -n "${ts:-}" ]; then
       transcript="$(keep_transcript "$n" "$ts")"
       if [ -n "$transcript" ]; then
-        details_block="
+        transcript_note="- Transcript kept: $(basename "$transcript")"
+      else
+        transcript_note="- Transcript: none found"
+      fi
+      details_block="
 
 <details><summary>Details</summary>
 
-- Transcript kept: $(basename "$transcript")
+$transcript_note
 
 </details>"
-      fi
     fi
     $WATCHER_BOARD unclaim "$n" || log "reconcile: unclaim failed for #$n"
     $WATCHER_GH issue comment "$n" --body "🤖 FYI: a run died while holding this card (still marked in-flight, no process running). I released it; the next poll may retry.${details_block}" \
