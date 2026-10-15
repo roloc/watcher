@@ -15,8 +15,12 @@ set -uo pipefail
 # below, so cases that grep for the fixture's own values fail on a correct tree. Found while
 # verifying card #34 from inside that exact lane. OWNER_LOGIN (card #154) joins the list for
 # the same reason: that same lane exports it too, and it would otherwise silently override
-# `run()`'s own BOARD_OWNER-derived default ("test-owner") in every case here.
-unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX OWNER_LOGIN
+# `run()`'s own BOARD_OWNER-derived default ("test-owner") in every case here. DISCORD_WEBHOOK_URL
+# and DISCORD_MENTION (card #158) join for the same reason again: bin/spawn.sh exports both
+# to the tick (so a card worktree's own `/etc/watcher/env` value reaches it), and the shim
+# section below asserts on an exact stub value for each — a real webhook URL leaking in from
+# this lane's own environment fails those cases on a correct tree, the same shape as #34.
+unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX OWNER_LOGIN DISCORD_WEBHOOK_URL DISCORD_MENTION
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPAWN="$HERE/spawn.sh"
@@ -2256,6 +2260,49 @@ if grep -q "doctor.sh \[.*CWD=$POINTER_ROOT/v2\]" "$TESTLOG"; then
   pass "the re-launched process stands in v2, not the v1 folder a later sweep removes"
 else
   flunk "the re-launched process never showed v2 as its own cwd" "$(grep '^doctor.sh ' "$TESTLOG")"
+fi
+
+# ============================================================================
+echo "37. card #158: projects/example.env.txt never drifts from this script's own header"
+# The header documents every project-file knob across two blocks: "One project per
+# instance..." (PROJECT_NAME, LANE_AGENTS, ...) and "Every external command is
+# overridable..." (which also mixes in TICK_TIMEOUT, TICK_MAX_TURNS, TICK_MAX_BUDGET_USD,
+# POLL_INTERVAL, READY_PULL and WIP_MAX — real project-file knobs documented there only
+# because they are also plain overridable env vars). Excluded: every WATCHER_* name (the
+# internal overrides this script's own tests use to stub `claude`, `gh`, `board.py` and
+# so on — never set in a real project file) and anything the header itself marks
+# "(tests only)". What is left is exactly the set example.env.txt has to cover.
+EXAMPLE_ENV="$REPO_ROOT/projects/example.env.txt"
+header_vars="$(awk '/One project per instance, chosen by a project file/{flag=1} /^# Exported to the tick/{flag=0} flag' "$SPAWN" \
+  | grep -oE '^#   [A-Z][A-Z0-9_]*' | sed 's/^#   //' \
+  | grep -v '^WATCHER_' | grep -v '^TRANSCRIPT_MAX_BYTES$' | sort -u)"
+example_vars="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$EXAMPLE_ENV" | sed 's/=$//' | sort -u)"
+if [ "$header_vars" = "$example_vars" ]; then
+  pass "the header's documented vars and example.env.txt's vars are the same set"
+else
+  flunk "drift between the header and example.env.txt" \
+    "header-only: $(comm -23 <(printf '%s\n' "$header_vars") <(printf '%s\n' "$example_vars") | tr '\n' ' ')  example-only: $(comm -13 <(printf '%s\n' "$header_vars") <(printf '%s\n' "$example_vars") | tr '\n' ' ')"
+fi
+# Proves the check actually detects drift, not just that today's two files happen to
+# agree: add one name to a scratch copy of each side in turn and confirm the same
+# comparison goes red.
+SCRATCH_SPAWN="$TMP/spawn-plus-var.sh"
+awk '/^# Exported to the tick/{print "#   A_MADE_UP_VAR    not a real knob (test only)"} {print}' "$SPAWN" > "$SCRATCH_SPAWN"
+scratch_header_vars="$(awk '/One project per instance, chosen by a project file/{flag=1} /^# Exported to the tick/{flag=0} flag' "$SCRATCH_SPAWN" \
+  | grep -oE '^#   [A-Z][A-Z0-9_]*' | sed 's/^#   //' \
+  | grep -v '^WATCHER_' | grep -v '^TRANSCRIPT_MAX_BYTES$' | sort -u)"
+if [ "$scratch_header_vars" != "$example_vars" ]; then
+  pass "a var added only to the header turns this check red"
+else
+  flunk "the check missed a var added only to the header"
+fi
+SCRATCH_EXAMPLE="$TMP/example-plus-var.env.txt"
+{ cat "$EXAMPLE_ENV"; echo "A_MADE_UP_VAR=x"; } > "$SCRATCH_EXAMPLE"
+scratch_example_vars="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$SCRATCH_EXAMPLE" | sed 's/=$//' | sort -u)"
+if [ "$header_vars" != "$scratch_example_vars" ]; then
+  pass "a var added only to example.env.txt turns this check red"
+else
+  flunk "the check missed a var added only to example.env.txt"
 fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"

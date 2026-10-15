@@ -1728,6 +1728,28 @@ finally:
     srv27b.shutdown()
     srv27b.server_close()
 
+print("28. card #158: projects/ holding only the shipped examples draws an empty floor, not an error")
+EXAMPLES_ONLY = tempfile.mkdtemp(prefix="watcher-floor-examples-")
+EXAMPLES_STATE = tempfile.mkdtemp(prefix="watcher-floor-examples-state-")
+REPO_PROJECTS_DIR = os.path.join(os.path.dirname(HERE), "projects")
+for fn in ("example.env.txt", "example-triage.env.txt", "example.detect.env.txt", "README.md"):
+    shutil.copy(os.path.join(REPO_PROJECTS_DIR, fn), os.path.join(EXAMPLES_ONLY, fn))
+lanes28 = floor.discover_lanes(EXAMPLES_ONLY, EXAMPLES_STATE)
+check("the .txt-named examples (and the README) are never read as a lane", lanes28 == [], lanes28)
+
+
+def _no_board_calls(*_a, **_k):
+    raise AssertionError("board_fetcher must never be called with zero lanes")
+
+
+state28 = floor.build_state(EXAMPLES_ONLY, EXAMPLES_STATE, _no_board_calls)
+check("build_state draws an empty floor rather than raising", state28["projects"] == [], state28)
+check("...with a sane, empty header, not a crash or a stale value",
+      state28["header"]["needs_steve_total"] == 0 and state28["header"]["owner_login"] == "",
+      state28["header"])
+shutil.rmtree(EXAMPLES_ONLY, ignore_errors=True)
+shutil.rmtree(EXAMPLES_STATE, ignore_errors=True)
+
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(WD_ROOT, ignore_errors=True)
 shutil.rmtree(TS_ROOT, ignore_errors=True)

@@ -15,6 +15,10 @@
 # One project per instance, chosen by a project file (projects/<name>.env), sourced first:
 #   PROJECT_NAME     short name (state/log dirs are keyed on it)
 #   PROJECT_ROOT     the project's main checkout on this box (worktrees go beside it)
+#   PROJECT_REPO     optional; owner/repo the cards live in, for every repo-scoped `gh`
+#                    call here and in board.py (card #3; see GH_REPO below). Defaults to
+#                    PROJECT_ROOT's own git remote "origin" — set it explicitly only when
+#                    the instance name (<name> above) is not literally that repo's name.
 #   BOARD_OWNER      GitHub user/org that owns the Projects board   (board.py reads these)
 #   BOARD_NUMBER     the board's number
 #   OWNER_LOGIN      optional; the GitHub login every Stuck/park/awaiting-rebuild comment
