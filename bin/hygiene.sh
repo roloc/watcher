@@ -22,7 +22,7 @@
 # OLD_TODO_DAYS (30), NEXT_SESSION_DAYS (14).
 set -uo pipefail
 
-REPO="${GITHUB_REPOSITORY:-roloc/watcher}"
+REPO="${GITHUB_REPOSITORY:-}"
 STALE_BRANCH_DAYS="${STALE_BRANCH_DAYS:-14}"
 OLD_TODO_DAYS="${OLD_TODO_DAYS:-30}"
 NEXT_SESSION_DAYS="${NEXT_SESSION_DAYS:-14}"
@@ -73,6 +73,9 @@ names_open_card() {
 if [ "$REMOTE" = 1 ]; then
   if ! command -v gh >/dev/null 2>&1; then
     echo "hygiene: gh not on PATH — run with --no-remote, or install gh" >&2; done_ok=1; exit 2
+  fi
+  if [ -z "$REPO" ]; then
+    echo "hygiene: GITHUB_REPOSITORY is required for a remote check (GitHub Actions sets it; export it by hand for a local run, or use --no-remote)" >&2; done_ok=1; exit 2
   fi
   git fetch --quiet --prune origin 2>/dev/null || echo "hygiene: fetch failed — branch ages are from the last fetch" >&2
   open_prs="$(gh pr list --repo "$REPO" --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null || true)"

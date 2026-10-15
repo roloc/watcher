@@ -41,7 +41,8 @@
 #                    lane whose tick only touches the board, never the code.
 #   WORKTREE_COPY_DIRS optional; the project's gitignored private inputs, space-separated
 #                    and relative to the checkout, copied into every card worktree
-#                    (default: riffmap's `docs/transcripts`). See bin/worktree.sh.
+#                    (default: none — a project with such inputs, like riffmap's
+#                    `docs/transcripts`, sets this itself). See bin/worktree.sh.
 #   LANE_CHANNEL     optional; `canary` makes this lane run the box's canary checkout
 #                    (default: `/opt/watcher-canary`, `WATCHER_CANARY_DIR` overrides) instead
 #                    of the one every other lane shares, with its own `CLAUDE_CONFIG_DIR` so

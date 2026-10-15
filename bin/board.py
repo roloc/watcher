@@ -77,7 +77,10 @@ from urllib.parse import urlsplit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notify  # noqa: E402  (bin/notify.py, beside this file)
 
-OWNER = os.environ.get("BOARD_OWNER") or "roloc"
+OWNER = os.environ.get("BOARD_OWNER")
+if not OWNER:
+    sys.exit("board.py: BOARD_OWNER is required — set it in the project's env file to "
+              "the login or org that owns its GitHub Projects board.")
 # Card #154: a Stuck/park comment addresses a GitHub login instead of the word "Steve" —
 # `Needs @<login>:` — going forward, but every comment already on a board before this
 # shipped still says the old `Needs Steve:`. Every reader of a Needs-shaped comment

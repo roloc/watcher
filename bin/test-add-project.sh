@@ -59,7 +59,7 @@ esac
 EOF
 chmod +x "$BIN"/*
 export PATH="$BIN:$PATH"
-export WATCHER_GH=gh ADD_PROJECT_YES=1
+export WATCHER_GH=gh ADD_PROJECT_YES=1 BOT_LOGIN=testbot
 
 REPO_ROOT="$TMP/repo"
 mkdir -p "$REPO_ROOT/deploy" "$REPO_ROOT/projects"
@@ -156,6 +156,18 @@ check "missing one option: Stage gets a graphql replace"    called "updateProjec
 check "missing one option: keeps every existing stage, by id" called '{id: "a", name: "Waiting", color: GRAY, description: ""}, {id: "b", name: "Claimed", color: GRAY, description: ""}'
 check "missing one option: and appends the missing one, with no id of its own" called '{name: "Parked", color: RED, description: ""}'
 check "missing one option: Priority gets no graphql call for its own sake" [ "$(grep -c graphql "$CALLS")" = 1 ]
+
+# 6. BOT_LOGIN unset (card #157): a forker who has not made a bot account yet gets one
+#    clear line, never a query against riffmap-bot (an account that is not theirs).
+project_list '{"projects":[{"title":"testproj","number":42}]}'
+fields "{\"fields\":[$STATUS_DONE,$STAGE_DONE,$PRIORITY_DONE]}"
+: > "$CALLS"
+rm -f "$REPO_ROOT/projects/testproj.env"
+BOT_LOGIN= bash "$REPO_ROOT/deploy/add-project.sh" testproj roloc/testproj > "$TMP/out" 2>&1
+echo $? > "$TMP/rc"
+check "no BOT_LOGIN: exits non-zero"                       [ "$(rc)" != 0 ]
+check "no BOT_LOGIN: one clear line naming BOT_LOGIN"      out_has "set BOT_LOGIN="
+check "no BOT_LOGIN: never queries a permission it has no business asking about" not_called "collaborators"
 
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi

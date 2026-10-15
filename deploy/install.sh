@@ -12,7 +12,6 @@
 #                                 project on the box gets /watch and the reviewer
 #   /home/watcher/projects/<p>    each project's main checkout (cloned by `install.sh <p>`)
 set -euo pipefail
-REPO_URL="${WATCHER_REPO:-https://github.com/roloc/watcher.git}"
 # Card #106: deploy/autodeploy.sh's own release-folder swap runs this from a FRESH clone it
 # just made, never from /opt/watcher itself — WATCHER_DIR is how it says so (every
 # self-reference below reads $WATCHER_DIR, never the literal path). An ordinary by-hand run
@@ -21,6 +20,16 @@ WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
 # Same default deploy/autodeploy.sh's own DEPLOY_CANARY_DIR and bin/spawn.sh's own
 # WATCHER_CANARY_DIR already use (card #46).
 WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
+# Card #157: no fork should ever clone `roloc/watcher` by default. When $WATCHER_DIR is
+# already a checkout (the ordinary by-hand install: clone your own fork there first, per
+# README, then run this), its own `origin` IS the fork's URL, so that is read instead of
+# asked for. Only the from-nothing case — nothing at $WATCHER_DIR yet, so there is no
+# checkout to read — requires WATCHER_REPO.
+if [ -d "$WATCHER_DIR/.git" ]; then
+  REPO_URL="${WATCHER_REPO:-$(git -C "$WATCHER_DIR" remote get-url origin 2>/dev/null || true)}"
+else
+  REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> -- $WATCHER_DIR does not exist yet, so there is no checkout to read an origin from}"
+fi
 
 # canary_clone: makes $WATCHER_CANARY_DIR a clone of $WATCHER_DIR — fast, local, no network
 # and so no login root never has — with its own `origin` set to the TRUE upstream, read from

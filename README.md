@@ -118,8 +118,9 @@ commit (`gh api`, REST only), and on the board whose repo is this checkout, the 
 state from `/var/lib/watcher-deploy` (live, checking, testing, waiting, swapping, held — a
 held commit counts as needing the owner). It reads `projects/*.env`, each lane's state
 directory, one `board.py dump` per board and two REST calls per project (all cached,
-refreshed about once a minute); it never changes anything. Read-only, LAN-only
-(reached off-site over WireGuard), runs as the unprivileged `watcher` user.
+refreshed about once a minute); it never changes anything. Read-only, LAN-only — reached
+off-site over whatever tunnel already reaches the box — runs as the unprivileged `watcher`
+user.
 `bin/test-floor.py` is its offline suite: fixture state directories, a stubbed board.
 
 ## Talking to the owner
@@ -166,7 +167,7 @@ on. Details in `docs/how-it-works.md`, "Watching the product".
 
     apt install git python3 curl gh chromium       # plus node 22 and whatever the project builds with
     npm i -g @anthropic-ai/claude-code
-    git clone https://github.com/roloc/watcher /opt/watcher   # or rsync it in
+    git clone <your fork's clone URL> /opt/watcher   # or rsync it in
     /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, symlinks, `board`
 
 Then by hand, once:
@@ -180,10 +181,11 @@ Then by hand, once:
    on the tick's `PATH` — reads it back from this file before exec'ing the real binary.
 2. **GitHub:** `su - watcher`, `gh auth login` as the bot account, `gh auth setup-git`. The bot
    needs write access to the repo and access to the Projects board.
-3. **Project:** `deploy/add-project.sh riffmap roloc/riffmap` (from your own machine, see
-   "Add a project" below) sets up the board, the labels, and `projects/riffmap.env`; commit
-   and push that file, then `deploy/install.sh riffmap` clones the repo under
-   `/home/watcher/projects/` and drop its `.env.local` and any private inputs in place.
+3. **Project:** `BOT_LOGIN=<the bot's login> deploy/add-project.sh riffmap yourorg/riffmap`
+   (from your own machine, see "Add a project" below) sets up the board, the labels, and
+   `projects/riffmap.env`; commit and push that file, then `deploy/install.sh riffmap`
+   clones the repo under `/home/watcher/projects/` and drop its `.env.local` and any
+   private inputs in place.
 4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design
    watcher@riffmap-triage` (the build, design and triage lanes — without the triage lane
    an unlabeled card is nobody's); `journalctl -u watcher@riffmap -f` follows one.
@@ -192,9 +194,9 @@ Then by hand, once:
    Pause a lane with `touch ~watcher/.local/state/watcher/riffmap/PAUSE`.
 5. **The floor page** is already up (`deploy/install.sh` starts `watcher-floor.service`
    the first time it runs, before any project is even cloned): `http://<this box's LAN
-   address>:8787/`, reached off-site over whatever WireGuard tunnel already reaches the
-   box. `journalctl -u watcher-floor -f` follows it; `systemctl restart watcher-floor`
-   after hand-editing `bin/floor.py` outside the normal deploy path.
+   address>:8787/`, reached off-site over whatever tunnel already reaches the box.
+   `journalctl -u watcher-floor -f` follows it; `systemctl restart watcher-floor` after
+   hand-editing `bin/floor.py` outside the normal deploy path.
 
 ## Looking at pages
 
@@ -344,7 +346,7 @@ board, PR #38, is what surfaced them). Now it is one idempotent script, run from
 owner's Mac (or wherever), authenticated as **yourself** — never as the bot, since two of its steps
 (main's branch protection, the board itself) need admin/ownership the bot is never given:
 
-    TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
+    BOT_LOGIN=<the bot's login> TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
 
 `TEMPLATE_BOARD` is a clean, existing board to copy — `gh project copy` works on any board
 the caller can read, so it does not have to be a GitHub "template" (that flag is
@@ -354,8 +356,9 @@ for everything already in place. It copies the board, links the repo, creates th
 flight` / `blocked` / `steve-decision` labels, sets `main`'s branch protection (the named
 check required, PR required, 0 approvals, admins not enforced), and writes
 `projects/<name>.env`. Two things it cannot do for you — GitHub gives no API for either —
-it prints as an ask-first checklist and waits for a yes: granting `riffmap-bot` access to
-the new board, and turning on the board's **Auto-add to project** workflow with the filter
+it prints as an ask-first checklist and waits for a yes: granting the bot account
+(`BOT_LOGIN`) access to the new board, and turning on the board's **Auto-add to project**
+workflow with the filter
 `is:issue is:open` (`gh project copy` does not carry that workflow across at all, and a
 board whose filter is still GitHub's own `label:bug` example silently adds no cards — both
 found by failing, card #39, September 28, 2026).
@@ -379,9 +382,9 @@ Nothing here is riffmap-shaped, but two settings are worth knowing before the fi
   not own the code. Set it whenever `<name>` is not literally the repo under `BOARD_OWNER`.
 - **`WORKTREE_COPY_DIRS`** names the project's gitignored, in-tree private inputs —
   space-separated, relative to the checkout — copied into every card worktree so a tick can
-  read them (riffmap's meeting transcripts are the default). A project with none sets
-  `WORKTREE_COPY_DIRS=""`; a project with others sets
-  `WORKTREE_COPY_DIRS="docs/fixtures data/seed"`. A directory that is not there is skipped.
+  read them. Unset or `""` (the default) copies nothing; a project with some sets
+  `WORKTREE_COPY_DIRS="docs/fixtures data/seed"` (riffmap's is its meeting transcripts,
+  `docs/transcripts`). A directory that is not there is skipped.
 
 To split it into lanes, add
 `projects/<name>-<lane>.env` that sources `<name>.env` and sets `PROJECT_NAME=<name>-<lane>`

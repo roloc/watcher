@@ -15,22 +15,22 @@
 #   env files      — symlinked (.env.local / .env), so secrets have ONE source
 #                    of truth and a new required var can't go stale in a copy
 #   databases      — if the project has them; revisit on a destructive migration
-#   docs/transcripts — COPIED, not linked (card #87, 2026-09-07). The real meetings
-#                    are gitignored and live only in the main checkout, and Claude
-#                    Code refuses to follow a symlink that leaves the project
-#                    directory (it prompts, which headless is a refusal) — so a
-#                    worktree session could never read them and no worktree could
-#                    run a four-meeting eval. A copy is an ordinary in-tree file,
-#                    still gitignored here by the same .gitignore. Transcripts are
-#                    immutable inputs, so the staleness argument against copies
-#                    does not apply to them — but a meeting ADDED to the main
-#                    checkout later is not in older worktrees; `doctor` checks
-#                    only that the copy exists and is non-empty, not that it is
-#                    complete. AND:
-#                    every worktree now holds real meeting transcripts, so an
-#                    rsync of a worktree to lonestar-web must carry
-#                    `--exclude docs/transcripts` next to `--exclude out` (the
-#                    playbook recipe predates this copy and has no such line).
+#   WORKTREE_COPY_DIRS — a project's own gitignored, in-tree private inputs (named in its
+#                    `projects/<name>.env`) are COPIED, not linked. riffmap's is
+#                    `docs/transcripts` (card #87, 2026-09-07): the real meetings are
+#                    gitignored and live only in the main checkout, and Claude Code refuses
+#                    to follow a symlink that leaves the project directory (it prompts,
+#                    which headless is a refusal) — so a worktree session could never read
+#                    them and no worktree could run a four-meeting eval. A copy is an
+#                    ordinary in-tree file, still gitignored here by the same .gitignore.
+#                    Transcripts are immutable inputs, so the staleness argument against
+#                    copies does not apply to them — but a meeting ADDED to the main
+#                    checkout later is not in older worktrees; `doctor` checks only that the
+#                    copy exists and is non-empty, not that it is complete. AND: every
+#                    worktree now holds real meeting transcripts, so an rsync of a riffmap
+#                    worktree off this box must carry `--exclude docs/transcripts` next to
+#                    `--exclude out` (the playbook recipe predates this copy and has no such
+#                    line).
 #
 # NOT shared (each worktree gets its own):
 #   node_modules   — package-lock.json differs between branches
@@ -51,22 +51,21 @@ REPO_NAME="$(basename "$MAIN")"
 HOME_DIR="$(dirname "$MAIN")/${REPO_NAME}-worktrees"
 ENV_FILES=(.env.local .env)
 # The gitignored, in-tree inputs a worktree needs its own copy of (see the header for why
-# these are copied and not linked). `docs/transcripts` is riffmap's — the default is kept
-# so riffmap needs no configuration, and every entry is guarded by a `-d` test, so it is a
-# no-op in a project that has no such directory. A project with different private inputs
-# sets WORKTREE_COPY_DIRS in its `projects/<name>.env`, space-separated and relative to the
-# checkout (`WORKTREE_COPY_DIRS="docs/fixtures data/seed"`); the spawner exports it.
-# WORKTREE_COPY_DIRS="" is a deliberate "copy nothing", not "use the default" — which is
-# why both loops below expand it as ${COPY_DIRS[@]+"${COPY_DIRS[@]}"}: under `set -u`,
-# bash 3.2 (still what /bin/bash is on a Mac) treats a plain "${empty_array[@]}" as an
-# unbound variable and aborts. The box runs bash 5, where it is fine; this script is also
-# run by hand on a laptop, where it is not.
-if [ -n "${WORKTREE_COPY_DIRS+set}" ]; then
+# these are copied and not linked). Card #157: no project's own private directory
+# (`docs/transcripts` was riffmap's) is a default here — a project with such inputs sets
+# WORKTREE_COPY_DIRS in its own `projects/<name>.env`, space-separated and relative to the
+# checkout (`WORKTREE_COPY_DIRS="docs/fixtures data/seed"`); the spawner exports it. Unset
+# or empty both mean "copy nothing," and every entry is guarded by a `-d` test regardless,
+# so a project with no such directory is never affected. Expanded below as
+# ${COPY_DIRS[@]+"${COPY_DIRS[@]}"}: under `set -u`, bash 3.2 (still what /bin/bash is on a
+# Mac) treats a plain "${empty_array[@]}" as an unbound variable and aborts. The box runs
+# bash 5, where it is fine; this script is also run by hand on a laptop, where it is not.
+if [ -n "${WORKTREE_COPY_DIRS:-}" ]; then
   # Unquoted on purpose: a space-separated list from the env becomes the array's elements.
   # shellcheck disable=SC2206
   COPY_DIRS=(${WORKTREE_COPY_DIRS})
 else
-  COPY_DIRS=(docs/transcripts)
+  COPY_DIRS=()
 fi
 
 usage() {

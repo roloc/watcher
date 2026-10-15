@@ -756,7 +756,7 @@ The rules behind the shape (full version in `talking-to-the-owner.md`):
 - **First line is the ask**, bold, starts with `Needs @<login>:`, where `<login>` is the
   real value of this environment's `OWNER_LOGIN` variable — run `echo $OWNER_LOGIN` (or
   read it another way) and write that value in. The posted line reads, for example,
-  `Needs @roloc:`, a real GitHub login with no brackets or dollar sign anywhere in it —
+  `Needs @alex:`, a real GitHub login with no brackets or dollar sign anywhere in it —
   never the literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself.
   Every project sets this, so it should never come up empty; if it somehow does, write
   the old unadorned `Needs Steve:`, never `Needs @:` with nothing after the `@`. Never

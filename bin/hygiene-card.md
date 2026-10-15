@@ -14,8 +14,8 @@ listing it, and the link is the answer. Do not refactor anything the sweep did n
 the reviewer blocks a diff that reaches past the list.
 
 Branch deletions are not part of a PR and the reviewer cannot see them in one: delete with
-`gh api -X DELETE repos/roloc/watcher/git/refs/heads/<branch>` and list every branch you
-deleted in one comment on this card.
+`gh api -X DELETE repos/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/git/refs/heads/<branch>`
+and list every branch you deleted in one comment on this card.
 
 A section that comes back two sweeps running is a check that should be a CI gate instead
 of a weekly finding: say so in a comment here and file that card.

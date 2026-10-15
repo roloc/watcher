@@ -10,12 +10,20 @@ counts calls and returns canned `items()`/`project()` shapes.
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
 
+REAL_SUBPROCESS_RUN = subprocess.run  # captured before board.py's own stubbing below
+                                      # replaces subprocess.run in place (same module object)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# board.py requires BOARD_OWNER at import time (card #157: no silent "roloc" default) —
+# every case below overrides board.OWNER/board.NUMBER per-board anyway, so this value
+# never matters past the import.
+os.environ.setdefault("BOARD_OWNER", "test-owner")
 import board  # noqa: E402
 
 fails = 0
@@ -632,5 +640,17 @@ check("a second sweep inside the interval makes no additional call at all",
 del os.environ["STAGE_SWEEP_SEC"]
 
 board.subprocess.run = stub_run  # restore for anything appended after this suite
+
+print("25. BOARD_OWNER is required (card #157): a missing one is one clear line, never a "
+      "silent query against someone else's board")
+env = dict(os.environ)
+env.pop("BOARD_OWNER", None)
+real = REAL_SUBPROCESS_RUN([sys.executable, os.path.join(HERE, "board.py"), "list"],
+                            env=env, capture_output=True, text=True)
+check("exits 1, not 0", real.returncode == 1, real.returncode)
+check("one clear line naming BOARD_OWNER, on stderr",
+      "BOARD_OWNER is required" in real.stderr, real.stderr)
+check("never falls back to roloc or any other board", "roloc" not in real.stderr, real.stderr)
+
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES ABOVE'}")
 sys.exit(fails)

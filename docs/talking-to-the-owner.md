@@ -143,7 +143,7 @@ A quiet tick (nothing claimable) is one line: `Quiet tick: nothing claimable in 
 
 **After:**
 
-> 🤖 **Needs @roloc: pick where speaker names live in the meeting summary.**
+> 🤖 **Needs @alex: pick where speaker names live in the meeting summary.**
 >
 > - Card: add speaker names to the meeting summary.
 > - Done so far: the code change is ready either way.

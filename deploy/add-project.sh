@@ -14,9 +14,10 @@
 # purpose (bin/doctor.sh's own header explains why). Run it from inside a checkout of this
 # repo (projects/<name>.env is written next to this script's own projects/ directory).
 #
-#   deploy/add-project.sh riffmap roloc/riffmap
+#   BOT_LOGIN=yourbot deploy/add-project.sh riffmap yourorg/riffmap
 #
-# Env (everything has a sane default; TEMPLATE_BOARD is optional — card #156):
+# Env (BOT_LOGIN is required; everything else has a sane default, and TEMPLATE_BOARD is
+# optional — card #156):
 #   TEMPLATE_BOARD     <owner>/<number> of a clean, existing board to copy — Status
 #                      (Backlog/Ready/In progress/In review/Done/Stuck - Needs help),
 #                      Stage and Priority already set up, no live cards on it. `gh project
@@ -27,7 +28,10 @@
 #                      from nothing instead — `gh project create`, then the Status, Stage
 #                      and Priority fields built to match what bin/doctor.sh requires.
 #   BOARD_OWNER        who owns the new board                   (default: the owner in <owner/repo>)
-#   BOT_LOGIN           the bot account the watcher runs as      (default: riffmap-bot)
+#   BOT_LOGIN           required; the bot account the watcher runs as — a GitHub account
+#                      of its own (never yours), created at https://github.com/join and
+#                      given write access to the repo (this script's own ask-first
+#                      checklist, below, prompts for the grant)
 #   REQUIRED_CHECK      the CI check name to require on main     (default: verify)
 #   ADD_PROJECT_YES     1 = treat every "have you done this?" confirmation as yes, and
 #                        never prompt — for a non-interactive run (scripting, this script's
@@ -48,7 +52,7 @@ case "$REPO" in */*) ;; *) echo "add-project.sh: <owner/repo> must contain a /, 
 REPO_OWNER="${REPO%%/*}"
 
 BOARD_OWNER="${BOARD_OWNER:-$REPO_OWNER}"
-BOT_LOGIN="${BOT_LOGIN:-riffmap-bot}"
+BOT_LOGIN="${BOT_LOGIN:?add-project.sh: set BOT_LOGIN=<a GitHub login for the bot> — an account of its own, never yours, created at https://github.com/join}"
 REQUIRED_CHECK="${REQUIRED_CHECK:-verify}"
 ADD_PROJECT_YES="${ADD_PROJECT_YES:-0}"
 TEMPLATE_BOARD="${TEMPLATE_BOARD:-}"
