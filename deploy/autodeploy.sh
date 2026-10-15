@@ -809,6 +809,13 @@ $(grep -E 'FAIL|ok$|passed|failed' "$DSTATE/evals/$tgt.log" 2>/dev/null | tail -
     return 0
   fi
   clear_step
+  # A deploy ends this script's interest in every older target the same way a hold does
+  # (hold's own comment, card #150), so a PAUSE the canary stage wrote while it waited is
+  # lifted here too. A deploy-anyway skips the canary stage and never holds, so without
+  # this it shipped and left the lane paused on an older sha (October 14, 2026: 557306c
+  # went live and watcher@watcher stayed paused on "deploy 39e6be2"). Only a PAUSE that is
+  # `ours`; a hand-made one stays.
+  canary_unpause
   echo "$tgt" > "$DSTATE/deployed"
   close_held_except "$tgt"
   # A canary soak record for the commit that just promoted has done its job; the next

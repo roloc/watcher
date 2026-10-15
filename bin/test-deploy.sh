@@ -512,6 +512,44 @@ run; run   # held: the suite failed twice
 check "canary H2: a hand-made PAUSE is still there after a hold"      [ -f "$STATE/watcher/PAUSE" -a ! -s "$STATE/watcher/PAUSE" ]
 rm -f "$TMP/eval-fails" "$STATE/watcher/current"
 
+# H3. A deploy-anyway skips the canary stage and goes straight to the swap, so neither hold
+# nor the canary stage's own unpause runs — a PAUSE the deployer wrote while it waited is
+# left behind on a lane that is now running the shipped commit (October 14, 2026: 557306c
+# shipped with deploy-anyway and watcher@watcher stayed paused on "deploy 39e6be2"). A
+# successful swap lifts it. The path here: T1 pauses the busy lane; T2 lands and is held
+# because the canary checkout cannot be moved (its origin is gone, so the fetch, the
+# fast-forward and the reset all fail); the lane is busy again, so the next run pauses it
+# for T2 and waits; then T2 gets deploy-anyway and the next run ships it.
+canary_fresh; T1="$(commit commands/watch.md canary-h3)"
+CANARY_URL="$(git -C "$CANARY" remote get-url origin)"
+echo 963 > "$STATE/watcher/current"
+run   # T1: busy, so the lane is paused and waited on
+check "canary H3: the busy lane is paused for the first target"       grep -q "^deploy $T1" "$STATE/watcher/PAUSE"
+git -C "$CANARY" remote set-url origin "$TMP/no-such-origin.git"
+T2="$(commit commands/watch.md canary-h3b)"; rm -f "$STATE/watcher/current"
+run   # T2: idle, but the canary checkout cannot move onto it, so it is held
+check "canary H3: the newer commit is held"                           called "Deploy held: ${T2:0:7} is not live"
+echo 964 > "$STATE/watcher/current"
+run   # T2 again: busy, so it is paused and waited on once more
+check "canary H3: the busy lane is paused again for the held target"  grep -q "^deploy $T2" "$STATE/watcher/PAUSE"
+echo deploy-anyway > "$TMP/labels"; run
+check "canary H3: deploy-anyway ships the held commit"                [ "$(head_)" = "$T2" ]
+check "canary H3: …and the deployer's own PAUSE goes with it"         [ ! -e "$STATE/watcher/PAUSE" ]
+git -C "$CANARY" remote set-url origin "$CANARY_URL"; rm -f "$TMP/labels"
+# The same path with a PAUSE Steve made by hand: the swap leaves it exactly as it was.
+canary_fresh; : > "$STATE/watcher/PAUSE"; T1="$(commit commands/watch.md canary-h3c)"
+echo 965 > "$STATE/watcher/current"
+run
+git -C "$CANARY" remote set-url origin "$TMP/no-such-origin.git"
+T2="$(commit commands/watch.md canary-h3d)"; rm -f "$STATE/watcher/current"
+run   # held: the canary checkout cannot move
+echo 966 > "$STATE/watcher/current"; run
+echo deploy-anyway > "$TMP/labels"; run
+check "canary H3: deploy-anyway ships it with a hand-made PAUSE too"  [ "$(head_)" = "$T2" ]
+check "canary H3: …and the hand-made PAUSE is still there"            [ -f "$STATE/watcher/PAUSE" -a ! -s "$STATE/watcher/PAUSE" ]
+git -C "$CANARY" remote set-url origin "$CANARY_URL"
+rm -f "$TMP/labels" "$STATE/watcher/current"
+
 # I. A card the spawner parked during the soak (two attempts, no progress) holds the commit
 # like a dead tick does. The marker is an empty file under the lane's parked/, so this is
 # the "modified since" read with no result json to lean on — the half of canary_died that
