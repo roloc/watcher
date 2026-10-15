@@ -42,6 +42,11 @@ WORKTREE_BASE="$(dirname "$FAKE_ROOT")/$(basename "$FAKE_ROOT")-worktrees"
 # for a test that names it as the parsed key (test 23) to resolve.
 mkdir -p "$FAKE_ROOT" "$WORKTREE_BASE"
 
+# card #143: the Claude CLI session directory for card <n>'s worktree, under whatever
+# CLAUDE_PROJECTS_DIR a test points keep_transcript at — mirrors tail.py's own encode_dir
+# (every "/" becomes "-"), same as test-tail.sh's helper of the same name.
+session_dir_for() { echo "$1/$(echo "$WORKTREE_BASE/card-$2" | sed 's#/#-#g')"; }
+
 # A real local "origin" (bare) and a real git repo at $FAKE_ROOT with it as `origin` and a
 # `main` branch — the actual production topology (every card worktree is `git worktree
 # add`ed off $FAKE_ROOT, sharing its .git) — so the sync tests below (12b-12e) exercise
@@ -466,6 +471,8 @@ run() {
   WATCHER_DOCTOR="$BIN/doctor.sh" \
   WATCHER_STATE="$STATE" WATCHER_LOGS="$LOGS" \
   WATCHER_CLAUDE_JSON="${CLAUDE_JSON_PATH:-$TMP/unused-claude.json}" \
+  CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$STATE/no-claude-projects}" \
+  TRANSCRIPT_MAX_BYTES="${TRANSCRIPT_MAX_BYTES:-}" \
   WATCHER_TICK_TIMEOUT_SEC="${WATCHER_TICK_TIMEOUT_SEC:-}" \
   WATCHER_TRUST_PROBE_TIMEOUT_SEC="${WATCHER_TRUST_PROBE_TIMEOUT_SEC:-5}" \
   WATCHER_SLEEP="${WATCHER_SLEEP:-0}" \
@@ -627,6 +634,67 @@ else
   flunk "sweeper comment with a linked Closes line" "$comment_line"
 fi
 unset GH_PR_LIST_FILE
+
+# ============================================================================
+echo "3e. card #143: a non-success exit with a session transcript on disk gets it copied beside the empty result log, named in the released comment"
+fresh_state
+board_list $'50\tP1\tbuilder\t-\tCard fifty'
+board_show '{"number":50,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+CLAUDE_PROJECTS_DIR="$STATE/claude-projects"
+d="$(session_dir_for "$CLAUDE_PROJECTS_DIR" 50)"
+mkdir -p "$d"
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"what the dead tick was doing"}]}}' > "$d/session-1.jsonl"
+CLAUDE_SUBTYPE=error_during_execution CLAUDE_RC=1 CLAUDE_COST=0.20 CLAUDE_TURNS=9 CLAUDE_DENIALS=0
+run --once >/dev/null
+kept="$(ls "$LOGS"/card-50-*.transcript.jsonl 2>/dev/null | head -n1)"
+if [ -n "$kept" ] && diff -q "$kept" "$d/session-1.jsonl" >/dev/null 2>&1; then
+  pass "the session transcript is copied beside the (empty) result log, same stem"
+else
+  flunk "transcript copy" "kept='$kept' in $LOGS: $(ls "$LOGS" 2>/dev/null)"
+fi
+comment_line="$(grep 'gh issue comment 50' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'Transcript kept: card-50-.*\.transcript\.jsonl' \
+   && printf '%s' "$comment_line" | grep -q '<details><summary>Details</summary>'; then
+  pass "the released comment names the kept transcript under <details>, never above the fold"
+else
+  flunk "released comment should name the transcript under <details>" "$comment_line"
+fi
+unset CLAUDE_PROJECTS_DIR
+
+echo "3f. card #143: a non-success exit with NO session transcript on disk — the comment says so, nothing else breaks"
+fresh_state
+board_list $'51\tP1\tbuilder\t-\tCard fifty-one'
+board_show '{"number":51,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+CLAUDE_SUBTYPE=error_during_execution CLAUDE_RC=1 CLAUDE_COST=0.20 CLAUDE_TURNS=9 CLAUDE_DENIALS=0
+run --once >/dev/null; RC=$?
+[ "$RC" != 0 ] && pass "still a non-success exit (no transcript does not change that)" || flunk "exit code" "$RC"
+if ! ls "$LOGS"/card-51-*.transcript.jsonl >/dev/null 2>&1; then pass "no transcript file written: there was nothing to copy"; else flunk "unexpected transcript file" "$(ls "$LOGS")"; fi
+comment_line="$(grep 'gh issue comment 51' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'Transcript: none found'; then
+  pass "the comment says plainly that no transcript was found"
+else
+  flunk "comment should say no transcript was found" "$comment_line"
+fi
+if grepped "board.py unclaim 51"; then pass "the rest of the released path still runs (unclaim happened)"; else flunk "unclaim not called" "$(cat "$TESTLOG")"; fi
+
+echo "3g. card #143: a transcript over the byte cap is not copied — the source path is recorded instead"
+fresh_state
+board_list $'52\tP1\tbuilder\t-\tCard fifty-two'
+board_show '{"number":52,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+CLAUDE_PROJECTS_DIR="$STATE/claude-projects"
+d="$(session_dir_for "$CLAUDE_PROJECTS_DIR" 52)"
+mkdir -p "$d"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"a transcript longer than the test cap"}]}}\n' > "$d/session-1.jsonl"
+CLAUDE_SUBTYPE=error_during_execution CLAUDE_RC=1 CLAUDE_COST=0.20 CLAUDE_TURNS=9 CLAUDE_DENIALS=0
+TRANSCRIPT_MAX_BYTES=10
+run --once >/dev/null
+kept="$(ls "$LOGS"/card-52-*.transcript.jsonl 2>/dev/null | head -n1)"
+if [ -n "$kept" ] && grep -q "$d/session-1.jsonl" "$kept" && ! diff -q "$kept" "$d/session-1.jsonl" >/dev/null 2>&1; then
+  pass "over the cap: the kept file names the source path instead of copying its content"
+else
+  flunk "over-cap transcript handling" "kept='$kept': $(cat "$kept" 2>/dev/null)"
+fi
+unset CLAUDE_PROJECTS_DIR TRANSCRIPT_MAX_BYTES
 
 # ============================================================================
 echo "4. Second attempt on the same card (attempts file reaches 2, card still In progress) → Stuck move + comment"
@@ -908,6 +976,36 @@ run --once >/dev/null 2>"$TMP/reconcile.err"
 if grepped "board.py unclaim 140"; then pass "startup reconciliation unclaimed the stale card (no tick process alive)"; else flunk "expected an unclaim of #140" "$(cat "$TESTLOG")"; fi
 if grep -q 'restarted' "$TMP/reconcile.err" 2>/dev/null || grepped "gh issue comment 140"; then pass "a comment records the restart"; else flunk "expected a restart comment for #140" "$(cat "$TESTLOG")"; fi
 [ ! -f "$STATE/current" ] && pass "stale current file removed" || flunk "current file should have been removed" "$(cat "$STATE/current")"
+
+echo "14b. card #143: reconciliation's own 'a run died' comment also names a kept transcript, found from the newest card-<n>-*.json under WATCHER_LOGS (handle_exit never ran to hand it one directly)"
+fresh_state
+echo 142 > "$STATE/current"
+board_show '{"number":142,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+board_list ""
+# Simulate launch_tick's own redirection having created the (empty) result file right
+# before the process was killed outright — handle_exit never ran, so this reconciliation
+# is the only place anything notices the exit at all.
+: > "$LOGS/card-142-20261001T000000Z.json"
+CLAUDE_PROJECTS_DIR="$STATE/claude-projects"
+d="$(session_dir_for "$CLAUDE_PROJECTS_DIR" 142)"
+mkdir -p "$d"
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"what the crashed tick was doing"}]}}' > "$d/session-1.jsonl"
+run --once >/dev/null 2>"$TMP/reconcile142.err"
+if grepped "board.py unclaim 142"; then pass "reconciliation unclaimed #142"; else flunk "expected an unclaim of #142" "$(cat "$TESTLOG")"; fi
+kept="$(ls "$LOGS"/card-142-*.transcript.jsonl 2>/dev/null | head -n1)"
+if [ -n "$kept" ] && diff -q "$kept" "$d/session-1.jsonl" >/dev/null 2>&1; then
+  pass "the crashed tick's transcript is copied, same stem as the empty result log found on disk"
+else
+  flunk "transcript copy on reconcile" "kept='$kept': $(ls "$LOGS" 2>/dev/null)"
+fi
+comment_line="$(grep 'gh issue comment 142' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'Transcript kept: card-142-.*\.transcript\.jsonl' \
+   && printf '%s' "$comment_line" | grep -q '<details><summary>Details</summary>'; then
+  pass "the 'a run died' comment names the kept transcript under <details>"
+else
+  flunk "reconcile's died comment should name the transcript" "$comment_line"
+fi
+unset CLAUDE_PROJECTS_DIR
 
 echo "15. Startup reconciliation: current names a card that is no longer in-flight → just cleaned up, no unclaim"
 fresh_state

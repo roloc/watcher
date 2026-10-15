@@ -183,6 +183,27 @@ run
 check "unknown lane: exits 64"                             [ "$(rc)" = 64 ]
 check "unknown lane: names the file it looked for"          err_has "nosuchlane.env"
 
+# 11. --path <n>: the other caller (bin/spawn.sh, card #143) — prints the newest session's
+# path and exits, no --state or polling involved.
+fresh
+write_transcript "$(session_dir_for "$TMP/repo-worktrees/card-42")/session-1.jsonl"
+CLAUDE_PROJECTS_DIR="$PROJECTS" python3 "$HERE/tail.py" --path 42 \
+  --workdir-mode card --worktree-base "$TMP/repo-worktrees" \
+  > "$TMP/out" 2> "$TMP/err"
+echo $? > "$TMP/rc"
+check "--path: exits 0"                                    [ "$(rc)" = 0 ]
+check "--path: prints the session file's own path"          out_has "$(session_dir_for "$TMP/repo-worktrees/card-42")/session-1.jsonl"
+
+# 12. --path <n>: no session for that card — exits non-zero and says so on stderr, same as
+# tail.sh's own "waiting for a session" case but for a one-shot caller with no polling.
+fresh
+CLAUDE_PROJECTS_DIR="$PROJECTS" python3 "$HERE/tail.py" --path 99 \
+  --workdir-mode card --worktree-base "$TMP/repo-worktrees" \
+  > "$TMP/out" 2> "$TMP/err"
+echo $? > "$TMP/rc"
+check "--path, no session: exits non-zero"                 [ "$(rc)" != 0 ]
+check "--path, no session: says so on stderr"                err_has "no session transcript found"
+
 echo
 if [ "$fail" -eq 0 ]; then
   echo "tail: $n checks, all ok"

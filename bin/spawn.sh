@@ -61,6 +61,9 @@
 #   WATCHER_DOCTOR     bin/doctor.sh invocation                 (default: <here>/doctor.sh)
 #   WATCHER_BOARD      board.py invocation                      (default: python3 <here>/board.py)
 #   WATCHER_WORKTREE   worktree.sh invocation                   (default: <here>/worktree.sh)
+#   WATCHER_TAIL       tail.py invocation, `--path` mode only    (default: python3 <here>/tail.py)
+#                      — resolves a dead tick's own session transcript so it can be kept
+#                      beside the empty result log (card #143); see keep_transcript below.
 #   WATCHER_STATE      state dir                                (default: ~/.local/state/watcher/<name>)
 #   WATCHER_LOGS       log dir                                  (default: <state>/logs)
 #   WATCHER_SLEEP      when set, EVERY sleep uses this many seconds (tests: WATCHER_SLEEP=0);
@@ -180,6 +183,11 @@ WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_DOCTOR="${WATCHER_DOCTOR:-$WATCHER_HERE/doctor.sh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"
 WATCHER_WORKTREE="${WATCHER_WORKTREE:-$WATCHER_HERE/worktree.sh}"
+WATCHER_TAIL="${WATCHER_TAIL:-python3 $WATCHER_HERE/tail.py}"
+# Card #143: capped so a huge transcript (a long-running tick, a tool call that read
+# something large) is never copied in full — above this, the dest file names the source
+# path instead. 50MB, same order of magnitude as a single `cleanupPeriodDays` session.
+TRANSCRIPT_MAX_BYTES="${TRANSCRIPT_MAX_BYTES:-$((50 * 1024 * 1024))}"
 export WORKTREE_ROOT="$WATCHER_ROOT"
 # A headless tick never gets a background task's "finished" notification, so a CI wait
 # it backgrounds just ends the run with the PR unmerged — watch.md forbids it, and ticks
@@ -769,7 +777,7 @@ bump_attempts() {
 # comment/label-removal are guarded by parked/<n>, and that marker is written after the
 # comment goes out (never before the move is even attempted).
 park_stuck() {
-  local n="$1" detail="$2"
+  local n="$1" detail="$2" transcript="${3:-}"
   local tried="$WATCHER_STATE/parked/$n" ok="$WATCHER_STATE/parked-ok/$n"
   mkdir -p "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok"
   # A card that reaches Stuck starts over when Steve sends it back: sweep_in_review's
@@ -803,7 +811,10 @@ park_stuck() {
   # The body is for Steve (docs/talking-to-steve.md): the ask on line one, bullets, one
   # question, lettered options with the recommendation first, and how to answer. The
   # spawner only knows the card failed twice, not why, so the options are the three moves
-  # Steve can make; $detail and the log path are the engineer's crumbs, kept short.
+  # Steve can make; $detail, the log path and the transcript (card #143, when there is
+  # one) are the engineer's crumbs, kept short.
+  local transcript_line=""
+  [ -n "$transcript" ] && transcript_line=$'\n- Transcript kept: '"$(basename "$transcript")"
   local body
   body="🤖 **Needs Steve: this card failed 2 attempts, so I parked it.**
 
@@ -820,7 +831,7 @@ Reply A, B or C on this card, or say which way you lean, then move it.
 <details><summary>Details</summary>
 
 - Logs: $WATCHER_LOGS
-- Attempts on file: 2
+- Attempts on file: 2${transcript_line}
 
 </details>"
   $WATCHER_BOARD stage "$n" Parked >/dev/null 2>&1 || true
@@ -1115,9 +1126,39 @@ for p in prs:
 ' "$n" "$out" 2>/dev/null || return 1
 }
 
+# keep_transcript <n> <ts> — on a tick that did not succeed, copies its Claude Code
+# session transcript to $WATCHER_LOGS/card-<n>-<ts>.transcript.jsonl, the same stem as the
+# result JSON and stderr, so a post-mortem reads what the tick actually did instead of
+# guessing from an empty result (card #143). A copy, not a link: the worktree the source
+# is keyed on may be removed the moment this exit finishes (handle_exit's own
+# $LANE_WORKDIR = root check, below). Prints the kept path on success; prints nothing
+# (logging why) when there is no transcript to keep, so a caller can fold either outcome
+# into its own comment without caring which happened.
+keep_transcript() {
+  local n="$1" ts="$2" src dest size
+  src="$($WATCHER_TAIL --path "$n" --workdir-mode "$LANE_WORKDIR" --worktree-base "$WORKTREE_BASE" 2>/dev/null)" || true
+  if [ -z "$src" ]; then
+    log "no session transcript found for #$n; nothing to keep"
+    return 0
+  fi
+  dest="$WATCHER_LOGS/card-$n-$ts.transcript.jsonl"
+  size="$(wc -c < "$src" 2>/dev/null || echo 0)"
+  if [ "$size" -gt "$TRANSCRIPT_MAX_BYTES" ]; then
+    echo "source path (too large to copy, $size bytes): $src" > "$dest"
+    log "transcript for #$n is $size bytes, over the ${TRANSCRIPT_MAX_BYTES}-byte cap; recorded its source path at $dest instead of copying"
+  elif cp "$src" "$dest" 2>/dev/null; then
+    log "kept transcript for #$n at $dest"
+  else
+    log "transcript copy failed for #$n ($src -> $dest)"
+    return 0
+  fi
+  echo "$dest"
+}
+
 handle_exit() {
   local n="$1" json="$2" rc="$3"
   local subtype total_cost num_turns denials elapsed_min show has_in_flight is_closed is_in_progress attn attempts pr has_awaiting_rebuild
+  local transcript="" transcript_note=""
 
   subtype="$(json_field "$json" 'd.get("subtype","unknown")')"; subtype="${subtype:-unknown}"
   total_cost="$(json_field "$json" 'd.get("total_cost_usd","")')"
@@ -1129,6 +1170,21 @@ handle_exit() {
   # list price computed client-side, never a bill (docs/how-it-works.md, "The dollar
   # figure is quota, not a bill").
   log "tick #$n exited rc=$rc subtype=$subtype quota~\$${total_cost:-?} turns=${num_turns:-?} denials=${denials:-0}"
+
+  # Card #143: a tick that did not succeed (an empty/unparseable result counts as
+  # "unknown", above) may have died with no record but its own session transcript. Keep it
+  # now, same stem as $json/$err, before anything below can remove the worktree it's keyed
+  # on. A successful tick keeps no copy — the card's own comments are its record.
+  if [ "$subtype" != success ]; then
+    local ts
+    ts="$(basename "$json" .json)"; ts="${ts#card-$n-}"
+    transcript="$(keep_transcript "$n" "$ts")"
+    if [ -n "$transcript" ]; then
+      transcript_note="- Transcript kept: $(basename "$transcript")"
+    else
+      transcript_note="- Transcript: none found"
+    fi
+  fi
 
   # board_show_retry tries three times. If it STILL fails, this is not read as "no
   # in-flight, not in progress" (review, card #65 fold-in: that fail-open means the
@@ -1224,6 +1280,18 @@ except Exception:
     # finishes", a notification a headless run never gets, and the next tick found the PR
     # green and merged it in 18 seconds. The release and the retry are the same either way
     # (the card is In progress again, so pick_card takes it back); only the words differ.
+    # Card #143: the transcript note (if any) is an engineer's crumb, same rule as every
+    # other log path in these comments — under the fold, never above it.
+    local details_block=""
+    if [ -n "$transcript_note" ]; then
+      details_block="
+
+<details><summary>Details</summary>
+
+$transcript_note
+
+</details>"
+    fi
     pr="$(open_pr_for "$n" || true)"
     if [ -n "$pr" ]; then
       # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve; the PR is the
@@ -1231,7 +1299,7 @@ except Exception:
       $WATCHER_GH issue comment "$n" --body "🤖 FYI: PR #${pr%% *} is up for this card, but the run ended before merging it. I released the card; the next poll picks it up and merges once the checks are green.
 - PR: ${pr#* }
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
-- Agent quota used: ~\$${total_cost:-0} equivalent (subscription — not billed)" \
+- Agent quota used: ~\$${total_cost:-0} equivalent (subscription — not billed)${details_block}" \
         || log "sweeper comment failed for #$n"
       # No Discord post: nothing is broken — the work is done and the next poll merges it.
       # A second exit like this one parks the card, and the park is what alerts.
@@ -1242,7 +1310,7 @@ except Exception:
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
 - ${denials:-0} permission denials
 - Agent quota used: ~\$${total_cost:-0} equivalent (subscription — not billed)
-- Log: $(basename "$json")" \
+- Log: $(basename "$json")${details_block}" \
         || log "sweeper comment failed for #$n"
       # Discord, if configured (board.py notify is a no-op otherwise). A retry is not an
       # alert — the park, if it comes, is — but a died run is something broken, and that
@@ -1270,7 +1338,7 @@ except Exception:
   else
     attempts="$(bump_attempts "$n")"
     if [ "$attempts" -ge 2 ] && [ "$is_in_progress" = yes ]; then
-      park_stuck "$n" "The run ended with the card still In progress (log: $(basename "$json"))."
+      park_stuck "$n" "The run ended with the card still In progress (log: $(basename "$json"))." "$transcript"
     fi
   fi
 
@@ -1353,13 +1421,36 @@ except Exception:
     # with nothing on the board explaining why.
     local attempts
     attempts="$(bump_attempts "$n")"
+    # Card #143: same rule as handle_exit's own — a result that is not "success" (missing,
+    # unparseable, or a genuine failure subtype) may have left nothing but its own session
+    # transcript to explain what happened. Found from the newest card-<n>-*.json under
+    # $WATCHER_LOGS, since this reconciliation (a LATER poll, possibly a whole new spawn.sh
+    # process) never saw handle_exit's own $json/$ts.
+    local tsfile ts recon_subtype="unknown" transcript="" details_block=""
+    tsfile="$(ls "$WATCHER_LOGS"/card-"$n"-*.json 2>/dev/null | sort | tail -n1)"
+    if [ -n "$tsfile" ]; then
+      ts="$(basename "$tsfile" .json)"; ts="${ts#card-$n-}"
+      recon_subtype="$(json_field "$tsfile" 'd.get("subtype","unknown")')"; recon_subtype="${recon_subtype:-unknown}"
+    fi
+    if [ "$recon_subtype" != success ] && [ -n "${ts:-}" ]; then
+      transcript="$(keep_transcript "$n" "$ts")"
+      if [ -n "$transcript" ]; then
+        details_block="
+
+<details><summary>Details</summary>
+
+- Transcript kept: $(basename "$transcript")
+
+</details>"
+      fi
+    fi
     $WATCHER_BOARD unclaim "$n" || log "reconcile: unclaim failed for #$n"
-    $WATCHER_GH issue comment "$n" --body "🤖 FYI: a run died while holding this card (still marked in-flight, no process running). I released it; the next poll may retry." \
+    $WATCHER_GH issue comment "$n" --body "🤖 FYI: a run died while holding this card (still marked in-flight, no process running). I released it; the next poll may retry.${details_block}" \
       || log "reconcile: unclaim comment failed for #$n"
     $WATCHER_BOARD notify "$n" released "A run died while holding this card; found on cleanup. I released it; the next poll may retry." \
       || log "reconcile: discord notify failed for #$n"
     if [ "$attempts" -ge 2 ]; then
-      park_stuck "$n" "A run died holding this card (a crashed tick, or a board outage at its exit); found on cleanup, attempts=$attempts."
+      park_stuck "$n" "A run died holding this card (a crashed tick, or a board outage at its exit); found on cleanup, attempts=$attempts." "$transcript"
     fi
   else
     log "reconcile: #$n was not in-flight; nothing to unclaim"

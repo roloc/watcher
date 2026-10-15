@@ -6,6 +6,11 @@ the interface a human actually types. `bin/floor.py` imports this module directl
 floor page's "Peek" panel, reusing `replay_lines`/`read_new_lines` (and the path-resolving
 helpers below) rather than re-implementing the decode.
 
+`--path <n>` is the other caller: `bin/spawn.sh` runs `python3 tail.py --path <n>
+--workdir-mode <mode> --worktree-base <base>` to resolve a dead tick's own transcript
+path before copying it beside the empty result log (card #143) — prints the path and
+exits, no `--state` or polling involved.
+
 A transcript line is one of several `type`s (`assistant`, `user`, `attachment`,
 `queue-operation`, `last-prompt`, ...); only `assistant` (tool calls, and what the model
 said) and the first `user` turn (the slash command that started the tick) say anything
@@ -162,14 +167,28 @@ def drain(path, pos):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--state", required=True)
+    ap.add_argument("--state")
+    ap.add_argument("--path", metavar="N",
+                     help="print the newest session transcript path for card N and exit "
+                          "(used by spawn.sh to find a dead tick's own transcript)")
     ap.add_argument("--workdir-mode", required=True, choices=("card", "root"))
     ap.add_argument("--worktree-base", required=True)
     ap.add_argument("--no-follow", action="store_true")
     ap.add_argument("--poll-sec", type=float, default=2.0)
     args = ap.parse_args()
+    if args.path is None and not args.state:
+        ap.error("--state is required unless --path is given")
 
     projects_dir = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+
+    if args.path is not None:
+        session_dir = os.path.join(projects_dir, encode_dir(card_dir(args.path, args.workdir_mode, args.worktree_base)))
+        f = newest_jsonl(session_dir)
+        if f is None:
+            print("no session transcript found under %s" % session_dir, file=sys.stderr)
+            return 1
+        print(f)
+        return 0
 
     last_card = None
     last_file = None

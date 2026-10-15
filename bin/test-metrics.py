@@ -107,9 +107,15 @@ write_log(6, ts(140), outcome="declined (gated)", ended_in="Backlog")
 write_log(15, ts(135), outcome="awaiting rebuild", ended_in="In progress")
 
 # #7: died ticks, one per documented subtype
-write_log(7, ts(100), subtype="error_max_turns")
+path7 = write_log(7, ts(100), subtype="error_max_turns")
 write_log(8, ts(90), subtype="error_max_budget_usd")
-write_log(9, ts(80), subtype="error_during_execution")
+path9 = write_log(9, ts(80), subtype="error_during_execution")
+
+# card #143: two of the five dead ticks below (#7 and #9) have a session transcript
+# kept beside their own result log (bin/spawn.sh's keep_transcript); #8, #10 and #11 do
+# not — the shape a board-outage or a die-before-launch exit leaves.
+for p in (path7, path9):
+    open(p[: -len(".json")] + ".transcript.jsonl", "w").close()
 
 # #10: a killed tick that never flushed a result at all
 write_log(10, ts(70), empty=True)
@@ -174,6 +180,22 @@ check("error_max_budget_usd: 1", deaths.get("error_max_budget_usd") == 1)
 check("error_during_execution: 1", deaths.get("error_during_execution") == 1)
 check("unknown (empty + corrupt): 2", deaths.get("unknown") == 2, str(deaths.get("unknown")))
 check("a shipped card's ticks are not deaths", "success" not in deaths)
+
+print("4b. card #143: how many of the dead ticks have a transcript kept beside them")
+died = [t for t in ticks if t.died]
+kept = sum(1 for t in died if t.transcript_kept)
+check("2 of the 5 dead ticks (#7 and #9) have a transcript kept", kept == 2, str(kept))
+check("#7 (error_max_turns) has one", next(t for t in ticks if t.issue == 7).transcript_kept is True)
+check("#8 (error_max_budget_usd) does not", next(t for t in ticks if t.issue == 8).transcript_kept is False)
+check("#9 (error_during_execution) has one", next(t for t in ticks if t.issue == 9).transcript_kept is True)
+check("#10 (empty result) does not", next(t for t in ticks if t.issue == 10).transcript_kept is False)
+check("a shipped tick (#1) carries no transcript either", next(t for t in ticks if t.issue == 1).transcript_kept is False)
+
+report_buf = io.StringIO()
+metrics.report("transcript-lane", ticks, 8, out=report_buf)
+report_text = report_buf.getvalue()
+check("report() prints the total died with the kept count beside it",
+      "Died: 5 (2 with a transcript kept)" in report_text, report_text)
 
 print("5. turns/quota/elapsed per shipped card sums the whole episode")
 shipped = {s["issue"]: s for s in metrics.shipped_stats(issues)}

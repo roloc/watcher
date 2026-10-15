@@ -553,6 +553,7 @@ money he had been charged (September 19, 2026). The number was never a bill.
 | `awaiting-rebuild/<n>.noted` | the one FYI comment for that wait was posted; cleared the same way |
 | `logs/card-<n>-<ts>.json` | the tick's JSON result: `subtype`, `total_cost_usd` (quota, not a bill — see above), `num_turns`, `result` |
 | `logs/card-<n>-<ts>.stderr` | the tick's stderr |
+| `logs/card-<n>-<ts>.transcript.jsonl` | only on a non-`success` exit (card #143): a copy of the dead tick's own Claude Code session transcript, same stem as the `.json`/`.stderr` above. Over 50MB, the source path is written here instead of the content. Never written on a successful tick |
 
 ## How a tick ends
 

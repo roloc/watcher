@@ -41,7 +41,9 @@ What it reports, per lane:
   `how-it-works.md`, "How a tick ends" — `error_max_turns`, `error_max_budget_usd`,
   `error_during_execution`), grouped by that subtype. A log file that is missing, empty or
   will not parse counts here too, under `unknown` — the shape a genuinely killed process
-  leaves when it dies before flushing any result at all.
+  leaves when it dies before flushing any result at all. How many of those have a
+  `card-<n>-<ts>.transcript.jsonl` kept beside them (card #143) is its own count, next to
+  the total.
 - **Turns and quota per shipped card** — median and worst, summed across every tick a card
   took (not just its last — a card parked once and finished on a second tick counts both),
   for every card that reached Done.
@@ -95,7 +97,7 @@ def classify_ended_in(raw):
 
 class Tick:
     __slots__ = ("issue", "ts", "mtime", "subtype", "cost", "turns", "duration_ms",
-                 "outcome", "ended_in", "needs_steve", "tokens")
+                 "outcome", "ended_in", "needs_steve", "tokens", "transcript_kept")
 
     def __init__(self, issue, ts, mtime):
         self.issue = issue
@@ -109,6 +111,7 @@ class Tick:
         self.ended_in = None
         self.needs_steve = None
         self.tokens = None   # every token the tick moved: input, output, cache writes and reads
+        self.transcript_kept = False   # card #143: a sibling card-<n>-<ts>.transcript.jsonl exists
 
     @property
     def died(self):
@@ -147,6 +150,7 @@ def load_log(path):
     except OSError:
         mtime = ts
     t = Tick(issue, ts, mtime)
+    t.transcript_kept = os.path.exists(path[:-len(".json")] + ".transcript.jsonl")
     try:
         with open(path) as f:
             d = json.load(f)
@@ -345,8 +349,10 @@ def report(lane, ticks, weeks, out=sys.stdout):
 
     deaths = death_counts(ticks)
     if deaths:
+        kept = sum(1 for t in ticks if t.died and t.transcript_kept)
+        p(f"  Died: {sum(deaths.values())} ({kept} with a transcript kept)")
         for subtype, n in sorted(deaths.items(), key=lambda kv: -kv[1]):
-            p(f"  Died ({subtype}): {n} ({100 * n / len(ticks):.0f}% of ticks)")
+            p(f"    {subtype}: {n} ({100 * n / len(ticks):.0f}% of ticks)")
     else:
         p("  Died: 0")
 
