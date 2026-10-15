@@ -35,13 +35,15 @@ case "$1 $2" in
     done
     case "$json" in
       headRefOid) cat "$S/sha" ;;
-      files) cat "$S/files" ;;
-      body) cat "$S/body" ;;
       *) echo "stub gh: unhandled --json $json" >&2; exit 1 ;;
     esac
     ;;
   "api "*)
-    cat "$S/comments"
+    case "$*" in
+      *"/files"*) cat "$S/files" ;;
+      *"/comments"*) cat "$S/comments" ;;
+      *) echo "stub gh: unhandled api call: $*" >&2; exit 1 ;;
+    esac
     ;;
   *)
     echo "stub gh: unhandled call: $*" >&2

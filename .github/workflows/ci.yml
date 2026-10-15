@@ -120,6 +120,21 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
+    # `contents: read` above is the whole workflow's default; this job also needs to read
+    # the PR's own files and comments — reviewer findings here, confirmed against a real
+    # run on PR #148 (roloc/watcher): without this, every `gh pr view`/`gh api .../comments`
+    # call in bin/receipt-check.sh is denied ("Resource not accessible by integration"),
+    # which reads as "no clean receipt" for every PR, forever, never as the access error it
+    # actually is.
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    env:
+      # bin/floor.py is this repo's one screen (card #142, reviewer findings) — without
+      # this, a change to it would never need the `🤖 usability:` receipt the script
+      # otherwise supports.
+      RECEIPT_SCREEN_PATHS: bin/floor.py
     steps:
       - uses: actions/checkout@v4
       - name: A reviewer receipt for this exact commit

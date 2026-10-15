@@ -35,8 +35,9 @@ path_in() {
 }
 
 sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid)"
-files="$(gh pr view "$pr" --json files --jq '.files[].path')"
-body="$(gh pr view "$pr" --json body --jq .body)"
+# `gh pr view --json files` truncates past 100 files; `--paginate` on the REST endpoint
+# does not, so a large PR's later files still count toward needs_review.
+files="$(gh api --paginate "repos/{owner}/{repo}/pulls/$pr/files" --jq '.[].filename')"
 
 needs_review=0
 while IFS= read -r f; do
@@ -73,7 +74,6 @@ while IFS= read -r f; do
   [ -z "$f" ] && continue
   path_in "$f" $screen_paths && needs_usability=1
 done <<< "$files"
-case "$body" in *"## Screens"*) needs_usability=1 ;; esac
 
 if [ "$needs_usability" -eq 1 ]; then
   usability_line="$(newest_receipt '🤖 usability:')"
