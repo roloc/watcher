@@ -649,6 +649,59 @@ not_grep() { ! grep -q -- "$1" "$2"; }
 check "install canary: never attempted an HTTPS clone (the stub would have failed it)" \
       not_grep "could not read Username" "$TMP/install-out"
 
+# ============================================================================
+echo "install.sh's REPO_URL (card #157): once the watcher user exists, reading"
+echo "WATCHER_DIR's own origin runs as watcher, never as whoever invoked the script"
+# ============================================================================
+# Root running a plain `git -C "$WATCHER_DIR" remote get-url origin` on a release folder
+# `chown`'d to watcher (every real one autodeploy.sh builds) fails with "detected dubious
+# ownership" — review of this card's own PR: the first version of this derivation did
+# exactly that, which would have stopped every real deploy right here, root-swallowed by
+# `2>/dev/null` into the `WATCHER_REPO` required-value error instead of a working REPO_URL.
+# `$IBIN/su` (above) stands in for the real `su - watcher`, logging which user it was
+# asked for; a fake `id` reports the watcher account as existing, same as a real box past
+# its first install.
+cat > "$IBIN/id" <<'EOF'
+#!/usr/bin/env bash
+echo "id $*" >> "$CALLS"
+[ "$1" = watcher ]   # exit 0 only for the account this file cares about
+EOF
+chmod +x "$IBIN/id"
+cat > "$IBIN/su" <<EOF
+#!/usr/bin/env bash
+echo "su \$*" >> "\$CALLS"
+[ "\$1" = - ] && shift; shift; [ "\$1" = -c ] && shift
+exec "$REAL_GIT" -C "$IWATCHER" remote get-url origin
+EOF
+chmod +x "$IBIN/su"
+: > "$CALLS"
+WATCHER_DIR="$IWATCHER" INSTALL_LIB_ONLY=1 PATH="$IBIN:$PATH" bash -c \
+  "source '$INSTALL'; echo \"REPO_URL=\$REPO_URL\"" > "$TMP/repo-url-out" 2>&1
+check "existing watcher user: checks for the account first" called "id watcher"
+check "existing watcher user: reads the origin as watcher, not as root" \
+      called "su - watcher -c"
+check "existing watcher user: REPO_URL comes out right" \
+      grep -q "REPO_URL=https://github.com/roloc/watcher.git" "$TMP/repo-url-out"
+
+# Before the watcher account exists (the very first run — README's clone, then this
+# script, both as root, before `useradd` below ever fires), nothing has chowned anything
+# away from root yet: a plain call is correct, and `su` must never be reached for it.
+# A fake `id` that always reports "no such user" stands in for a fresh box — never just
+# removing the stub, which would fall through to whatever `id` really says about
+# `watcher` on the box this suite happens to run on.
+cat > "$IBIN/id" <<'EOF'
+#!/usr/bin/env bash
+echo "id $*" >> "$CALLS"
+exit 1
+EOF
+chmod +x "$IBIN/id"
+: > "$CALLS"
+WATCHER_DIR="$IWATCHER" INSTALL_LIB_ONLY=1 PATH="$IBIN:$PATH" bash -c \
+  "source '$INSTALL'; echo \"REPO_URL=\$REPO_URL\"" > "$TMP/repo-url-out2" 2>&1
+check "no watcher user yet: never calls su at all" not_called "su"
+check "no watcher user yet: REPO_URL still comes out right" \
+      grep -q "REPO_URL=https://github.com/roloc/watcher.git" "$TMP/repo-url-out2"
+
 # The history file: what the deployer said, where the floor page can read it (the page's
 # user cannot read the journal).
 fresh; T="$(commit bin/spawn.sh history-1)"

@@ -27,10 +27,26 @@ WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
 # yet, or a copy with no `.git` at all (README's "or rsync it in") — does this require
 # WATCHER_REPO.
 if [ -d "$WATCHER_DIR/.git" ]; then
-  # `|| true` on the git call itself, never on the assignment: under `set -e`, a failing
-  # command substitution inside a default-value expansion kills the script right here,
-  # before the `:?` below ever runs — silently, with none of this file's own messages.
-  REPO_URL="${WATCHER_REPO:-$(git -C "$WATCHER_DIR" remote get-url origin 2>/dev/null || true)}"
+  if [ -n "${WATCHER_REPO:-}" ]; then
+    REPO_URL="$WATCHER_REPO"
+  else
+    # Every other git call on $WATCHER_DIR in this file runs as the watcher user (see
+    # canary_clone's own comment below): git refuses to read a repo owned by someone
+    # else ("dubious ownership"), and by the time the watcher user exists, $WATCHER_DIR
+    # already is watcher's (autodeploy.sh's release folders always are — this ran as
+    # root straight on one once and broke every deploy). On the very first run, before
+    # `useradd` below has even happened, nothing has chowned anything yet, so whoever
+    # is running this script (root, per the header above) still owns the checkout it
+    # just made by hand — a plain call is correct there, and only there. `|| true` on
+    # the git call itself, never on the assignment: under `set -e`, a failing command
+    # substitution here would kill the script before the `:?` below ever runs —
+    # silently, with none of this file's own messages.
+    if id watcher >/dev/null 2>&1; then
+      REPO_URL="$(su - watcher -c "git -C '$WATCHER_DIR' remote get-url origin" 2>/dev/null || true)"
+    else
+      REPO_URL="$(git -C "$WATCHER_DIR" remote get-url origin 2>/dev/null || true)"
+    fi
+  fi
   : "${REPO_URL:?install.sh: could not read the git origin already at $WATCHER_DIR, and WATCHER_REPO is unset — set WATCHER_REPO=<the git URL of your fork>}"
 else
   REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> — $WATCHER_DIR is missing, or not a git checkout (a copy made by rsync has no origin to read), so there is nothing to derive it from}"
