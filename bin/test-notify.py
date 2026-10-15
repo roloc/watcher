@@ -299,6 +299,13 @@ check("digest: posts to slack too", len(sent) == 2 and sent[1][2] == "slack")
 check("digest: the whole message lands in the one block, verbatim markdown aside",
       notify._slack_mrkdwn(DIGEST_TEXT) in sent[1][1]["blocks"][0]["text"]["text"])
 
+sent.clear()
+weird = dict(CARD, title="A <script> & B > C")
+notify.post("released", weird)
+block = sent[1][1]["blocks"][0]["text"]["text"]
+check("a title with '&', '<', '>' is escaped, not left to break the Slack link",
+      "<script>" not in block and "&lt;script&gt;" in block and "&amp;" in block)
+
 print("8b. Slack on its own, and both off together")
 saved_discord = os.environ.pop("DISCORD_WEBHOOK_URL")
 sent.clear()

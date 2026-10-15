@@ -149,7 +149,11 @@ def build(kind, card, detail="", pr=None, board_url=""):
 
 
 def _slack_mrkdwn(s):
-    # Discord's `**bold**` is Slack's `*bold*`; nothing else in these messages uses markdown.
+    # Slack's own escaping rule, applied before anything else: `&`, `<` and `>` are
+    # special in mrkdwn (a raw `<` or `>` from a card title would otherwise read as the
+    # start of a link or a mention). Discord's `**bold**` is Slack's `*bold*`; nothing
+    # else in these messages uses markdown.
+    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return re.sub(r"\*\*(.+?)\*\*", r"*\1*", s)
 
 
@@ -165,7 +169,8 @@ def build_slack(kind, card, detail="", pr=None, board_url=""):
         mention = (os.environ.get("SLACK_MENTION") or "").strip()
         if mention:
             lead = f"{mention} {lead}"
-    link = f"<{m['url']}|{m['label']}>" if m["url"] else m["label"]
+    label = _slack_mrkdwn(m["label"])
+    link = f"<{m['url']}|{label}>" if m["url"] else label
     body = _slack_mrkdwn(m["body"])
     text = f"{lead}\n{link}\n{body}"[:SLACK_TEXT_MAX]
     return {"text": lead[:SLACK_TEXT_MAX],

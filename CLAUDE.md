@@ -133,14 +133,15 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   same trap. A command a stock Mac does not ship (`timeout`, `flock`) gets a stand-in in
   the suite, the way `test-deploy.sh` stubs `flock`, not a fallback in the script.
 - No permission prompts exist on the box. Nothing in the tick may depend on one.
-- Discord is a repeater, never a record: a post happens after the board change lands, a
-  failed post is one stderr line and nothing else, and no message goes out per poll or
-  per tick. **It is for stuck, broken, and the Monday digest only** — a move to Stuck, a
-  run that died, a card the detector filed, or `bin/metrics.py --post`'s weekly numbers
-  (card #139, the one post on a clock instead of an event, named as a future possibility
-  in `metrics.py`'s own header since it was written). A new kind of post needs one of
-  those three to be true of it; progress belongs on the floor page (October 1, 2026). The
-  webhook URL is a secret; it lives in `/etc/watcher/env`, never in git.
+- Discord/Slack is a repeater, never a record: a post happens after the board change
+  lands, a failed post is one stderr line and nothing else, and no message goes out per
+  poll or per tick. **It is for stuck, broken, and the Monday digest only** — a move to
+  Stuck, a run that died, a card the detector filed, or `bin/metrics.py --post`'s weekly
+  numbers (card #139, the one post on a clock instead of an event, named as a future
+  possibility in `metrics.py`'s own header since it was written). A new kind of post
+  needs one of those three to be true of it; progress belongs on the floor page
+  (October 1, 2026). A webhook URL is a secret, whichever channel it is for; it lives in
+  `/etc/watcher/env`, never in git.
 - American English in every file. Dates like September 7, 2026.
 
 ## When the watcher works its own board
