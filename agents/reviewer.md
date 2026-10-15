@@ -113,10 +113,17 @@ Then the project's own standing traps, which its `CLAUDE.md` lists.
 
 ## Output
 
-Blocking findings first: file:line, the concrete failure, **confirmed** or **plausible**.
-Then nits, one line each, at most five. If nothing blocks, the first line is
-"No blocking findings." Keep the whole report under 400 words. Do not manufacture
-findings to look useful; a short clean report is the good outcome.
+**The first line is the receipt.** `Reviewed <SHA>: no blocking findings` or
+`Reviewed <SHA>: blocking`, where `<SHA>` is the exact head commit of the worktree you were
+handed (`git rev-parse HEAD`) — the full 40-character hash, not the short form. The tick
+posts this line verbatim as a PR comment (`commands/watch.md` §3), and
+`bin/receipt-check.sh`'s `review-receipt` CI check reads it back to confirm the commit that
+merges is the one you actually reviewed, so get the SHA right: it names the commit in your
+own worktree at the moment you run, never one from the PR body or the plan.
+
+Blocking findings next: file:line, the concrete failure, **confirmed** or **plausible**.
+Then nits, one line each, at most five. Keep the whole report under 400 words. Do not
+manufacture findings to look useful; a short clean report is the good outcome.
 
 ## For Steve
 

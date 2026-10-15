@@ -50,7 +50,7 @@ jobs:
       # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/shim/claude bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/eval.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh bin/test-eval-ledger.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh evals/cases/*.sh; do
+          for f in bin/spawn.sh bin/shim/claude bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/eval.sh bin/receipt-check.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh bin/test-eval-ledger.sh bin/test-receipt.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh evals/cases/*.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 
@@ -96,3 +96,33 @@ jobs:
 
       - name: The lane-tail suite
         run: bash bin/test-tail.sh
+
+      - name: The review-receipt suite
+        run: bash bin/test-receipt.sh
+
+  # Card #142: a code PR used to merge on the tick's own say-so that `reviewer` ran — CI
+  # had no way to see whether it actually had, or whether the branch was amended after.
+  # This job is the independent half: it never trusts the tick, only the PR's own comments
+  # and its own current head commit. It runs as its own job (not a `verify` step) so it
+  # reports as its own named check, becomes a required check in branch protection
+  # alongside `verify` (a repo setting — Settings → Branches — not something this file can
+  # set for itself), and evaluates fresh on every push: an amend with no new receipt is a
+  # fresh run with nothing to find, so it reports red on its own, no tick involved.
+  #
+  # It runs independently of `verify`, not after it, and finishes in seconds — reading a
+  # few PR comments, nothing it builds or tests — so on an ordinary push it concludes
+  # (red: no receipt posted yet) long before `verify` does. `commands/watch.md` §3 is what
+  # turns it green: once `reviewer` posts its receipt comment, the tick reruns this job
+  # (`gh run rerun --failed`) against the same commit and waits for it again. A docs-only
+  # PR that touches no part of the merge gate is exempt — `bin/receipt-check.sh` says so
+  # itself and exits 0 on the first run, never red at all.
+  review-receipt:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: A reviewer receipt for this exact commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash bin/receipt-check.sh "${{ github.event.pull_request.number }}"

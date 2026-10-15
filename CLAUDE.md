@@ -73,6 +73,14 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   twice is held and never deployed. The playbook: every future incident that changes one of those
   three files adds its case in the same PR (`bin/eval.sh`'s own header has the how-to, and
   the caveat about what a case does and does not prove).
+- `bin/receipt-check.sh` — the `review-receipt` CI check (card #142): a code PR cannot
+  merge without a `🤖 reviewer:` comment (`commands/watch.md` §3 posts it) naming the PR's
+  exact head commit with a clean verdict, and a screen change needs a matching
+  `🤖 usability:` one too. Independent of the tick that opened the PR — it reads only the
+  PR's own comments and its own current head SHA — so an amend after the review, or a
+  review that never ran, fails it instead of merging silently. Required alongside `verify`
+  in `.github/workflows/ci.yml`'s `review-receipt` job. `bash bin/test-receipt.sh` is its
+  offline suite (CI runs it); run it after touching the file.
 - `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
   (`steve-cheat-sheet.md`).
 - `deploy/autodeploy.sh` — **the deploy path.** A timer on the box (`watcher-deploy.timer`)
@@ -209,7 +217,8 @@ above:
   all of these merges since I am only involved at the card / feature level"). The gate is
   `.github/workflows/`, `agents/reviewer.md`, `agents/usability.md`, the ship-and-merge rules in
   `commands/watch.md` §3, "Hard rules for every agent" in `docs/how-it-works.md`,
-  everything under `deploy/`, and the replay suite (`bin/eval.sh`, `evals/`). A change to
+  everything under `deploy/`, `bin/receipt-check.sh` (the `review-receipt` required check,
+  card #142), and the replay suite (`bin/eval.sh`, `evals/`). A change to
   any of it **always gets the reviewer**, even when it looks like prose or config, and
   anything that **weakens** it — drops a check, loosens a condition, removes or edits a
   replay case so it passes more easily — is a blocking finding, never a nit. **For the gate

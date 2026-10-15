@@ -63,7 +63,13 @@ though a human reading the file would say it obviously does.
   hook, `agents/reviewer.md` if the project keeps its own, any replay/eval suite>. A change
   to any of it always gets the reviewer pass, even when it reads as prose or config, and
   anything that weakens it (drops a check, loosens a condition, makes a test easier to
-  pass) is a blocking finding, never a nit.
+  pass) is a blocking finding, never a nit. Add its own `review-receipt` CI job, running
+  `bin/receipt-check.sh` (card #142): a required check, alongside the one named above,
+  that a code PR cannot merge without — it reads the `🤖 reviewer:`/`🤖 usability:`
+  comments `commands/watch.md` §3 posts and fails a PR whose newest one does not name the
+  exact commit about to merge. `RECEIPT_GATE_PATHS` and `RECEIPT_SCREEN_PATHS` (its own
+  header) are what point it at this project's own gate and screen paths if they differ
+  from the watcher's own defaults.
 
 - **Contracts a builder must not touch.** <Name anything a tick is never allowed to decide
   for itself — a data contract between services, a pricing rule, a migration, a public API

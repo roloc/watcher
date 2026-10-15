@@ -330,17 +330,20 @@ it. The page drew nothing.)
 
 **That picture gets a second pair of eyes before `reviewer`'s.** Once the shots exist for
 a PR that must ship with its picture (above), call `usability` — hand it only the card's
-first line, its `You get` line, and the shots (phone first, both themes). It has no tools
-of its own to fetch anything, so if a live page exists, take a phone-width shot of it
-yourself first (`browse.py shot`, same as above) and hand it that picture too — never the
-live URL, and never the diff, the plan, or the test results: that is the whole point of
-the pass, so it cannot nod along with what you think you built. Fix a blocking finding the
-way you fix a blocking `reviewer` finding; disagree with one and it is Stuck (§4), the
-same as `reviewer`'s. Then, when you call `reviewer` on the same change, tell it whether
-`usability` ran and what it found — `reviewer` treats a screen change with no `usability`
-verdict as blocking, the same as one nobody ever rendered. A docs-only PR, or one that
-touches no screen, never gets `usability` — same gate as `reviewer`'s own screen rule,
-immediately above.
+first line, its `You get` line, the shots (phone first, both themes), and the exact commit
+SHA this verdict is for (`git rev-parse HEAD`, the commit you are about to push — compute
+it last, so nothing changes under it before the push). It has no tools of its own to fetch
+anything, so if a live page exists, take a phone-width shot of it yourself first
+(`browse.py shot`, same as above) and hand it that picture too — never the live URL, and
+never the diff, the plan, or the test results: that is the whole point of the pass, so it
+cannot nod along with what you think you built. Fix a blocking finding the way you fix a
+blocking `reviewer` finding — and re-run `usability` on the fixed worktree's new SHA before
+you push, since the SHA moved; disagree with one and it is Stuck (§4), the same as
+`reviewer`'s. Keep its receipt line (§3 posts it once the PR exists). Then, when you call
+`reviewer` on the same change, tell it whether `usability` ran and what it found —
+`reviewer` treats a screen change with no `usability` verdict as blocking, the same as one
+nobody ever rendered. A docs-only PR, or one that touches no screen, never gets
+`usability` — same gate as `reviewer`'s own screen rule, immediately above.
 
 **Route a design card before building it.** In a project with a **triage lane**
 (`LANE_COMMAND=/triage` — see `how-it-works.md`, "Lanes"; riffmap has one) an unlabeled
@@ -387,6 +390,11 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
+- **The moment the PR exists, post any receipt you already hold.** If the change touched
+  a screen, `usability` already ran (above) and its first line is the receipt — post it
+  now, verbatim, as `gh pr comment <pr> --body "🤖 usability: <that line>"`. A code PR
+  carries no `reviewer` receipt yet; that comes after CI (below). A docs-only PR, or one
+  that touched no screen, posts nothing here.
 - **If §2 gave the card a plan, the PR body carries it too**, under `## Plan` — the real
   file list and the real check this time: the FYI comment left the files out and put
   the check in plain words. Diverged
@@ -465,8 +473,17 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   merged PRs, every link green, and the meeting looked exactly the same at the end as it
   did in the sentence that started it.)
 - Wait for the project's **required CI check** (its `CLAUDE.md` names it) **in the
-  foreground** — `gh pr checks <pr> --watch --interval 60 --fail-fast` blocks until it
-  finishes — then run the verify block and `reviewer`, below, before merging. **Always
+  foreground** — `gh pr checks <pr> --watch --interval 60` blocks until every check on the
+  PR reaches a final state. **Never add `--fail-fast` here**: a code PR also carries
+  `review-receipt` (card #142, below), which is expected to still be failing at this point
+  — nothing has posted a receipt for this commit yet — and `--fail-fast` would read that
+  as the required check failing before the one you are actually waiting on even finishes.
+  Once `--watch` returns, read the named check's own result, never the command's overall
+  exit code: `gh pr checks <pr> --json name,bucket --jq '.[] | select(.name=="<name>") |
+  .bucket'`. Treat only that check as "the required CI check" for the "fails twice is
+  Stuck" rule (§4) — `review-receipt` is handled on its own, below, and a first failure
+  there is not a CI failure, it is the normal, expected state of a commit nobody has
+  reviewed yet. Then run the verify block and `reviewer`, below, before merging. **Always
   pass `--interval 60`**: left at its own default, `--watch` polls GraphQL every 10 seconds,
   which is 90 queries for one ordinary 15-minute CI run — most of an hour's GraphQL budget
   on watching a check box turn green (card #98). 60 seconds costs the same wait a tenth of
@@ -479,7 +496,9 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   notification — the process is gone — and the spawner has to release the card and spend a
   second tick merging a PR that was already green (riffmap#305, September 14, 2026). Run
   the wait in the foreground and keep the turn. Subagents run in the foreground only.
-  `main` requires 0 approvals; CI is the required check; `reviewer`, and `usability` for a
+  `main` requires 0 approvals; the project's own CI check is the required check that
+  decides whether the change is good; `review-receipt` is a second required check that
+  only your own later steps (below) can turn green; `reviewer`, and `usability` for a
   screen change, are the only other gates and each runs once.
 - **Once CI is green, run the verify block before `reviewer`.** The block is the one the
   card carried, or the one you wrote into the plan (§2) — a fenced ` ```verify ` block of
@@ -497,15 +516,39 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   PR itself; `gh pr view <pr> --json body` is the ground truth, the invocation's own copy
   is a convenience), so it reads the real result instead of a promise. A block that could
   not fail (no real command, or one that always exits 0) is the same as no block — reject
-  it the same way you would a missing one, never treat a trivial pass as done. Fix what
-  `reviewer` marks blocking, push, wait for CI again, re-run the block, and call `reviewer`
-  once more on that fix only; take or leave the nits. Then `gh pr merge --squash
-  --delete-branch`.
+  it the same way you would a missing one, never treat a trivial pass as done.
+  **Post `reviewer`'s first line verbatim as a PR comment the moment it returns** —
+  `gh pr comment <pr> --body "🤖 reviewer: <that line>"` — before you decide what to do
+  with its findings; that comment is the receipt `bin/receipt-check.sh`'s `review-receipt`
+  check reads, and it names the commit you just pushed, so post it whether the verdict is
+  clean or blocking.
+  **Then make `review-receipt` look again.** It already ran and failed, the moment you
+  pushed — before this comment existed — and a comment alone never re-triggers a GitHub
+  Actions job. `gh run list --branch <branch> --workflow CI --limit 1 --json databaseId
+  --jq '.[0].databaseId'` names the run this push started; `gh run rerun <that id>
+  --failed` reruns only the jobs that failed, `review-receipt` among them, against the
+  exact same commit — never a new push, never a new SHA. Poll it the same way as the
+  first wait, never tighter than every 60 seconds: `gh pr checks <pr> --json name,bucket
+  --jq '.[] | select(.name=="review-receipt") | .bucket'` until it reports `pass`. A
+  `fail` here is never a merge, the same as the project's own CI check failing twice —
+  that is **Stuck** (§4), with what `bin/receipt-check.sh` actually printed (`gh run view
+  <run id> --log | grep receipt-check` if you need the exact line). A docs-only PR that
+  never got a `reviewer` receipt skips all of this — `review-receipt` exempted it on the
+  very first run, so it is already `pass`. Fix what `reviewer` marks blocking, push, wait
+  for CI again, re-run the block, and call `reviewer` once more on that fix only — its SHA
+  moved, so its new first line is a new receipt: post it, then rerun and confirm
+  `review-receipt` green the same way, once more. Take or leave the nits. Then `gh pr
+  merge --squash --delete-branch`.
 - **`main` may move under you** while you work — the other lane merges its own PRs, and so
   does Steve. Before merging, and again if the merge is refused as not mergeable:
   `git fetch origin && git -c merge.conflictStyle=diff3 merge origin/main`. If git merges
-  it cleanly, push, wait for CI again, re-run the verify block and update `## Verify`, then
-  merge. If it leaves conflict markers, read
+  it cleanly, push, wait for CI again, re-run the verify block and update `## Verify`; if
+  the PR already carries a `reviewer` receipt (it got one at all, above), call `reviewer`
+  once more and post its new receipt the same way — the merge moved the head SHA, so the
+  old receipt no longer names the commit about to merge, however unchanged the reviewable
+  diff actually is — then rerun and confirm `review-receipt` green the same way (above: a
+  new push gets a new CI run, so this is a new run id to find), then merge. If it leaves
+  conflict markers, read
   every hunk — `diff3` shows three blocks: yours, the base both branches started from, and
   main's — and sort the conflict into one of two kinds:
   - **Additive: both sides added, nobody rewrote.** In every hunk each side is the base
@@ -515,7 +558,9 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     entries in a list of mockups, two sections at the end of a doc, two test cases — not
     two versions of one thing. Resolve it yourself: the base text, then main's addition,
     then yours; delete the markers; commit the merge; push; wait for CI; re-run the verify
-    block and update `## Verify`; merge. Leave one
+    block and update `## Verify`; if the PR already carries a `reviewer` receipt, call it
+    once more, post the new one, and rerun and confirm `review-receipt` green, same reason
+    as above; merge. Leave one
     comment **on the PR, not on the card** — `gh pr comment <pr> --body "🤖 FYI: merged
     main; kept both sides of an additive conflict in <file>."` It is a note about the
     merge, for whoever reads the PR later; the card is where Steve reads, and it needs

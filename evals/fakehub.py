@@ -252,12 +252,91 @@ def gh_pr_edit(argv, cwd):
     print(pr["url"])
 
 
-def gh_pr_checks(argv):
+# --- review-receipt (card #142) --------------------------------------------------------
+# A Python-only re-implementation of bin/receipt-check.sh's own decision, close enough for
+# the replay suite: the real script only ever runs inside real GitHub Actions, never here.
+# `gh pr checks`'s simulated `review-receipt` bucket is recomputed fresh on every call —
+# never cached — so a rerun (`gh run rerun`, below) has nothing to actually do: the next
+# `gh pr checks` call already reflects whatever comment exists by then.
+
+RECEIPT_GATE_DEFAULT = ("commands/watch.md agents/reviewer.md agents/usability.md "
+                         "docs/how-it-works.md .github/workflows deploy evals bin/eval.sh")
+
+
+def _changed_files(cwd):
+    r = run(["git", "diff", "--name-only", "origin/main...HEAD"], cwd=cwd, check=False)
+    return [l for l in r.stdout.splitlines() if l]
+
+
+def _path_in(f, paths):
+    return any(f == p or f.startswith(p + "/") for p in paths)
+
+
+def review_receipt_bucket(pr, sha, cwd):
+    gate = os.environ.get("RECEIPT_GATE_PATHS", RECEIPT_GATE_DEFAULT).split()
+    screens = os.environ.get("RECEIPT_SCREEN_PATHS", "").split()
+    files = _changed_files(cwd)
+    needs_review = any(not f.endswith(".md") or _path_in(f, gate) for f in files)
+    if not needs_review:
+        return "pass"
+    comments = pr.get("comments", [])
+    reviewer_lines = [c for c in comments if c.startswith("🤖 reviewer:")]
+    if not reviewer_lines or f"Reviewed {sha}: no blocking findings" not in reviewer_lines[-1]:
+        return "fail"
+    needs_usability = any(_path_in(f, screens) for f in files) or "## Screens" in (pr.get("body") or "")
+    if needs_usability:
+        usability_lines = [c for c in comments if c.startswith("🤖 usability:")]
+        if not usability_lines or f"Usability {sha}: no blocking findings" not in usability_lines[-1]:
+            return "fail"
+    return "pass"
+
+
+def _find_pr(d, pos, cwd):
+    if pos and pos[0].lstrip("#").isdigit():
+        return d["prs"][pos[0].lstrip("#")]
+    branch = current_branch(cwd)
+    cands = [p for p in d["prs"].values() if p["head"] == branch]
+    if not cands:
+        die(f"no pull request found for branch {branch!r}")
+    return cands[0]
+
+
+def gh_pr_checks(argv, cwd):
+    pos, flags = parse_flags(argv)
+    d = load()
+    pr = _find_pr(d, pos, cwd)
+    sha = run(["git", "rev-parse", "HEAD"], cwd=cwd).stdout.strip()
+    checks = [
+        {"name": "verify", "bucket": "pass"},
+        {"name": "review-receipt", "bucket": review_receipt_bucket(pr, sha, cwd)},
+    ]
+
+    if "json" in flags:
+        jq = flags.get("jq", "")
+        m = re.match(r'\.\[\]\s*\|\s*select\(\.name=="([^"]+)"\)\s*\|\s*\.bucket', jq)
+        if m:
+            for c in checks:
+                if c["name"] == m.group(1):
+                    print(c["bucket"])
+            return
+        print(json.dumps(checks))
+        return
+
     if CI_FAIL_ONCE and not os.environ.get("FAKEHUB_CI_FAILED_ONCE_MARKER_SEEN"):
         # Not wired to a real second run across processes; today's cases never set
         # FAKEHUB_CI_FAIL_ONCE. Left explicit rather than silently unsupported.
         die("some checks were not successful (simulated)")
+    if any(c["bucket"] == "fail" for c in checks):
+        die("some checks were not successful (simulated)")
     print("All checks were successful")
+
+
+def gh_run_list(argv, cwd):
+    print(json.dumps([{"databaseId": 1}]))
+
+
+def gh_run_rerun(argv, cwd):
+    print("rerun requested (simulated — review-receipt recomputes on the next check)")
 
 
 CLOSES_RE = re.compile(
@@ -354,10 +433,12 @@ GH_DISPATCH = {
     ("pr", "list"): lambda argv, cwd: gh_pr_list(argv, cwd),
     ("pr", "comment"): lambda argv, cwd: gh_pr_comment(argv, cwd),
     ("pr", "edit"): lambda argv, cwd: gh_pr_edit(argv, cwd),
-    ("pr", "checks"): lambda argv, cwd: gh_pr_checks(argv),
+    ("pr", "checks"): lambda argv, cwd: gh_pr_checks(argv, cwd),
     ("pr", "merge"): lambda argv, cwd: gh_pr_merge(argv, cwd),
     ("label", "list"): lambda argv, cwd: gh_label_list(argv),
     ("api", None): lambda argv, cwd: gh_api(argv),
+    ("run", "list"): lambda argv, cwd: gh_run_list(argv, cwd),
+    ("run", "rerun"): lambda argv, cwd: gh_run_rerun(argv, cwd),
 }
 
 

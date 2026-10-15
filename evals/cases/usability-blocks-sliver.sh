@@ -146,6 +146,14 @@ case_check() {
     else
       flunk "usability-sliver: shipped, but site/index.html on main has no Retries column" "$main_html"
     fi
+    # Card #142: a code PR cannot merge without a `reviewer` receipt naming its own head
+    # commit, posted as a PR comment. This case ships a real (non-docs) file, so it is the
+    # one exercising that path for real, not the docs-only happy-path case.
+    if grep -qE 'pr comment.*🤖 reviewer: Reviewed [0-9a-f]{7,40}: no blocking findings' "$EVAL_LOG"; then
+      pass "usability-sliver: posted a reviewer receipt naming a head commit before merging"
+    else
+      flunk "usability-sliver: no reviewer receipt comment in the gh log" "$(grep 'pr comment' "$EVAL_LOG")"
+    fi
     if printf '%s' "$main_html" | grep -qi '#fff'; then
       flunk "usability-sliver: shipped with the exact pre-existing invisible-column rule, untouched" \
         "the watcher#96 shape — the last column is still white-on-white on phone"
