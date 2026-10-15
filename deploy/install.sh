@@ -21,14 +21,19 @@ WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
 # WATCHER_CANARY_DIR already use (card #46).
 WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
 # Card #157: no fork should ever clone `roloc/watcher` by default. When $WATCHER_DIR is
-# already a checkout (the ordinary by-hand install: clone your own fork there first, per
-# README, then run this), its own `origin` IS the fork's URL, so that is read instead of
-# asked for. Only the from-nothing case — nothing at $WATCHER_DIR yet, so there is no
-# checkout to read — requires WATCHER_REPO.
+# already a git checkout (the ordinary by-hand install: clone your own fork there first,
+# per README, then run this), its own `origin` IS the fork's URL, so that is read instead
+# of asked for. Only when there is no checkout to read one from — nothing at $WATCHER_DIR
+# yet, or a copy with no `.git` at all (README's "or rsync it in") — does this require
+# WATCHER_REPO.
 if [ -d "$WATCHER_DIR/.git" ]; then
+  # `|| true` on the git call itself, never on the assignment: under `set -e`, a failing
+  # command substitution inside a default-value expansion kills the script right here,
+  # before the `:?` below ever runs — silently, with none of this file's own messages.
   REPO_URL="${WATCHER_REPO:-$(git -C "$WATCHER_DIR" remote get-url origin 2>/dev/null || true)}"
+  : "${REPO_URL:?install.sh: could not read the git origin already at $WATCHER_DIR, and WATCHER_REPO is unset -- set WATCHER_REPO=<the git URL of your fork>}"
 else
-  REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> -- $WATCHER_DIR does not exist yet, so there is no checkout to read an origin from}"
+  REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> -- $WATCHER_DIR is missing, or not a git checkout (a copy made by rsync has no origin to read), so there is nothing to derive it from}"
 fi
 
 # canary_clone: makes $WATCHER_CANARY_DIR a clone of $WATCHER_DIR — fast, local, no network

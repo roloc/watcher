@@ -278,8 +278,9 @@ Three rules keep it cheap:
 - **A finding that recurs becomes a gate.** Two sweeps running with the same section means
   the check belongs in `ci.yml`, where a PR cannot land it. The sweep should shrink.
 
-Run it by hand from any checkout: `bin/hygiene.sh` (needs `gh`), or
-`bin/hygiene.sh --no-remote` to skip the branch check.
+Run it by hand from any checkout: `bin/hygiene.sh` (needs `gh` and `GITHUB_REPOSITORY`
+set — GitHub Actions sets the latter itself, so export it by hand for a local run), or
+`bin/hygiene.sh --no-remote` to skip the branch check and need neither.
 
 ## Deploys happen by themselves
 

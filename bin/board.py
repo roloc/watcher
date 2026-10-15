@@ -78,9 +78,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notify  # noqa: E402  (bin/notify.py, beside this file)
 
 OWNER = os.environ.get("BOARD_OWNER")
-if not OWNER:
-    sys.exit("board.py: BOARD_OWNER is required — set it in the project's env file to "
-              "the login or org that owns its GitHub Projects board.")
+# Card #157: no silent "roloc" default — but required lazily, not at import, so the
+# handful of subcommands that never touch a board (ask/images/plan/ratelimit/ledger —
+# bin/floor.py execs these with no BOARD_OWNER in their environment on purpose, since
+# they only read an issue's own comments or a cache file) keep working with none set.
+# `_require_owner()` is the one place that actually needs OWNER to mean something:
+# `items()`, `project()` and the sweep stamp, below.
+def _require_owner():
+    if not OWNER:
+        sys.exit("board.py: BOARD_OWNER is required — set it in the project's env file to "
+                  "the login or org that owns its GitHub Projects board.")
+    return OWNER
 # Card #154: a Stuck/park comment addresses a GitHub login instead of the word "Steve" —
 # `Needs @<login>:` — going forward, but every comment already on a board before this
 # shipped still says the old `Needs Steve:`. Every reader of a Needs-shaped comment
@@ -91,7 +99,10 @@ NUMBER = int(os.environ.get("BOARD_NUMBER") or 1)
 STAGE_FIELD = "Stage"
 STATUS_FIELD = "Status"
 STUCK_STATUS = "Stuck - Needs help"
-BOARD_URL = f"https://github.com/users/{OWNER}/projects/{NUMBER}"
+
+
+def _board_url():
+    return f"https://github.com/users/{_require_owner()}/projects/{NUMBER}"
 
 
 # --- the board cache (card #98) ---------------------------------------------------------
@@ -417,6 +428,7 @@ def gh(query, **vars):
 
 
 def project(fresh=False):
+    _require_owner()
     name = _project_cache_name()
     sec = _project_cache_sec()
     if not fresh:
@@ -478,6 +490,7 @@ def _stale_or_die(name, err, what):
 
 
 def items(fresh=False):
+    _require_owner()
     name = _items_cache_name()
     sec = _board_cache_sec()
     if not fresh and sec > 0:
@@ -863,7 +876,7 @@ def announce(kind, card, detail="", with_pr=False):
         return
     pr = pr_for(card["number"]) if with_pr else None
     notify.post(kind, card, detail=detail, pr=pr,
-                board_url=BOARD_URL if kind == "stuck" else "")
+                board_url=_board_url() if kind == "stuck" else "")
 
 
 QUEUE_STAGE = "Waiting"

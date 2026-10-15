@@ -650,7 +650,7 @@ real = REAL_SUBPROCESS_RUN([sys.executable, os.path.join(HERE, "board.py"), "lis
 check("exits 1, not 0", real.returncode == 1, real.returncode)
 check("one clear line naming BOARD_OWNER, on stderr",
       "BOARD_OWNER is required" in real.stderr, real.stderr)
-check("never falls back to roloc or any other board", "roloc" not in real.stderr, real.stderr)
+check("never queries any board — nothing at all on stdout", real.stdout == "", real.stdout)
 
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES ABOVE'}")
 sys.exit(fails)
