@@ -173,10 +173,10 @@ case_check() {
     pass "usability-sliver: found it could not fix the phone shot in scope and asked, instead of shipping it"
     local comments
     comments="$(state issues.100.comments)"
-    if printf '%s' "$comments" | grep -q 'Needs Steve:'; then
+    if printf '%s' "$comments" | grep -q 'Needs @fixture-owner:'; then
       pass "usability-sliver: Stuck comment keeps the Steve shape"
     else
-      flunk "usability-sliver: no 'Needs Steve:' comment" "$comments"
+      flunk "usability-sliver: no 'Needs @fixture-owner:' comment" "$comments"
     fi
   else
     flunk "usability-sliver: neither cleanly shipped nor cleanly stuck" \

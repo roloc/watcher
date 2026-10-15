@@ -89,6 +89,23 @@ check("exactly the one mockup link, not the live page, the PR, or the folded ima
 check("needs_steve_ask still reads the same comment's first line",
       board.needs_steve_ask(1) == "**Needs Steve: pick a direction**", board.needs_steve_ask(1))
 
+print("1b. card #154: a 'Needs @<login>:' comment reads exactly like a 'Needs Steve:' one")
+COMMENTS[40] = [
+    "🤖 **Needs Steve: first ask, before this box named a login**\n\n**Look:**\n"
+    "- old mockup: https://example.com/old.png\n\n**Question: a?**",
+    "A, go with option A.",
+    "🤖 **Needs @octocat: second ask, OWNER_LOGIN=octocat now**\n\n**Look:**\n"
+    "- new mockup: https://example.com/new.png\n\n**Question: b?**",
+]
+check("needs_steve_ask reads the newest round, whichever form it's in",
+      board.needs_steve_ask(40) == "**Needs @octocat: second ask, OWNER_LOGIN=octocat now**",
+      board.needs_steve_ask(40))
+check("needs_steve_images reads the newest round's picture too",
+      board.needs_steve_images(40) == ["https://example.com/new.png"], board.needs_steve_images(40))
+rounds40 = board.needs_steve_rounds(40)
+check("needs_steve_rounds finds both rounds, old form and new, newest first",
+      len(rounds40) == 2, rounds40)
+
 print("2. no Needs Steve comment at all: both empty, never a crash")
 COMMENTS[2] = ["just a regular comment", "🤖 FYI: routine update, nothing needed"]
 check("needs_steve_images: []", board.needs_steve_images(2) == [])

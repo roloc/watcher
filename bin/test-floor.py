@@ -968,6 +968,55 @@ check("root mode's worktree_base is PROJECT_ROOT itself",
 check("a bad LANE_WORKDIR falls back to 'card', not a crashed page",
       wd_lanes["bad-mode"]["workdir_mode"] == "card")
 
+print("19b. card #154: OWNER_LOGIN — defaults to BOARD_OWNER, a fork can name its own")
+OL_ROOT = tempfile.mkdtemp(prefix="watcher-floor-ownerlogin-test-")
+OL_PROJECTS = os.path.join(OL_ROOT, "projects")
+OL_STATE = os.path.join(OL_ROOT, "state")
+os.makedirs(OL_PROJECTS)
+os.makedirs(OL_STATE)
+
+
+def ol_env(name, body):
+    with open(os.path.join(OL_PROJECTS, f"{name}.env"), "w") as f:
+        f.write(body)
+
+
+ol_env("no-override", f"""\
+PROJECT_NAME=no-override
+PROJECT_ROOT={OL_ROOT}/repo
+BOARD_OWNER=roloc
+PROJECT_REPO=roloc/no-override
+BOARD_NUMBER=20
+""")
+ol_env("forked", f"""\
+PROJECT_NAME=forked
+PROJECT_ROOT={OL_ROOT}/repo2
+BOARD_OWNER=roloc
+OWNER_LOGIN=octocat
+PROJECT_REPO=roloc/forked
+BOARD_NUMBER=21
+""")
+
+ol_lanes = {l["lane"]: l for l in floor.discover_lanes(OL_PROJECTS, OL_STATE)}
+check("no OWNER_LOGIN line at all: falls back to BOARD_OWNER (the old form every board "
+      "already has) rather than an empty login",
+      ol_lanes["no-override"]["owner_login"] == "roloc", ol_lanes["no-override"])
+check("OWNER_LOGIN set: a fork's own login, independent of BOARD_OWNER",
+      ol_lanes["forked"]["owner_login"] == "octocat", ol_lanes["forked"])
+
+ol_dir = lane_dir("forked")
+write_log(ol_dir, 98, 5, ended_in="Stuck - Needs help", needs_steve="yes — pick one")
+ol_lanes["forked"]["state_dir"] = ol_dir
+ol_tick = metrics.load_lane(ol_dir)[-1]
+ol_items = {98: {"number": 98, "url": "https://github.com/roloc/forked/issues/98",
+                 "status": "Stuck - Needs help", "state": "OPEN"}}
+ol_desk = floor.lane_desk(ol_lanes["forked"], ol_items, "https://board", NOW,
+                           last_tick=ol_tick, ask=lambda n, r: "Needs @octocat: pick one",
+                           images=lambda n, r: [])
+check("a needs_steve desk carries the lane's own owner_login, for the badge to read "
+      "'Needs @octocat' instead of the fixed word 'Steve'",
+      ol_desk["pill"] == "needs_steve" and ol_desk["owner_login"] == "octocat", ol_desk)
+
 print("20. tail_status: Peek's own decode (idle, waiting, a full replay, then a drain)")
 TS_ROOT = tempfile.mkdtemp(prefix="watcher-floor-tail-test-")
 TS_STATE = os.path.join(TS_ROOT, "state")

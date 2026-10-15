@@ -78,6 +78,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notify  # noqa: E402  (bin/notify.py, beside this file)
 
 OWNER = os.environ.get("BOARD_OWNER") or "roloc"
+# Card #154: a Stuck/park comment addresses a GitHub login instead of the word "Steve" —
+# `Needs @<login>:` — going forward, but every comment already on a board before this
+# shipped still says the old `Needs Steve:`. Every reader of a Needs-Steve-shaped comment
+# (here, and bin/floor.py's board_ask/board_images/board_rounds, which call this module
+# rather than keeping a second copy) matches either form through this one pattern.
+NEEDS_RE = re.compile(r"Needs (?:Steve|@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?):")
 NUMBER = int(os.environ.get("BOARD_NUMBER") or 1)
 STAGE_FIELD = "Stage"
 STATUS_FIELD = "Status"
@@ -653,7 +659,7 @@ def _latest_needs_steve_comment(issue):
         body = c.get("body") or ""
         first = body.strip().splitlines()
         first = first[0].strip() if first else ""
-        if "Needs Steve:" in first:
+        if NEEDS_RE.search(first):
             return body
     return ""
 
@@ -842,7 +848,7 @@ def needs_steve_rounds(issue):
         body = c.get("body") or ""
         first = body.strip().splitlines()
         first = first[0].strip() if first else ""
-        if "Needs Steve:" not in first:
+        if not NEEDS_RE.search(first):
             continue
         rounds.append({"when": c.get("createdAt") or "", "images": _parse_look_images(body)})
     rounds.sort(key=lambda r: r["when"], reverse=True)

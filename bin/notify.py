@@ -8,6 +8,9 @@ and links to it, so Steve can tap through from his phone. Configuration is one e
     DISCORD_WEBHOOK_URL   the channel's webhook. Unset or empty = every post is a no-op.
     DISCORD_MENTION       optional, prepended to Stuck alerts only — `<@123456789>`,
                           `<@&roleid>` or `@here` — so a parked card pings someone.
+    OWNER_LOGIN           optional; the GitHub login the Stuck alert's content line names
+                          (card #154) — defaults to BOARD_OWNER, then to the word "Steve",
+                          so a fork of this repo pings its own owner with no config at all.
 
 What gets posted (and by whom):
 
@@ -54,6 +57,14 @@ def enabled():
     return bool(webhook_url())
 
 
+def needs_label():
+    """`Needs @<login>` once a project names one (OWNER_LOGIN, falling back to
+    BOARD_OWNER), or the old `Needs Steve` with no `@` at all when neither is set — never
+    the literal `@Steve`, which is nobody's GitHub login."""
+    login = (os.environ.get("OWNER_LOGIN") or os.environ.get("BOARD_OWNER") or "").strip()
+    return f"Needs @{login}" if login else "Needs Steve"
+
+
 def card_label(card):
     return f"#{card['number']} {card.get('title') or ''}".strip()
 
@@ -74,7 +85,7 @@ def build(kind, card, detail="", pr=None, board_url=""):
 
     if kind == "stuck":
         mention = (os.environ.get("DISCORD_MENTION") or "").strip()
-        content = f"🚨 **Needs Steve:** {label} is stuck."
+        content = f"🚨 **{needs_label()}:** {label} is stuck."
         if mention:
             content = f"{mention} {content}"
         ask = detail or "Read the last comment on the card."

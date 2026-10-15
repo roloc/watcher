@@ -91,6 +91,10 @@ MAX_BUDGET="${EVAL_MAX_BUDGET_USD:-3}"
 # repos/$GH_REPO/issues/<n>/dependencies/blocked_by`, commands/watch.md's and
 # commands/triage.md's own recipe) has the same env shape as production, not a guess.
 EVAL_GH_REPO="${EVAL_GH_REPO:-fixture-org/fixture-repo}"
+# Card #154: bin/spawn.sh always exports OWNER_LOGIN for a real lane (defaulting to
+# BOARD_OWNER), so a case's tick gets the same env shape as production here too, rather
+# than hitting an unset variable no real tick would ever see.
+EVAL_OWNER_LOGIN="${EVAL_OWNER_LOGIN:-fixture-owner}"
 
 fail=0; n=0; cases=0; flunks=0
 say()   { printf '  %-66s %s\n' "$1" "$2"; }
@@ -286,6 +290,7 @@ run_case() {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
     WATCHER_HOME="$REPO" \
     GH_REPO="$EVAL_GH_REPO" \
+    OWNER_LOGIN="$EVAL_OWNER_LOGIN" \
     timeout "$CASE_TIMEOUT" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
       --dangerously-skip-permissions \
       --max-turns "$turns" --max-budget-usd "$budget" \

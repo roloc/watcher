@@ -1184,6 +1184,9 @@ try:
               "right there in the room — no click through to the card needed",
               b.eval("!!document.querySelector("
                     "'.character[data-pill=\"needs_steve\"] .character-mockup img')"))
+        check("card #154: the desk's own pill names the configured login, not the fixed "
+              "word 'Steve' — this fixture's own OWNER_LOGIN is 'octocat'",
+              b.eval("document.querySelector('.desk .pill.needs_steve')?.textContent") == "Needs @octocat")
         HELD_ALT = "document.querySelector('.character[data-pill=\"needs_steve\"] .character-mockup img')?.alt"
         check("it starts on direction A's first shot",
               b.eval(HELD_ALT) == "phone light", b.eval(HELD_ALT))

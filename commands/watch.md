@@ -671,7 +671,8 @@ explain; **the change is built and merged and the card's symptom survives** (§3
 have tried the same failing thing twice.
 
 **The "built, but the symptom survives" ask has the same shape as every other.** The first
-line is still `Needs Steve:`, and the question is still one question with lettered options
+line is still `Needs @<login>:` (the real GitHub login, never the literal text
+`$OWNER_LOGIN`), and the question is still one question with lettered options
 — what changed is that you have a fact to put under it, not an opinion: what shipped, and
 what the thing he reported still shows. Say both in plain words ("the fix for X landed and
 the page still shows Y"), never the project's name for the code path you changed.
@@ -721,7 +722,7 @@ with backticks, pipes, braces or a literal `$`, is refused on `--body "…"`) in
 shape:
 
 ```
-🤖 **Needs Steve: <one sentence saying what you need decided>**
+🤖 **Needs @<login>: <one sentence saying what you need decided>**
 
 - Card: <what the card asked for, in plain words>
 - Done so far: <what you tried>
@@ -750,7 +751,12 @@ Reply A, B or C on this card, or say which way you lean, then move it back to **
 
 The rules behind the shape (full version in `talking-to-steve.md`):
 
-- **First line is the ask**, bold, starts with `Needs Steve:`. Never "needs input".
+- **First line is the ask**, bold, starts with `Needs @<login>:`, where `<login>` is the
+  real value of this environment's `OWNER_LOGIN` variable — run `echo $OWNER_LOGIN` (or
+  read it another way) and write that value in. The posted line reads, for example,
+  `Needs @roloc:`, a real GitHub login with no brackets or dollar sign anywhere in it —
+  never the literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself.
+  Never "needs input".
 - **At most 8 bullets above the fold**, one fact each, about 15 words each.
 - **Exactly one question**, ending in `?`. Recommended option first, marked `(recommended)`.
 - **No paths, commands, code, or unexpanded acronyms above the fold.** Say "the build",

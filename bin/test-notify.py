@@ -11,6 +11,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 os.environ["DISCORD_WEBHOOK_URL"] = "https://discord.example/webhook"
 os.environ.pop("DISCORD_MENTION", None)
+# This suite's own default (section 2's "Needs Steve:") assumes neither is set — true for a
+# real lane's own tick only when its project never sets OWNER_LOGIN/BOARD_OWNER, but NOT
+# true of the shell this suite happens to run in (this box's own watcher lane exports
+# BOARD_OWNER=roloc for itself), so it is cleared here rather than inherited.
+os.environ.pop("OWNER_LOGIN", None)
+os.environ.pop("BOARD_OWNER", None)
 
 import notify  # noqa: E402
 import board   # noqa: E402
@@ -75,6 +81,25 @@ for kind in ("released", "breach", "digest"):
     check(f"...but not to '{kind}': broken is a line, stuck is the ping",
           "<@123>" not in last()["content"])
 del os.environ["DISCORD_MENTION"]
+
+print("2b. the Stuck alert names a GitHub login, not the word Steve, once configured")
+os.environ["OWNER_LOGIN"] = "octocat"
+sent.clear()
+notify.post("stuck", CARD, detail="Needs @octocat: pick where speaker names live.",
+            board_url="https://github.com/users/o/projects/1")
+check("OWNER_LOGIN=octocat → the alert's own line names that login",
+      last()["content"].startswith("🚨 **Needs @octocat:**"))
+del os.environ["OWNER_LOGIN"]
+os.environ["BOARD_OWNER"] = "someorg"
+sent.clear()
+notify.post("stuck", CARD)
+check("no OWNER_LOGIN, but BOARD_OWNER set → falls back to it",
+      last()["content"].startswith("🚨 **Needs @someorg:**"))
+del os.environ["BOARD_OWNER"]
+sent.clear()
+notify.post("stuck", CARD)
+check("neither set → the old form, 'Needs Steve:', still works",
+      last()["content"].startswith("🚨 **Needs Steve:**"))
 
 print("3. the two 'something broke' posts")
 sent.clear()

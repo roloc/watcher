@@ -108,9 +108,9 @@ case_check() {
     pass "symptom-survives: in-flight removed"
   fi
 
-  if state issues.100.comments | grep -q 'Needs Steve:'; then
+  if state issues.100.comments | grep -q 'Needs @fixture-owner:'; then
     pass "symptom-survives: the Stuck comment keeps the Steve shape"
   else
-    flunk "symptom-survives: no 'Needs Steve:' comment" "$(state issues.100.comments)"
+    flunk "symptom-survives: no 'Needs @fixture-owner:' comment" "$(state issues.100.comments)"
   fi
 }

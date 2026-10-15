@@ -69,10 +69,10 @@ case_check() {
 
   local comments stuck_comment above_fold
   comments="$(state issues.100.comments)"
-  if printf '%s' "$comments" | grep -q 'Needs Steve:'; then
+  if printf '%s' "$comments" | grep -q 'Needs @fixture-owner:'; then
     pass "stuck-plain: the Stuck comment keeps the Steve shape"
   else
-    flunk "stuck-plain: no 'Needs Steve:' comment" "$comments"
+    flunk "stuck-plain: no 'Needs @fixture-owner:' comment" "$comments"
   fi
 
   # Isolate the Stuck comment itself, not every comment on the card concatenated — an
@@ -82,7 +82,7 @@ case_check() {
 import json, os
 d = json.load(open(os.environ["FAKEHUB_STATE"]))
 for c in d["issues"]["100"]["comments"]:
-    if "Needs Steve:" in c:
+    if "Needs @fixture-owner:" in c:
         print(c)
         break
 ')"

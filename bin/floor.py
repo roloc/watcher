@@ -99,7 +99,10 @@ ENV_VARS = ("PROJECT_NAME", "PROJECT_ROOT", "BOARD_OWNER", "PROJECT_REPO", "BOAR
             # card #105: bin/spawn.sh's own watchdog ceiling, in minutes — read so the Ship
             # desk's "lands by" can compute a busy canary lane's own deadline the same way
             # the spawner would, rather than assuming every lane uses the 150-minute default.
-            "TICK_TIMEOUT")
+            "TICK_TIMEOUT",
+            # card #154: who a needs_steve pill on this lane's board addresses — defaults
+            # to BOARD_OWNER below, the same default rule bin/spawn.sh applies for the tick.
+            "OWNER_LOGIN")
 
 # Every key the JSON endpoint may ever emit. `test-floor.py` walks a real response and
 # fails if it finds one outside this set — the rule from the card ("serves only the fields
@@ -110,6 +113,9 @@ ALLOWED_FIELDS = {
     "lanes", "board_error",
     "lane", "kind", "unit", "unit_active", "pill", "link", "card", "stage", "minutes",
     "reason", "ask", "images", "number", "url",
+    # card #154: the GitHub login a needs_steve pill addresses, box-wide (header) and
+    # per-lane (desk)
+    "owner_login",
     # card #103: whether the tick's plan comment is up yet, and whether it has gone past
     # PLAN_LATE_MIN with none
     "plan_posted", "plan_late",
@@ -218,6 +224,7 @@ def discover_lanes(projects_dir, state_root):
             "unit": f"watcher@{name}",
             "project_repo": env["PROJECT_REPO"],
             "board_owner": env["BOARD_OWNER"],
+            "owner_login": env.get("OWNER_LOGIN") or env["BOARD_OWNER"],
             "board_number": board_number,
             "lane_agents": env.get("LANE_AGENTS") or "",
             "lane_command": env.get("LANE_COMMAND") or "/watch",
@@ -639,7 +646,8 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
     `pausing_reason` (the file's own first line — "deploy <sha>" for the deployer and the
     canary stage, "" for a hand-touched one) for the page script to turn into plain
     words. Only a lane holding nothing reads as `paused`."""
-    base = {"lane": lane["lane"], "kind": lane_kind(lane), "unit": lane["unit"]}
+    base = {"lane": lane["lane"], "kind": lane_kind(lane), "unit": lane["unit"],
+            "owner_login": lane.get("owner_login") or ""}
     if unit_active is not None:
         base["unit_active"] = unit_active
     state_dir = lane["state_dir"]
@@ -1381,6 +1389,11 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
     return {
         "header": {"box": box_name, "time": now.isoformat(),
                    "needs_steve_total": needs_steve_total,
+                   # card #154: the box-wide "N need @<login>" suffix names whichever
+                   # lane's own project file this box happens to read first — every lane
+                   # on one box is normally the same person's fork, so there is one login
+                   # to show, not several.
+                   "owner_login": (lanes[0]["owner_login"] if lanes else ""),
                    "github_remaining": rl.get("remaining"),
                    "github_reset": rl.get("resetAt"),
                    "github_limit": rl.get("limit"),
@@ -2065,6 +2078,13 @@ window.addEventListener("unhandledrejection", function () {
 <script id="main">
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
                      paused: "Paused", sleeping: "Sleeping"};
+// Card #154: a needs_steve pill addresses the GitHub login the owning project's own
+// `OWNER_LOGIN` names, not the fixed word "Steve" — a fork of this repo reads its own
+// owner's name here. Falls back to PILL_LABEL's own "Needs Steve" for a lane the backend
+// never gave an owner_login (an older demo fixture), never "Needs @" with nothing after it.
+function needsLabel(ownerLogin) {
+  return ownerLogin ? `Needs @${esc(ownerLogin)}` : PILL_LABEL.needs_steve;
+}
 
 // Card #110: a working lane can also be pausing (a PAUSE file sits beside its held card).
 // The backend hands back the file's own first line as `pausing_reason` — "deploy <sha>"
@@ -2393,7 +2413,7 @@ function deskHTML(d) {
       ${dispatcher ? dispatcherSVG(d.pill) : spriteSVG(d.pill)}
       <div class="name">${esc(d.kind)}</div>
       <div class="unit">${esc(d.unit)}</div>
-      <span class="pill ${esc(d.pill)}${planLate ? " plan-late" : ""}">${PILL_LABEL[d.pill] || esc(d.pill)}</span>
+      <span class="pill ${esc(d.pill)}${planLate ? " plan-late" : ""}">${d.pill === "needs_steve" ? needsLabel(d.owner_login) : (PILL_LABEL[d.pill] || esc(d.pill))}</span>
       <div class="detail">${detail}</div>
       ${pausingLine(d)}
       ${d.pill === "needs_steve" ? mockupThumbsHTML(d.images) : ""}
@@ -2411,7 +2431,9 @@ function render(state) {
   for (const p of state.projects || []) for (const s of p.stuck || []) stuckByCard[s.card.number] = s;
   document.getElementById("box").textContent =
     "The floor — " + state.header.box +
-    (state.header.needs_steve_total > 0 ? ` — ${state.header.needs_steve_total} need Steve` : "");
+    (state.header.needs_steve_total > 0
+      ? ` — ${state.header.needs_steve_total} need ${state.header.owner_login ? "@" + esc(state.header.owner_login) : "Steve"}`
+      : "");
   document.getElementById("clock").textContent = new Date(state.header.time).toLocaleString();
 
   // The account's GraphQL budget (card #98), read from board.py's own cache — nothing
@@ -3662,9 +3684,10 @@ function bulletinHTML(state) {
   for (const p of state.projects || []) for (const l of p.lanes || []) {
     if (!l.card) continue;
     if (l.pill !== "working" && l.pill !== "needs_steve") continue;
-    const what = l.pill === "working" ? `${esc(l.stage || "—")} · ${l.minutes}m${planSuffix(l)}` : `needs Steve: ${esc(l.ask || "a decision")}`;
+    const what = l.pill === "working" ? `${esc(l.stage || "—")} · ${l.minutes}m${planSuffix(l)}`
+      : `${needsLabel(l.owner_login).toLowerCase()}: ${esc(l.ask || "a decision")}`;
     now.push(`<div class="board-row">${cardNum(l.card)}<span class="what">${esc(p.name)} · ${esc(l.kind)} · ${what}</span>
-      <span class="pill ${esc(l.pill)}">${PILL_LABEL[l.pill]}</span>${peekBtn(p.name, l.card.number)}</div>`);
+      <span class="pill ${esc(l.pill)}">${l.pill === "needs_steve" ? needsLabel(l.owner_login) : PILL_LABEL[l.pill]}</span>${peekBtn(p.name, l.card.number)}</div>`);
   }
   const recent = (state.recent || []).map(r => `<div class="board-row">${cardNum(r.card)}
       <span class="what">${esc(r.project)} · ${esc(r.lane)}</span><span class="meta">${relTime(r.when)} · ${esc(r.quota)}</span>${peekBtn(r.project, r.card.number)}</div>`);
@@ -3828,9 +3851,9 @@ function buildDemoStates() {
                 proj("beta", [L("beta", "Build", "idle", {reason: "Nothing to pick up right now."})], "passing")],
      recent: [{project: "alpha", lane: "alpha", card: {number: 10, url: "#"}, when: now, quota: "~$0.40 equivalent (subscription — not billed)"}],
      server, wins},
-    {header: {box: "demo", time: now, needs_steve_total: 2},
+    {header: {box: "demo", time: now, needs_steve_total: 2, owner_login: "octocat"},
      projects: [proj("alpha", [L("alpha", "Build", "needs_steve", {card: {number: 11, url: "#"}, ask: "Pick A or B",
-                               images: [DEMO_PNG]}),
+                               images: [DEMO_PNG], owner_login: "octocat"}),
                                L("alpha-design", "Design", "paused", {}),
                                L("alpha-triage", "Triage", "working", {card: {number: 12, url: "#"}, stage: "Claimed", minutes: 1})],
                 "failing", null,

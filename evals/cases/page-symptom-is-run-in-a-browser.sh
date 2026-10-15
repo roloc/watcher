@@ -108,7 +108,7 @@ case_check() {
 
   if [ "$(state issues.100.status)" = "Stuck - Needs help" ]; then
     flunk "page-in-browser: went to Stuck" \
-      "what Steve saw is a fact the browser shows: $(state issues.100.comments | grep -m1 'Needs Steve' || true)"
+      "what Steve saw is a fact the browser shows: $(state issues.100.comments | grep -m1 'Needs @' || true)"
   else
     pass "page-in-browser: did not ask Steve what he saw"
   fi

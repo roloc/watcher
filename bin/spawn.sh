@@ -17,6 +17,9 @@
 #   PROJECT_ROOT     the project's main checkout on this box (worktrees go beside it)
 #   BOARD_OWNER      GitHub user/org that owns the Projects board   (board.py reads these)
 #   BOARD_NUMBER     the board's number
+#   OWNER_LOGIN      optional; the GitHub login every Stuck/park/awaiting-rebuild comment
+#                    addresses (`Needs @<login>:`) — defaults to BOARD_OWNER when unset, so
+#                    a fork of this repo pings its own owner with no config at all.
 #   DISCORD_WEBHOOK_URL  optional; a per-project Discord channel for stuck and broken
 #                    alerts. Usually set once for the box in /etc/watcher/env instead
 #                    (see notify.py).
@@ -148,6 +151,17 @@ WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 [ -n "$WATCHER_ROOT" ] || { echo "spawn.sh: set WATCHER_PROJECT=projects/<name>.env (or WATCHER_ROOT)" >&2; exit 64; }
 PROJECT_NAME="${PROJECT_NAME:-$(basename "$WATCHER_ROOT")}"
 export BOARD_OWNER="${BOARD_OWNER:-}" BOARD_NUMBER="${BOARD_NUMBER:-}"
+# Card #154: who every Stuck/park/awaiting-rebuild comment addresses, so a fork of this
+# repo pings its own owner from the first tick instead of the word "Steve". Defaults to
+# BOARD_OWNER (the one login every project file already sets) when a project does not set
+# its own; exported to the tick the same way BOARD_OWNER is, and to board.py/notify.py
+# (both read it directly rather than being passed it as an argument). Left empty, never
+# defaulted to the literal word "Steve", so this script's own comments (below) can still
+# fall back to the old unadorned "Needs Steve:" rather than the nonsensical "Needs @Steve:".
+export OWNER_LOGIN="${OWNER_LOGIN:-${BOARD_OWNER:-}}"
+# "Needs @<login>" once one is known, else the old "Needs Steve" with no "@" at all.
+NEEDS_WHO="${OWNER_LOGIN:+@$OWNER_LOGIN}"
+NEEDS_WHO="${NEEDS_WHO:-Steve}"
 # The ledger's caller column (card #114): this lane's own board.py calls (polling, the
 # sweeps) are attributed to the lane by name. The tick itself gets a narrower one, set
 # only on the one command line that launches it (print_claude_cmd) — never here, or every
@@ -817,7 +831,7 @@ park_stuck() {
   local transcript_line=""
   [ -n "$transcript" ] && transcript_line=$'\n- Transcript kept: '"$(basename "$transcript")"
   local body
-  body="🤖 **Needs Steve: this card failed 2 attempts, so I parked it.**
+  body="🤖 **Needs ${NEEDS_WHO}: this card failed 2 attempts, so I parked it.**
 
 - Moved to **Stuck - Needs help**. The bots will not retry on their own.
 - Why: $detail${retry_note}
@@ -1518,7 +1532,7 @@ sweep_in_review() {
       kind=no-pr
       target="Stuck - Needs help"
       why="This card is in In review but has no pull request, so nobody is working it."
-      body="🤖 **Needs Steve: this card is in In review but has no pull request, so nobody is working it.**
+      body="🤖 **Needs ${NEEDS_WHO}: this card is in In review but has no pull request, so nobody is working it.**
 
 - Moved to **Stuck - Needs help**. The bots only pick up cards from **In progress**.
 - In review is where a bot leaves a card whose PR is up. This card has no open PR.
@@ -1533,7 +1547,7 @@ Move the card; no reply needed."
       kind=second-visit
       target="Stuck - Needs help"
       why="This card's PR came back to In review after a second try. It needs you."
-      body="🤖 **Needs Steve: this card's PR is still not merged after a second try.**
+      body="🤖 **Needs ${NEEDS_WHO}: this card's PR is still not merged after a second try.**
 
 - PR: $pr_url
 - Moved to **Stuck - Needs help**. I already sent it back to **In progress** once and it came back to In review. The tick's last comment above says why.
@@ -1701,7 +1715,7 @@ park_stale_rebuild() {
     local retry_note=""
     [ -f "$ok" ] || retry_note=$'\n- The move to Stuck did not go through yet; I will keep retrying it.'
     local body
-    body="🤖 **Needs Steve: the downstream rebuild this card is waiting on never reported back.**
+    body="🤖 **Needs ${NEEDS_WHO}: the downstream rebuild this card is waiting on never reported back.**
 
 - Moved to **Stuck - Needs help**. It had been waiting over $hours hours.
 - Why: the project's own rebuild-finished notice never arrived.${retry_note}

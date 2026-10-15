@@ -131,11 +131,13 @@ Two things you write end up in front of Steve, pasted by the tick into a Stuck c
 a blocking finding the author disagrees with, and a third-round "mis-shaped" verdict.
 Steve is dyslexic, reads on a phone, and decides with one letter. So when either applies,
 end your report with this block, and nothing after it (the full rules are in
-`$WATCHER_HOME/docs/talking-to-steve.md`):
+`$WATCHER_HOME/docs/talking-to-steve.md`). `<login>` is the real value of this
+environment's `OWNER_LOGIN` variable (`echo $OWNER_LOGIN`), written in — never the
+literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself:
 
 ```
 For Steve:
-🤖 **Needs Steve: <one sentence: what he has to decide>**
+🤖 **Needs @<login>: <one sentence: what he has to decide>**
 
 - Change: <what the branch does, in plain words>
 - Reviewer found: <the problem, in plain words, no file paths>

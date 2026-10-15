@@ -75,10 +75,10 @@ case_check() {
 
   local comments
   comments="$(state issues.100.comments)"
-  if printf '%s' "$comments" | grep -q 'Needs Steve:'; then
+  if printf '%s' "$comments" | grep -q 'Needs @fixture-owner:'; then
     pass "login-wall: Stuck comment keeps the Steve shape"
   else
-    flunk "login-wall: no 'Needs Steve:' comment" "$comments"
+    flunk "login-wall: no 'Needs @fixture-owner:' comment" "$comments"
   fi
 
   if printf '%s' "$comments" | grep -qi 'rec/'; then

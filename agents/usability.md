@@ -76,11 +76,13 @@ is the good outcome.
 A blocking finding the tick disagrees with, or a third-round verdict, ends up in front of
 Steve. He is dyslexic, reads on a phone, and decides with one letter. End your report with
 this block, and nothing after it, when either applies (full rules in
-`$WATCHER_HOME/docs/talking-to-steve.md`):
+`$WATCHER_HOME/docs/talking-to-steve.md`). `<login>` is the real value of this
+environment's `OWNER_LOGIN` variable (`echo $OWNER_LOGIN`), written in — never the
+literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself:
 
 ```
 For Steve:
-🤖 **Needs Steve: <one sentence: what he has to decide>**
+🤖 **Needs @<login>: <one sentence: what he has to decide>**
 
 - Change: <what the branch does, in plain words>
 - Usability found: <the problem, described as what's on the screen, never a code name>

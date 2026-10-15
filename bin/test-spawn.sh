@@ -13,8 +13,10 @@ set -uo pipefail
 # WATCHER_PROJECT for its own tick, and a tick that runs this suite from inside that lane
 # inherits them — silently overriding the fake "owner/proj" and other fixtures `run()` sets
 # below, so cases that grep for the fixture's own values fail on a correct tree. Found while
-# verifying card #34 from inside that exact lane.
-unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX
+# verifying card #34 from inside that exact lane. OWNER_LOGIN (card #154) joins the list for
+# the same reason: that same lane exports it too, and it would otherwise silently override
+# `run()`'s own BOARD_OWNER-derived default ("test-owner") in every case here.
+unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS LANE_COMMAND LANE_WORKDIR READY_PULL WIP_MAX OWNER_LOGIN
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPAWN="$HERE/spawn.sh"
@@ -720,15 +722,28 @@ if grepped 'gh issue comment 40' && grep -q 'gh issue comment 40.*2 attempts' "$
 # first line, one question, lettered options with the recommendation first, and how to
 # answer. A regression to a prose paragraph must fail here, not on a card.
 park_line="$(grep 'gh issue comment 40' "$TESTLOG" || true)"
-if printf '%s' "$park_line" | grep -q 'gh issue comment 40 --body 🤖 \*\*Needs Steve:' \
+if printf '%s' "$park_line" | grep -q 'gh issue comment 40 --body 🤖 \*\*Needs @test-owner:' \
    && printf '%s' "$park_line" | grep -q '\*\*Question: [^?]*?\*\*' \
    && printf '%s' "$park_line" | grep -q '\*\*A\. [^*]*\*\* (recommended' \
    && printf '%s' "$park_line" | grep -q '\*\*B\. ' \
    && printf '%s' "$park_line" | grep -q '\*\*C\. ' \
    && printf '%s' "$park_line" | grep -q 'Reply A, B or C on this card'; then
-  pass "Stuck comment keeps the Steve shape: 'Needs Steve:' first, one Question, A/B/C with A recommended, how to answer"
+  pass "Stuck comment keeps the Steve shape: 'Needs @<login>:' first, one Question, A/B/C with A recommended, how to answer"
 else
   flunk "Stuck comment shape" "$park_line"
+fi
+
+echo "4b. card #154: OWNER_LOGIN overrides BOARD_OWNER as who the park comment addresses"
+fresh_state
+board_list $'41\tP1\tbuilder\t-\tCard forty-one'
+board_show '{"number":41,"state":"OPEN","status":"In progress","labels":[]}'
+CLAUDE_SUBTYPE=error_max_turns CLAUDE_RC=1 CLAUDE_COST=0.10 CLAUDE_TURNS=400 CLAUDE_DENIALS=0
+OWNER_LOGIN=octocat run --once >/dev/null
+OWNER_LOGIN=octocat run --once >/dev/null
+if grep -q 'gh issue comment 41 --body 🤖 \*\*Needs @octocat:' "$TESTLOG"; then
+  pass "OWNER_LOGIN=octocat → the park comment addresses that login, not BOARD_OWNER's test-owner"
+else
+  flunk "OWNER_LOGIN park comment" "$(cat "$TESTLOG")"
 fi
 
 # ============================================================================
@@ -1772,7 +1787,7 @@ board_list $'612\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting a long time
 AWAITING_REBUILD_STALE_SEC=0 run --once >/dev/null 2>&1 || true
 if grepped "board.py move 612 Stuck - Needs help"; then pass "stale label → parked in Stuck"; else flunk "stale-label park" "$(cat "$TESTLOG")"; fi
 stuck_comment="$(grep 'gh issue comment 612' "$TESTLOG" || true)"
-if printf '%s' "$stuck_comment" | grep -q 'Needs Steve' \
+if printf '%s' "$stuck_comment" | grep -q 'Needs @test-owner' \
    && printf '%s' "$stuck_comment" | grep -qi 'downstream rebuild' \
    && ! printf '%s' "$stuck_comment" | grep -qi 'failed 2 attempts'; then
   pass "its own Stuck comment — never claims the card 'failed 2 attempts'"
@@ -1848,7 +1863,7 @@ if not_grepped "board.py move 700"; then pass "no PR but inside the grace → un
 fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tDropped here by hand'
 GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 run --once >/dev/null 2>&1
 if grepped "board.py move 700 Stuck - Needs help"; then pass "In review + no PR past the grace → Stuck"; else flunk "expected a move to Stuck" "$(cat "$TESTLOG")"; fi
-if grep -q 'gh issue comment 700.*Needs Steve: .*no pull request.*Question: .*\*\*A\. .*\*\*B\. .*\*\*C\. ' "$TESTLOG"; then pass "…with the ask first, one question, lettered options (talking-to-steve shape)"; else flunk "Stuck comment shape" "$(cat "$TESTLOG")"; fi
+if grep -q 'gh issue comment 700.*Needs @test-owner: .*no pull request.*Question: .*\*\*A\. .*\*\*B\. .*\*\*C\. ' "$TESTLOG"; then pass "…with the ask first, one question, lettered options (talking-to-steve shape)"; else flunk "Stuck comment shape" "$(cat "$TESTLOG")"; fi
 
 fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tStale green PR'
 GH_PR_LIST_FILE="$PRS" INREVIEW_STALE_SEC=0 run --once >/dev/null 2>&1
@@ -1858,7 +1873,7 @@ if grep -q 'gh issue comment 700.*FYI: PR #71' "$TESTLOG"; then pass "…with an
 : > "$TESTLOG"
 GH_PR_LIST_FILE="$PRS" run --once >/dev/null 2>&1
 if grepped "board.py move 700 Stuck - Needs help" && not_grepped "board.py move 700 In progress"; then pass "back in In review after its one turn → Stuck, not a second re-queue"; else flunk "expected Stuck on the second visit" "$(cat "$TESTLOG")"; fi
-if grep -q 'gh issue comment 700.*Needs Steve: .*pull/71.*Question: ' "$TESTLOG"; then pass "…and the Stuck comment carries the PR link above the question"; else flunk "second-visit comment" "$(cat "$TESTLOG")"; fi
+if grep -q 'gh issue comment 700.*Needs @test-owner: .*pull/71.*Question: ' "$TESTLOG"; then pass "…and the Stuck comment carries the PR link above the question"; else flunk "second-visit comment" "$(cat "$TESTLOG")"; fi
 [ ! -f "$STATE/inreview/700.requeued" ] && pass "…and parking clears the marker: Steve's answer starts the card over" || flunk "requeued marker survived the park"
 
 fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tMove keeps failing'
