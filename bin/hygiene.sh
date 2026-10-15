@@ -14,8 +14,8 @@
 # comes back two sweeps running is a finding that should become one (README, "The weekly
 # hygiene card").
 #
-#   bin/hygiene.sh              # the full sweep (needs `gh` and a fetched origin)
-#   bin/hygiene.sh --no-remote  # skip the branch check: no gh, no network
+#   bin/hygiene.sh              # the full sweep (needs `gh`, GITHUB_REPOSITORY, and a fetched origin)
+#   bin/hygiene.sh --no-remote  # skip the branch check: no gh, no GITHUB_REPOSITORY, no network
 #
 # Plain bash 3 and BSD tools — the Mac runs it too (CLAUDE.md, "offline suites have to
 # pass on a Mac"). Days are tunable through the env: STALE_BRANCH_DAYS (14),
