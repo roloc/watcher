@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # deploy/add-project.sh's cases, in test-detect.sh's shape: no network, `gh` is a stub that
 # logs one line per call to $CALLS so a case can grep what the script did. Card #156: with
-# no TEMPLATE_BOARD, the script now builds a board from nothing instead of refusing to run
-# — the three cases below are exactly what the card asks for: the no-template create path
-# (the three field calls, in order, with the exact option lists), the with-template copy
-# path (unchanged — no field calls at all), and a rerun on a board that already has the
-# fields (no writes).
+# no TEMPLATE_BOARD, the script now builds a board from nothing instead of refusing to run.
+# What the card itself asks for is cases 1-3 below: the no-template create path (the three
+# field calls, in order, with the exact option lists), the with-template copy path
+# (unchanged — no field calls at all), and a rerun on a board that already has the fields
+# (no writes). Cases 4 and 5 are from the reviewer's pass on this card's own PR: a field
+# matched by presence, not order (the real Watcher board's own Status field carries Done
+# and Stuck - Needs help swapped relative to the order this script would have written —
+# a full-match-but-reordered field must never be touched at all), and a field short just
+# one option keeping every option it already has by id, so a live card's value survives.
 #
 #   bash bin/test-add-project.sh      # exit 0 = every case holds
 set -uo pipefail
@@ -129,7 +133,19 @@ check "rerun: no field-create call"                        not_called "field-cre
 check "rerun: no graphql call"                              not_called "graphql"
 check "rerun: still links (link is itself idempotent)"      called "gh project link 42 --owner roloc --repo roloc/testproj"
 
-# 4. Rerun where Stage is missing just one option: gets that option, nothing else.
+# 4. Status already carries every required name, but in a different order than this
+#    script would have written — the live Watcher board's own shape. Left alone entirely:
+#    a full-match-by-presence is enough, and a destructive replace here would drop every
+#    option's id, orphaning whatever a real card already has set.
+STATUS_REORDERED='{"id":"PVTSSF_STATUS","name":"Status","type":"ProjectV2SingleSelectField","options":[{"id":"a","name":"Backlog"},{"id":"b","name":"Ready"},{"id":"c","name":"In progress"},{"id":"d","name":"In review"},{"id":"e","name":"Stuck - Needs help"},{"id":"f","name":"Done"}]}'
+fields "{\"fields\":[$STATUS_REORDERED,$STAGE_DONE,$PRIORITY_DONE]}"
+run
+check "reordered Status: exits 0"                           [ "$(rc)" = 0 ]
+check "reordered Status: left alone, not rewritten"          out_has "Status: already has the required options (unchanged)"
+check "reordered Status: no graphql call at all"            not_called "graphql"
+
+# 5. Rerun where Stage is missing just one option: gets that option, keeping every
+#    existing one by id — nothing else.
 STAGE_MISSING_PARKED='{"id":"PVTSSF_STAGE","name":"Stage","type":"ProjectV2SingleSelectField","options":[{"id":"a","name":"Waiting"},{"id":"b","name":"Claimed"},{"id":"c","name":"Designing"},{"id":"d","name":"Building"},{"id":"e","name":"Testing"},{"id":"f","name":"Reviewing"},{"id":"g","name":"PR open"},{"id":"h","name":"Merging"}]}'
 fields "{\"fields\":[$STATUS_DONE,$STAGE_MISSING_PARKED,$PRIORITY_DONE]}"
 run
@@ -137,8 +153,8 @@ check "missing one option: exits 0"                        [ "$(rc)" = 0 ]
 check "missing one option: Status still untouched"          out_has "Status: already has the required options (unchanged)"
 check "missing one option: Priority still untouched"        out_has "Priority: already has the required options (unchanged)"
 check "missing one option: Stage gets a graphql replace"    called "updateProjectV2Field"
-check "missing one option: the new list keeps every existing stage" called '{name: "Waiting", color: GRAY, description: ""}, {name: "Claimed", color: GRAY, description: ""}'
-check "missing one option: and appends the missing one"     called '{name: "Parked", color: RED, description: ""}'
+check "missing one option: keeps every existing stage, by id" called '{id: "a", name: "Waiting", color: GRAY, description: ""}, {id: "b", name: "Claimed", color: GRAY, description: ""}'
+check "missing one option: and appends the missing one, with no id of its own" called '{name: "Parked", color: RED, description: ""}'
 check "missing one option: Priority gets no graphql call for its own sake" [ "$(grep -c graphql "$CALLS")" = 1 ]
 
 echo
