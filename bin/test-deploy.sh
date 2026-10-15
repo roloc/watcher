@@ -509,7 +509,7 @@ check "canary H2 (red check): …and the deployer's own PAUSE goes with it" [ ! 
 echo "completed success" > "$TMP/ci"
 canary_fresh; : > "$STATE/watcher/PAUSE"; touch "$TMP/eval-fails"; T="$(commit commands/watch.md canary-h2e)"
 run; run   # held: the suite failed twice
-check "canary H2: a hand-made PAUSE is still there after a hold"      [ -f "$STATE/watcher/PAUSE" ] && [ ! -s "$STATE/watcher/PAUSE" ]
+check "canary H2: a hand-made PAUSE is still there after a hold"      [ -f "$STATE/watcher/PAUSE" -a ! -s "$STATE/watcher/PAUSE" ]
 rm -f "$TMP/eval-fails" "$STATE/watcher/current"
 
 # I. A card the spawner parked during the soak (two attempts, no progress) holds the commit
