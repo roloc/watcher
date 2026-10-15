@@ -766,6 +766,30 @@ try:
                       return r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight; })()"""))
         shot(b, "peek-phone.png", full_page=False)  # the panel is fixed to the screen
         b.key("Escape")
+
+        # card #164: the picture that matters for this card is the canary state itself,
+        # not just an ordinary live one — Steve opens the floor page from his phone, so
+        # that is the width the canary-only session has to be shown decoded at too.
+        transcript(f"{ROOT}/alpha-worktrees", 8,
+                   [say("Soaking on the canary: reading card eight."), run("Run the tail suite")],
+                   under=CANARY)
+        with open(os.path.join(STATE, "alpha", "current"), "w") as f:
+            f.write("8\n")
+        with open(os.path.join(STATE, "alpha", "release"), "w") as f:
+            f.write("watcher-canary")
+        b.click(peek_button("alpha"))
+        check("at phone width too, a session only under the canary config dir is found and decoded",
+              b.wait_for(PANEL_TEXT + ".includes('Soaking on the canary: reading card eight.')"),
+              b.eval(PANEL_TEXT))
+        check("...and labeled live, the same as any other working lane, at this width",
+              b.eval(PANEL_SUB) == "working on #8 — live", b.eval(PANEL_SUB))
+        shot(b, "peek-canary-phone.png", full_page=False)
+        b.key("Escape")
+        with open(os.path.join(STATE, "alpha", "current"), "w") as f:
+            f.write("7\n")
+        with open(os.path.join(STATE, "alpha", "release"), "w") as f:
+            f.write("aaaaaaaaaaaa")
+
         b.click('.peek-btn[data-peek-ship="alpha"]')
         check("the ship station's Peek fits the phone too",
               b.wait_for(PANEL_TEXT + ".includes('The spawner suite')")
