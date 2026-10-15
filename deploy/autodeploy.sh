@@ -206,11 +206,14 @@ ours() { head -c 7 "$1" 2>/dev/null | grep -q '^deploy '; }
 
 # --- a held commit --------------------------------------------------------------------------
 
-# The board and repo for held cards come from the watcher's own project file.
+# The board and repo for held cards come from the watcher's own project file. The fourth
+# field (card #154) is who a held-commit card addresses — OWNER_LOGIN, defaulting to
+# BOARD_OWNER, the same default rule bin/spawn.sh applies for a tick.
 self_env() {
   local f="$WATCHER_DIR/projects/$SELF_PROJECT.env"
   [ -f "$f" ] || return 1
-  ( set +u; . "$f"; echo "${PROJECT_REPO:-} ${BOARD_OWNER:-} ${BOARD_NUMBER:-}" )
+  ( set +u; . "$f"
+    echo "${PROJECT_REPO:-} ${BOARD_OWNER:-} ${BOARD_NUMBER:-} ${OWNER_LOGIN:-${BOARD_OWNER:-}}" )
 }
 
 # overridden <sha>: Steve added deploy-anyway to that commit's held card.
@@ -224,7 +227,7 @@ overridden() {
 
 # hold <sha> <why, plain words> <details>: one Stuck card per commit, never repeated.
 hold() {
-  local sha="$1" why="$2" details="$3" short="${1:0:7}" repo owner board url n body
+  local sha="$1" why="$2" details="$3" short="${1:0:7}" repo owner board owner_login url n body
   # Card #150 (October 14, 2026): a hold ends this script's interest in the target, so any
   # PAUSE the canary stage wrote while waiting for its lane(s) to go idle — for THIS target
   # or for the older one it superseded — is lifted here, on every hold path, before
@@ -235,15 +238,18 @@ hold() {
   canary_unpause
   [ -f "$DSTATE/held/$sha" ] && return 0
   say "HOLDING $short: $why"
-  read -r repo owner board <<< "$(self_env)"
+  read -r repo owner board owner_login <<< "$(self_env)"
   if [ -z "$repo" ]; then
     say "no projects/$SELF_PROJECT.env to file a card from; the hold is in this journal only"
     : > "$DSTATE/held/$sha"; return 0
   fi
+  # "Needs @<login>" once self_env found one, else the old "Needs Steve" with no "@" at all.
+  local needs_who="${owner_login:+@$owner_login}"
+  needs_who="${needs_who:-Steve}"
   # Written where the bot's gh can read it: the state directory is root's.
   body="$(mktemp /tmp/watcher-deploy-held.XXXXXX)"; chmod 644 "$body"
   cat > "$body" <<EOF
-**Needs Steve: the watcher's newest version is held back and not deployed.**
+**Needs ${needs_who}: the watcher's newest version is held back and not deployed.**
 
 - The version is \`$short\` on \`main\`: https://github.com/$repo/commit/$sha
 - It was not deployed because $why.

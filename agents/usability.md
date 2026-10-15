@@ -78,7 +78,8 @@ Steve. He is dyslexic, reads on a phone, and decides with one letter. End your r
 this block, and nothing after it, when either applies (full rules in
 `$WATCHER_HOME/docs/talking-to-steve.md`). `<login>` is the real value of this
 environment's `OWNER_LOGIN` variable (`echo $OWNER_LOGIN`), written in — never the
-literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself:
+literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself — unset (it
+shouldn't be), write the old unadorned `Needs Steve:` instead of `Needs @:`:
 
 ```
 For Steve:

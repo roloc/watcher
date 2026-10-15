@@ -756,7 +756,9 @@ The rules behind the shape (full version in `talking-to-steve.md`):
   read it another way) and write that value in. The posted line reads, for example,
   `Needs @roloc:`, a real GitHub login with no brackets or dollar sign anywhere in it —
   never the literal text `$OWNER_LOGIN`, and never the placeholder word `<login>` itself.
-  Never "needs input".
+  Every project sets this, so it should never come up empty; if it somehow does, write
+  the old unadorned `Needs Steve:`, never `Needs @:` with nothing after the `@`. Never
+  "needs input".
 - **At most 8 bullets above the fold**, one fact each, about 15 words each.
 - **Exactly one question**, ending in `?`. Recommended option first, marked `(recommended)`.
 - **No paths, commands, code, or unexpanded acronyms above the fold.** Say "the build",

@@ -129,7 +129,7 @@ case_check() {
     pass "awaiting-rebuild-exit: in-flight removed"
   fi
 
-  if state issues.100.comments | grep -qi 'Needs @fixture-owner:'; then
+  if state issues.100.comments | grep -qiE 'Needs (Steve|@[^:]+):'; then
     flunk "awaiting-rebuild-exit: parked in Stuck instead of taking the new exit" \
       "$(state issues.100.comments)"
   else
