@@ -2272,11 +2272,18 @@ echo "37. card #158: projects/example.env.txt never drifts from this script's ow
 # internal overrides this script's own tests use to stub `claude`, `gh`, `board.py` and
 # so on — never set in a real project file) and anything the header itself marks
 # "(tests only)". What is left is exactly the set example.env.txt has to cover.
+#
+# example.env.txt leaves DISCORD_WEBHOOK_URL and DISCORD_MENTION commented out
+# (`#VAR=`, no space before the name) rather than assigned empty — systemd loads
+# /etc/watcher/env, the box-wide value, before spawn.sh sources a project file, so an
+# empty assignment there would silently clear it instead of inheriting it. The extraction
+# below allows one leading `#` with no space for exactly that shape; an ordinary comment
+# line ("# optional. ...") always has a space right after the `#` and never matches.
 EXAMPLE_ENV="$REPO_ROOT/projects/example.env.txt"
 header_vars="$(awk '/One project per instance, chosen by a project file/{flag=1} /^# Exported to the tick/{flag=0} flag' "$SPAWN" \
   | grep -oE '^#   [A-Z][A-Z0-9_]*' | sed 's/^#   //' \
   | grep -v '^WATCHER_' | grep -v '^TRANSCRIPT_MAX_BYTES$' | sort -u)"
-example_vars="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$EXAMPLE_ENV" | sed 's/=$//' | sort -u)"
+example_vars="$(grep -oE '^#?[A-Z][A-Z0-9_]*=' "$EXAMPLE_ENV" | sed -E 's/^#//; s/=$//' | sort -u)"
 if [ "$header_vars" = "$example_vars" ]; then
   pass "the header's documented vars and example.env.txt's vars are the same set"
 else
@@ -2298,7 +2305,7 @@ else
 fi
 SCRATCH_EXAMPLE="$TMP/example-plus-var.env.txt"
 { cat "$EXAMPLE_ENV"; echo "A_MADE_UP_VAR=x"; } > "$SCRATCH_EXAMPLE"
-scratch_example_vars="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$SCRATCH_EXAMPLE" | sed 's/=$//' | sort -u)"
+scratch_example_vars="$(grep -oE '^#?[A-Z][A-Z0-9_]*=' "$SCRATCH_EXAMPLE" | sed -E 's/^#//; s/=$//' | sort -u)"
 if [ "$header_vars" != "$scratch_example_vars" ]; then
   pass "a var added only to example.env.txt turns this check red"
 else
