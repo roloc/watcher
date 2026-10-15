@@ -1007,6 +1007,25 @@ else
 fi
 unset CLAUDE_PROJECTS_DIR
 
+echo "14c. card #143: same reconciliation, but no session transcript anywhere — the comment says so, same wording as handle_exit's own"
+fresh_state
+# Card 144, not 143: a card number this suite uses in a pgrep-liveness check must never be
+# the number of whatever card a live tick running THIS suite by hand happens to hold —
+# pgrep -f would then match that live process's own command line and read as "still
+# running", found while writing this very case from inside a live /watch 143 session.
+echo 144 > "$STATE/current"
+board_show '{"number":144,"state":"OPEN","status":"In progress","labels":["in-flight"]}'
+board_list ""
+: > "$LOGS/card-144-20261001T000000Z.json"
+run --once >/dev/null 2>"$TMP/reconcile144.err"
+if ! ls "$LOGS"/card-144-*.transcript.jsonl >/dev/null 2>&1; then pass "no transcript file written: there was nothing to copy"; else flunk "unexpected transcript file" "$(ls "$LOGS")"; fi
+comment_line="$(grep 'gh issue comment 144' "$TESTLOG" || true)"
+if printf '%s' "$comment_line" | grep -q 'Transcript: none found'; then
+  pass "reconcile's died comment says plainly that no transcript was found, same wording as handle_exit's"
+else
+  flunk "reconcile's died comment should say no transcript was found" "$comment_line"
+fi
+
 echo "15. Startup reconciliation: current names a card that is no longer in-flight → just cleaned up, no unclaim"
 fresh_state
 echo 141 > "$STATE/current"
