@@ -423,6 +423,17 @@ October 12, 2026): a quiet Watcher board promotes a clean commit on its own afte
 minutes with no canary ticks, rather than making a prompt change sit for hours just
 because nobody happened to hand the watcher a card.
 
+The canary stage is the only part of a deploy that pauses a lane, and the pause is the
+deployer's own: while it waits for a busy canary lane to go idle before moving the canary
+checkout, it writes `deploy <sha>` to that lane's `PAUSE` (a hand-made `PAUSE` is left
+alone). That file is lifted the moment the deployer stops caring about the commit it was
+written for — when the canary moves (the lane restarts on it) and, since card
+[#150](https://github.com/roloc/watcher/issues/150) (October 14, 2026), on **every hold**,
+including a hold of a newer commit that superseded the one the pause was written for.
+Before that, a hold left the pause behind: the watcher's own lane sat paused with no
+held card it was allowed to work, so the card's "let the watcher fix it" option could
+never run. An ordinary swap never touches a canary lane's `PAUSE` at all.
+
 ## Dependencies
 
 Steve can hand over several cards at once and the prerequisite is worked first. The
