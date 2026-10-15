@@ -1769,7 +1769,10 @@ follow_pointer() {
   # in the OLD release once a later deploy sweeps it. $new_here is .../bin; the release
   # folder is its parent, same as WATCHER_HOME's own derivation from WATCHER_HERE above.
   cd "$(dirname "$new_here")"
-  exec "$new" "${WATCHER_ARGV[@]}"
+  # The `+` form, not a bare "${WATCHER_ARGV[@]}": the daemon runs with no arguments, and
+  # bash before 4.4 (a Mac's /bin/bash 3.2) calls an empty array unbound under `set -u`, so
+  # the re-exec died there instead of following the pointer. Same argv on every bash.
+  exec "$new" ${WATCHER_ARGV[@]+"${WATCHER_ARGV[@]}"}
 }
 
 # record_release — $RELEASEFILE names the release folder (its bare directory name — a

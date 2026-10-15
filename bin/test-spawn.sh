@@ -2192,7 +2192,11 @@ echo "36. card #106: a tick is pinned to its own folder; the next one follows th
 # of this very spawn.sh — bin/spawn.sh's own WATCHER_HERE resolves THROUGH the pointer, so
 # invoking it as "$TMP/pointer/bin/spawn.sh" (rather than $SPAWN directly, as every other
 # test here does) is what makes this exercise the real path a deploy flips.
-POINTER_ROOT="$TMP/pointer-test"
+# Resolved (`cd -P`), not "$TMP/pointer-test" as named: spawn.sh's own WATCHER_HERE and
+# pointer_moved resolve the whole path, not just the pointer, and a Mac's $TMPDIR is itself
+# a symlink (/var/folders -> /private/var/folders), so the names it logs carry the resolved
+# prefix. Linux's mktemp has no such link; there both spellings are the same string.
+POINTER_ROOT="$(cd -P "$TMP" && pwd)/pointer-test"
 rm -rf "$POINTER_ROOT"; mkdir -p "$POINTER_ROOT/v1/bin" "$POINTER_ROOT/v2/bin"
 cp "$SPAWN" "$POINTER_ROOT/v1/bin/spawn.sh"; cp "$SPAWN" "$POINTER_ROOT/v2/bin/spawn.sh"
 chmod +x "$POINTER_ROOT/v1/bin/spawn.sh" "$POINTER_ROOT/v2/bin/spawn.sh"
