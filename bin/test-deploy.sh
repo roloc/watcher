@@ -478,6 +478,40 @@ run
 check "canary H: once idle, the swap and restart go ahead"            [ "$(canary_head)" = "$T" ]
 check "canary H: …and the pause is lifted"                             [ ! -e "$STATE/watcher/PAUSE" ]
 
+# H2. Card #150 (October 14, 2026): the deployer's own PAUSE outlived the target it was
+# written for. T1 paused the busy canary lane and waited for it to go idle; T2 landed,
+# became the target, and was held (the suite failed on it twice) — and the hold path
+# returned without lifting T1's pause. The watcher lane is the only one working the watcher
+# board, so the held card's own option A ("move it to In progress and let the watcher fix
+# it") could never run. A hold lifts the PAUSE the deployer owns, whichever target it was
+# written for, and never a hand-made one.
+canary_fresh; OLD="$(canary_head)"; T1="$(commit commands/watch.md canary-h2)"
+echo 961 > "$STATE/watcher/current"
+run   # T1: the canary lane is busy, so it is paused and waited on
+check "canary H2: the busy lane is paused for the first target"       grep -q "^deploy $T1" "$STATE/watcher/PAUSE"
+touch "$TMP/eval-fails"; T2="$(commit commands/watch.md canary-h2b)"
+run; run   # T2 is the target now; the suite fails on it twice and it is held
+check "canary H2: the newer commit is held"                           called "Deploy held: ${T2:0:7} is not live"
+check "canary H2: …and the deployer's own PAUSE goes with it"         [ ! -e "$STATE/watcher/PAUSE" ]
+check "canary H2: …the lane was never restarted"                      not_called_exact "systemctl restart watcher@watcher"
+check "canary H2: …and the canary checkout never moved"               [ "$(canary_head)" = "$OLD" ]
+# The same, with a red check on the newer commit instead of a failed suite.
+rm -f "$TMP/eval-fails"
+canary_fresh; T1="$(commit commands/watch.md canary-h2c)"
+echo 962 > "$STATE/watcher/current"
+run
+check "canary H2 (red check): the busy lane is paused for the first target" grep -q "^deploy $T1" "$STATE/watcher/PAUSE"
+T2="$(commit commands/watch.md canary-h2d)"; echo "completed failure" > "$TMP/ci"
+run
+check "canary H2 (red check): the newer commit is held"               called "Deploy held: ${T2:0:7} is not live"
+check "canary H2 (red check): …and the deployer's own PAUSE goes with it" [ ! -e "$STATE/watcher/PAUSE" ]
+# A PAUSE Steve made by hand is not the deployer's to lift, on a hold any more than on a deploy.
+echo "completed success" > "$TMP/ci"
+canary_fresh; : > "$STATE/watcher/PAUSE"; touch "$TMP/eval-fails"; T="$(commit commands/watch.md canary-h2e)"
+run; run   # held: the suite failed twice
+check "canary H2: a hand-made PAUSE is still there after a hold"      [ -f "$STATE/watcher/PAUSE" ] && [ ! -s "$STATE/watcher/PAUSE" ]
+rm -f "$TMP/eval-fails" "$STATE/watcher/current"
+
 # I. A card the spawner parked during the soak (two attempts, no progress) holds the commit
 # like a dead tick does. The marker is an empty file under the lane's parked/, so this is
 # the "modified since" read with no result json to lean on — the half of canary_died that

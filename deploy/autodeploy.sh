@@ -225,6 +225,14 @@ overridden() {
 # hold <sha> <why, plain words> <details>: one Stuck card per commit, never repeated.
 hold() {
   local sha="$1" why="$2" details="$3" short="${1:0:7}" repo owner board url n body
+  # Card #150 (October 14, 2026): a hold ends this script's interest in the target, so any
+  # PAUSE the canary stage wrote while waiting for its lane(s) to go idle — for THIS target
+  # or for the older one it superseded — is lifted here, on every hold path, before
+  # anything else. Without this, the deployer paused watcher@watcher for 39e6be2, 557306c
+  # landed and was held, and the only lane working the watcher board sat paused with
+  # nothing held for it to fix. Only a PAUSE that is `ours` (canary_unpause); a hand-made
+  # one is Steve's and stays.
+  canary_unpause
   [ -f "$DSTATE/held/$sha" ] && return 0
   say "HOLDING $short: $why"
   read -r repo owner board <<< "$(self_env)"
