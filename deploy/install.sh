@@ -31,9 +31,9 @@ if [ -d "$WATCHER_DIR/.git" ]; then
   # command substitution inside a default-value expansion kills the script right here,
   # before the `:?` below ever runs — silently, with none of this file's own messages.
   REPO_URL="${WATCHER_REPO:-$(git -C "$WATCHER_DIR" remote get-url origin 2>/dev/null || true)}"
-  : "${REPO_URL:?install.sh: could not read the git origin already at $WATCHER_DIR, and WATCHER_REPO is unset -- set WATCHER_REPO=<the git URL of your fork>}"
+  : "${REPO_URL:?install.sh: could not read the git origin already at $WATCHER_DIR, and WATCHER_REPO is unset — set WATCHER_REPO=<the git URL of your fork>}"
 else
-  REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> -- $WATCHER_DIR is missing, or not a git checkout (a copy made by rsync has no origin to read), so there is nothing to derive it from}"
+  REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> — $WATCHER_DIR is missing, or not a git checkout (a copy made by rsync has no origin to read), so there is nothing to derive it from}"
 fi
 
 # canary_clone: makes $WATCHER_CANARY_DIR a clone of $WATCHER_DIR — fast, local, no network

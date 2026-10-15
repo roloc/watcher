@@ -384,8 +384,8 @@ Nothing here is riffmap-shaped, but two settings are worth knowing before the fi
 - **`WORKTREE_COPY_DIRS`** names the project's gitignored, in-tree private inputs —
   space-separated, relative to the checkout — copied into every card worktree so a tick can
   read them. Unset or `""` (the default) copies nothing; a project with some sets
-  `WORKTREE_COPY_DIRS="docs/fixtures data/seed"` (riffmap's is its meeting transcripts,
-  `docs/transcripts`). A directory that is not there is skipped.
+  `WORKTREE_COPY_DIRS="docs/fixtures data/seed"` (riffmap's is its own meeting transcripts
+  directory — `projects/riffmap.env` names it). A directory that is not there is skipped.
 
 To split it into lanes, add
 `projects/<name>-<lane>.env` that sources `<name>.env` and sets `PROJECT_NAME=<name>-<lane>`
