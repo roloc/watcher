@@ -278,7 +278,7 @@ chmod +x "$BIN/claude"
 
 # gh: records every call, does nothing else.
 # gh: logs every call on ONE line, newlines in a --body collapsed to spaces — the spawner's
-# comments to Steve are multi-line (docs/talking-to-steve.md), and every assertion below
+# comments to the owner are multi-line (docs/talking-to-the-owner.md), and every assertion below
 # greps the whole call as a single line ("gh issue comment 40.*2 attempts").
 # `gh api repos/<r>/issues/<n>/dependencies/blocked_by` (the spawner's dependency check)
 # prints $GH_DEPS_DIR/<n>.json when that file exists, else an empty list — or fails like
@@ -718,7 +718,7 @@ else
   flunk "Stuck move --why" "$why_line"
 fi
 if grepped 'gh issue comment 40' && grep -q 'gh issue comment 40.*2 attempts' "$TESTLOG"; then pass "Stuck comment names the two attempts"; else flunk "Stuck comment" "$(cat "$TESTLOG")"; fi
-# The park comment is read by Steve on his phone (docs/talking-to-steve.md): the ask on the
+# The park comment is read by the owner on their phone (docs/talking-to-the-owner.md): the ask on the
 # first line, one question, lettered options with the recommendation first, and how to
 # answer. A regression to a prose paragraph must fail here, not on a card.
 park_line="$(grep 'gh issue comment 40' "$TESTLOG" || true)"
@@ -1863,7 +1863,7 @@ if not_grepped "board.py move 700"; then pass "no PR but inside the grace → un
 fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tDropped here by hand'
 GH_PR_LIST_FILE="" INREVIEW_NO_PR_GRACE_SEC=0 run --once >/dev/null 2>&1
 if grepped "board.py move 700 Stuck - Needs help"; then pass "In review + no PR past the grace → Stuck"; else flunk "expected a move to Stuck" "$(cat "$TESTLOG")"; fi
-if grep -q 'gh issue comment 700.*Needs @test-owner: .*no pull request.*Question: .*\*\*A\. .*\*\*B\. .*\*\*C\. ' "$TESTLOG"; then pass "…with the ask first, one question, lettered options (talking-to-steve shape)"; else flunk "Stuck comment shape" "$(cat "$TESTLOG")"; fi
+if grep -q 'gh issue comment 700.*Needs @test-owner: .*no pull request.*Question: .*\*\*A\. .*\*\*B\. .*\*\*C\. ' "$TESTLOG"; then pass "…with the ask first, one question, lettered options (talking-to-the-owner shape)"; else flunk "Stuck comment shape" "$(cat "$TESTLOG")"; fi
 
 fresh_state; board_list ""; board_review $'700\tP1\tbuilder\t-\tStale green PR'
 GH_PR_LIST_FILE="$PRS" INREVIEW_STALE_SEC=0 run --once >/dev/null 2>&1

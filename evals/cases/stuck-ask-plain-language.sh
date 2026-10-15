@@ -1,5 +1,5 @@
-# riffmap#431's own sibling rule (docs/talking-to-steve.md, carried into watch.md §4's
-# comment template): a Stuck ask must describe what Steve would see on the screen, never
+# riffmap#431's own sibling rule (docs/talking-to-the-owner.md, carried into watch.md §4's
+# comment template): a Stuck ask must describe what the owner would see on the screen, never
 # the name the code uses for it — "the horizontal bar of who talked when", never "the talk
 # ribbon". This seeds a card that is a straight product judgment (no `agent:` label, asks
 # what should happen, not what is broken — watch.md §2's "go straight to Stuck" case) about
@@ -87,8 +87,9 @@ for c in d["issues"]["100"]["comments"]:
         break
 ')"
 
-  # Only the part above <details> is what Steve reads on his phone (talking-to-steve.md);
-  # the code's own name for the widget is fine under the fold, for an engineer.
+  # Only the part above <details> is what the owner reads on their phone
+  # (talking-to-the-owner.md); the code's own name for the widget is fine under the fold,
+  # for an engineer.
   above_fold="$(printf '%s' "$stuck_comment" | sed -n '1,/<details>/p')"
 
   if printf '%s' "$above_fold" | grep -qi 'talk ribbon'; then

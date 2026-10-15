@@ -91,5 +91,5 @@ though a human reading the file would say it obviously does.
 
 - **Access, for a card `/triage` cannot route.** <If a symptom card can arrive with no
   reachable link at all (commands/triage.md's "stuck on access" case), name the one action
-  that unblocks it, in the exact words a Stuck comment should use — `- Steve: <that
+  that unblocks it, in the exact words a Stuck comment should use — `- Owner: <that
   action> — no tick can open the link above.`>

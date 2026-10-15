@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tail a lane's live activity: which card it holds, and what the tick itself is doing
-# right now. `journalctl -u watcher@<lane> -f` (docs/steve-cheat-sheet.md) only shows
+# right now. `journalctl -u watcher@<lane> -f` (docs/owner-cheat-sheet.md) only shows
 # spawn.sh's OWN lines — poll, launch, exit — because the tick's `--output-format json`
 # file is written once, at exit (see the comment above `print_claude_cmd` in spawn.sh).
 # The one thing that updates while a tick runs is its own session transcript, kept under

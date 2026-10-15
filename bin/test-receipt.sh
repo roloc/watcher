@@ -126,7 +126,7 @@ if [ "$RC" = 0 ]; then pass "screen change, both receipts clean: exits 0"; else 
 
 # 6. Docs-only: every changed file is a `.md` outside the gate. Exempt — passes with no
 # comments at all, never looking for a receipt.
-scenario "$SHA" "docs/talking-to-steve.md" ""
+scenario "$SHA" "docs/talking-to-the-owner.md" ""
 run
 if [ "$RC" = 0 ]; then pass "docs-only: exits 0 with no receipt"; else flunk "docs-only: exits 0 with no receipt" "rc=$RC: $OUT"; fi
 if printf '%s' "$OUT" | grep -qi "docs-only"; then

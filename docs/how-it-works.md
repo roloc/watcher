@@ -1,7 +1,7 @@
 # How the watcher works
 
 Written for the agents that run inside it. Read this once before touching a card, a
-review, or this repo. If you are reading it as a human, `docs/steve-cheat-sheet.md` is the
+review, or this repo. If you are reading it as a human, `docs/owner-cheat-sheet.md` is the
 short version.
 
 ## Who is who
@@ -15,15 +15,15 @@ short version.
 | **Usability** | `agents/usability.md` | a subagent the tick calls once, on a screen change only, before `reviewer` | a second read-only pass that never sees the code: only the card's ask and the PR's pictures, blocking when the person the card names could not do the thing from a phone shot |
 | **Board CLI** | `bin/board.py` (`board` on the box) | called by both of the above | `list`, `show`, `move`, `unclaim` against the GitHub Projects board |
 | **Worktrees** | `bin/worktree.sh` | called by the spawner | one worktree per card beside the main checkout; copies private inputs in |
-| **Discord** | `bin/notify.py` | imported by the board CLI, and by `bin/metrics.py --post` | posts to Steve's channel when a card is stuck, something broke, or the Monday digest is due, and for nothing else — when a webhook is configured |
+| **Discord** | `bin/notify.py` | imported by the board CLI, and by `bin/metrics.py --post` | posts to the owner's channel when a card is stuck, something broke, or the Monday digest is due, and for nothing else — when a webhook is configured |
 | **Metrics** | `bin/metrics.py` | `--digest`/`--post`: `watcher-metrics.timer`, every Monday; otherwise run by hand | read-only report over a lane's own logs: first-pass merge rate, park rate, deaths, turns/quota and time to Done, per week; `--digest` is the one-bullet-per-lane shape the Monday post sends |
-| **Floor page** | `bin/floor.py` | `watcher-floor.service`, always on | live, read-only page: what every lane is working on, idle, needing Steve, paused or asleep after a failure, plus recent ticks across every project; a Peek button on every lane's desk opens that lane's session — live while it works, its last one when it does not — decoded the same way `bin/tail.sh` decodes it; the ship station's Peek lists every step CI ran on main's newest commit, the commits before it, and the deployer's last lines (from its `history` file) — and, while a deploy is in progress, which step it is on, how fresh its last check was, which lane(s) it is waiting on (a link to each card, and its watchdog deadline), and when it lands at the latest (card #105). Each board also gets a **Needs Steve strip**: every card Stuck on that board, whichever lane last touched it (not only the one a lane's own desk happens to show), with a carousel of every picture its Needs Steve comments have shown — flip through with arrows, a swipe or the arrow keys, lettered by direction when the comment named one, newest round first, older rounds reachable past the last picture and marked with their own date. A **Studio** button shows the same data as a floor plan, drawn for a desk's browser (at least 960px; a phone pans it): the break room and Steve's office across the top with a hallway between, the main hallway, then a room per board with hallways between and the server room at the end. A board's room has a desk per lane (lit and scanning while it works), a counter for triage, the ship station on a shelf and the board's counts on a whiteboard; idle lanes walk out of the door and down the hallway to the break room (coffee machine, vending machine, couch, windows) and mill about there, a lane asleep after a failure naps on the couch, and a lane that needs Steve walks to his office and waves in front of his desk with its picture held up while the light over his door turns red. A ship station with nothing to watch (CI green, nothing deploying) goes on break the same way, leaving its shelf tagged "out" until there is something to watch again, and joins the crowd at cookie time too — just without a cookie in hand, since there is no picture of a dock hand eating one (card #126). His in-tray holds every Stuck card with the same carousel as the floor's strip. On his wall, two boards to click: the **bulletin board** (every card being worked and recently worked, each with a Peek that reads the card itself off GitHub through `/api/card.json`) and the **wins board** (every card a lane took to Done in the last seven days, by board, with its title from the board). Hover the **server room** for this box's load, memory, disk and uptime, the tokens every lane moved in the last day (from the tick logs' own `usage`), and — when `PROXMOX_URL` and `PROXMOX_TOKEN` are set in the box's `/etc/watcher/floor.env`, the floor service's own file, never `/etc/watcher/env`, which every lane's tick reads (`PROXMOX_VERIFY=0` for the lab's self-signed certificate) — every node and guest on the Proxmox host with its CPU and memory. Tap a character for a speech bubble, tap the bubble for its full Peek. `?demo=1` cycles a fixture through every state, for development and screenshots |
+| **Floor page** | `bin/floor.py` | `watcher-floor.service`, always on | live, read-only page: what every lane is working on, idle, needing the owner, paused or asleep after a failure, plus recent ticks across every project; a Peek button on every lane's desk opens that lane's session — live while it works, its last one when it does not — decoded the same way `bin/tail.sh` decodes it; the ship station's Peek lists every step CI ran on main's newest commit, the commits before it, and the deployer's last lines (from its `history` file) — and, while a deploy is in progress, which step it is on, how fresh its last check was, which lane(s) it is waiting on (a link to each card, and its watchdog deadline), and when it lands at the latest (card #105). Each board also gets a **Needs-the-owner strip**: every card Stuck on that board, whichever lane last touched it (not only the one a lane's own desk happens to show), with a carousel of every picture its `Needs @<login>` comments have shown — flip through with arrows, a swipe or the arrow keys, lettered by direction when the comment named one, newest round first, older rounds reachable past the last picture and marked with their own date. A **Studio** button shows the same data as a floor plan, drawn for a desk's browser (at least 960px; a phone pans it): the break room and the owner's office across the top with a hallway between, the main hallway, then a room per board with hallways between and the server room at the end. A board's room has a desk per lane (lit and scanning while it works), a counter for triage, the ship station on a shelf and the board's counts on a whiteboard; idle lanes walk out of the door and down the hallway to the break room (coffee machine, vending machine, couch, windows) and mill about there, a lane asleep after a failure naps on the couch, and a lane that needs the owner walks to their office and waves in front of their desk with its picture held up while the light over their door turns red. A ship station with nothing to watch (CI green, nothing deploying) goes on break the same way, leaving its shelf tagged "out" until there is something to watch again, and joins the crowd at cookie time too — just without a cookie in hand, since there is no picture of a dock hand eating one (card #126). Their in-tray holds every Stuck card with the same carousel as the floor's strip. On their wall, two boards to click: the **bulletin board** (every card being worked and recently worked, each with a Peek that reads the card itself off GitHub through `/api/card.json`) and the **wins board** (every card a lane took to Done in the last seven days, by board, with its title from the board). Hover the **server room** for this box's load, memory, disk and uptime, the tokens every lane moved in the last day (from the tick logs' own `usage`), and — when `PROXMOX_URL` and `PROXMOX_TOKEN` are set in the box's `/etc/watcher/floor.env`, the floor service's own file, never `/etc/watcher/env`, which every lane's tick reads (`PROXMOX_VERIFY=0` for the lab's self-signed certificate) — every node and guest on the Proxmox host with its CPU and memory. Tap a character for a speech bubble, tap the bubble for its full Peek. `?demo=1` cycles a fixture through every state, for development and screenshots |
 | **A browser** | `bin/browse.py` | run by a tick or by hand | headless Chrome, for looking at a page the way its reader does: `check` (did the page's own code fail?), `text`, `shot`. `curl` fetches what the server sent; a page that draws itself is only seen by running it |
-| **Steve** | a human | GitHub, on his phone | moves cards, answers Stuck cards, owns every product decision |
+| **The owner** | a human | GitHub, on their phone | moves cards, answers Stuck cards, owns every product decision |
 
-Steve is the only human. Everything else is a bot. The box the bots run in is throwaway and
-holds nothing worth protecting beyond a bot GitHub login and a Claude token, which is why
-the tick can run with permissions skipped.
+One human owns the board. Everything else is a bot. The box the bots run in is throwaway
+and holds nothing worth protecting beyond a bot GitHub login and a Claude token, which is
+why the tick can run with permissions skipped.
 
 ## The board
 
@@ -31,12 +31,12 @@ Columns, in order: `Backlog | Ready | In progress | In review | Done | Stuck - N
 
 | Column | Who moves cards in | Meaning |
 |---|---|---|
-| Backlog | Steve, or a tick returning a card it declined (`watch.md` §4b) | **never pulled from.** Where a self-gated card waits until Steve moves it to Ready |
-| **Ready** | Steve | **the loop's own queue** when `READY_PULL=1` (riffmap, since September 19, 2026): a lane promotes the top card here to In progress when In progress and Waiting are both dry and the column is under `WIP_MAX`. Without that setting it is Backlog's twin and nothing reads it |
-| **In progress** | Steve, a lane promoting a Ready or Waiting card, or Steve moving a Stuck card back | **what a tick is handed.** A card here is work in flight |
+| Backlog | the owner, or a tick returning a card it declined (`watch.md` §4b) | **never pulled from.** Where a self-gated card waits until the owner moves it to Ready |
+| **Ready** | the owner | **the loop's own queue** when `READY_PULL=1` (riffmap, since September 19, 2026): a lane promotes the top card here to In progress when In progress and Waiting are both dry and the column is under `WIP_MAX`. Without that setting it is Backlog's twin and nothing reads it |
+| **In progress** | the owner, a lane promoting a Ready or Waiting card, or the owner moving a Stuck card back | **what a tick is handed.** A card here is work in flight |
 | In review | the tick | the work is finished, reviewed and green, and only the merge did not happen. Not a resting place: the spawner sweeps it every poll (see "The In review sweep") |
 | Done | the merge (`Closes #n`) | shipped |
-| **Stuck - Needs help** | the tick or the spawner | the bots need Steve. The comment on the card says what, in the format in `docs/talking-to-steve.md` |
+| **Stuck - Needs help** | the tick or the spawner | the bots need the owner. The comment on the card says what, in the format in `docs/talking-to-the-owner.md` |
 
 Labels and fields the bots read:
 
@@ -78,7 +78,7 @@ board, under `WATCHER_CACHE_DIR` (default `/var/cache/watcher`, the one director
 lane and the floor service can both reach — falling back to `WATCHER_STATE_ROOT` or
 `~/.local/state/watcher` if that is not writable). `items()`'s TTL is `BOARD_CACHE_SEC`
 (default 120 seconds; `project()`'s is a fixed 10 minutes, since a board's fields only
-change when Steve edits it, and a miss on a field or option name invalidates that cache and
+change when the owner edits it, and a miss on a field or option name invalidates that cache and
 retries once live rather than waiting out the TTL). `BOARD_CACHE_SEC=0` turns the
 `items()`/`project()` cache off — reads and writes both — which is what every offline suite
 sets, so a test never touches a real directory. `show` always reads live, cache or not: it
@@ -144,7 +144,7 @@ The account's remaining budget and reset time ride along for free on whichever q
 asked for it (`items()`'s own GraphQL query includes `rateLimit{ remaining resetAt limit
 cost }`, itself free to ask for): `board.py ratelimit` prints the last cached value and never
 makes a call of its own. The floor page's header shows it, read the same way, so the next
-time a tick waits out the hourly reset Steve can see why from his phone instead of
+time a tick waits out the hourly reset the owner can see why from their phone instead of
 guessing.
 
 A tick's own wait on CI (`gh pr checks --watch`, `commands/watch.md` §3) spends the same
@@ -153,7 +153,7 @@ queries. `--interval 60` is the fix there — the same wait, a tenth of the poin
 
 ## Life of a card
 
-1. **The card reaches In progress** — Steve moves it there, or drags it to the Waiting
+1. **The card reaches In progress** — the owner moves it there, or drags it to the Waiting
    stage, or (with `READY_PULL=1`) a lane promotes it from **Ready** on its own.
 2. **The spawner polls** (`board list "In progress"`) once a minute. It takes the first row
    that is not `in-flight`, has fewer than 2 attempts on file, and is not blocked by an
@@ -182,7 +182,7 @@ queries. `--interval 60` is the fix there — the same wait, a tenth of the poin
 ## The In review sweep
 
 The spawner's input is In progress, so In review used to be a column nothing read: a card
-there waited for Steve to notice it, and a move to In review is not an alert (it posts
+there waited for the owner to notice it, and a move to In review is not an alert (it posts
 nothing to Discord). Two riffmap cards sat there for most of a day on September 17, 2026
 (watcher#18) — one whose tick ran out of budget before its review, one dropped there by
 hand with no PR. So every poll, after the board read and before the pick, `spawn.sh`'s
@@ -198,7 +198,7 @@ An `in-flight` card is skipped. Comment first, move second, and the move is retr
 poll until it lands; the comment is not repeated. State is `inreview/<n>.seen|.said|.requeued`
 under the lane's state directory; `.requeued` is cleared whenever the card reaches Stuck —
 parked by the sweep, by `park_stuck`, or by the tick itself (`handle_exit` reads the status
-back) — because Steve's answer starts it over, and when it closes. A re-queued card is
+back) — because the owner's answer starts it over, and when it closes. A re-queued card is
 picked on the following poll, not the same one. Everything fails closed: a PR lookup that
 errors is not "no PR" and the card is left alone for that poll, and a failed In review read
 never stops In progress from being served. Both limits are env knobs a project file may set.
@@ -207,9 +207,9 @@ never stops In progress from being served. Both limits are env knobs a project f
 
 The Stage field says what a tick is doing, so it means nothing once the card is closed —
 and a Done card that still reads "Parked" or "Merging" sits in the wrong group on the
-Stage-grouped view Steve works from. `handle_exit` empties the Stage of the card a tick
-was holding when it closed (step 6 above), which covers a tick that merges its own PR.
-It does not cover **a card that closes with no tick on it**: Steve merging the PR of a
+Stage-grouped view the owner works from. `handle_exit` empties the Stage of the card a
+tick was holding when it closed (step 6 above), which covers a tick that merges its own
+PR. It does not cover **a card that closes with no tick on it**: the owner merging the PR of a
 card parked in Stuck, or closing a card by hand. Five cards on the watcher's own board
 sat in Done reading "Parked" that way (watcher [#35](https://github.com/roloc/watcher/issues/35),
 [#36](https://github.com/roloc/watcher/issues/36), [#40](https://github.com/roloc/watcher/issues/40),
@@ -242,7 +242,7 @@ off this box, in its own time. `commands/watch.md` §3 gives that one case its o
 instead of Stuck or a wasted re-poll inside the tick's own window: label the card
 `awaiting-rebuild`, remove `in-flight`, leave it In progress, stop (riffmap
 [#602](https://github.com/roloc/riffmap/issues/602), October 8, 2026, is why — a tick that
-re-checked a 32-meeting rebuild a few times inside one run, then parked asking Steve
+re-checked a 32-meeting rebuild a few times inside one run, then parked asking the owner
 "should I keep checking back?", for a wait that needed nobody). `pick_card` skips a card
 carrying that label (one FYI comment the first poll it sees it, no attempt counted), until
 a project's own workflow removes it when the rebuild ends (riffmap
@@ -322,8 +322,8 @@ its state (`attempts/`, `parked/`, `current`, `PAUSE`, the pidfile, the logs), i
 clock, its sleeps. A card that changes agent label mid-life changes lanes, and starts its
 two-attempt budget over in the new lane's state.
 
-**The label is Steve's, but the bots put it there.** Steve writes cards in plain words
-and usually leaves the `agent:` label off. An unlabeled card is the **triage lane's**: on
+**The label is the owner's, but the bots put it there.** The owner writes cards in plain
+words and usually leaves the `agent:` label off. An unlabeled card is the **triage lane's**: on
 its next poll — within a minute, whatever the other lanes are doing — it runs `/triage`
 (`commands/triage.md`), which reads the card, adds the one `agent:` label its words call
 for (design-shaped asks — options, examples, mockups, a brief, a decision — to `designer`
@@ -348,9 +348,9 @@ rewrote or removed something the other side touched is a Stuck card, never a han
 merge. Design PRs live in `docs/` and build PRs in the source tree, so either should be
 rare; the additive kind is the one that does happen (riffmap#349, September 17, 2026).
 
-**Two attempts, then Steve.** That rule is enforced by the spawner, not by the tick. A tick
-that keeps retrying the same failing thing inside one run is wasting the budget; go to Stuck
-instead. Steve moving a parked card back to In progress resets the count to zero.
+**Two attempts, then the owner.** That rule is enforced by the spawner, not by the tick. A
+tick that keeps retrying the same failing thing inside one run is wasting the budget; go to
+Stuck instead. The owner moving a parked card back to In progress resets the count to zero.
 
 ## The watcher's own board
 
@@ -436,7 +436,7 @@ never run. An ordinary swap never touches a canary lane's `PAUSE` at all.
 
 ## Dependencies
 
-Steve can hand over several cards at once and the prerequisite is worked first. The
+The owner can hand over several cards at once and the prerequisite is worked first. The
 spawner asks GitHub, before it picks any row, which open issues the card is **blocked by**
 — the issue's *Relationships* field. A card with one is skipped, whatever its priority,
 and gets one FYI comment naming what it waits on (one more if that set changes); the poll
@@ -444,8 +444,8 @@ after the last blocker closes, it is picked. If the lookup itself fails the card
 for that poll, never launched on a guess. The Waiting stage goes through the same check.
 
 Where the relationships come from, best first: the tick that **files** the card records it
-in the same turn it writes the Depends-on sentence (`watch.md`, section 2); Steve sets one
-by hand on the issue; or `/triage` records it from the card's own words ("after #291",
+in the same turn it writes the Depends-on sentence (`watch.md`, section 2); the owner sets
+one by hand on the issue; or `/triage` records it from the card's own words ("after #291",
 "once the radar redesign lands", "depends on", a `Depends on` line — not "part of", "refs"
 or "see").
 
@@ -488,11 +488,11 @@ rediscovering by hand what its own first line said.)
 
 ## Self-pull
 
-Without it, the loop cannot start anything: every card waits on Steve's hand reaching
+Without it, the loop cannot start anything: every card waits on the owner's hand reaching
 In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third source.
 
-- **Order is fixed:** In progress, then Waiting, then Ready. A card Steve moved by hand is
-  always served before one the loop chose, whatever the priorities say.
+- **Order is fixed:** In progress, then Waiting, then Ready. A card the owner moved by
+  hand is always served before one the loop chose, whatever the priorities say.
 - **`WIP_MAX` (default 2) is board-wide,** not per lane: it counts every open card in the
   In progress column, because that column *is* the work in flight. A lane stops promoting
   when the column is full, whoever filled it. It costs no extra API call — the count comes
@@ -542,8 +542,8 @@ enforced cap, and a project whose lane pins a subscription backend (riffmap pins
 `RIFFMAP_BACKEND=claude`) has no such path at all.
 
 Why this is written down: the loop's own reports said "cost" and "spend" for two months,
-and everything reading them — agents and humans alike — repeated it back to Steve as
-money he had been charged (September 19, 2026). The number was never a bill.
+and everything reading them — agents and humans alike — repeated it back to the owner as
+money they had been charged (September 19, 2026). The number was never a bill.
 
 ## State on disk
 
@@ -555,7 +555,7 @@ money he had been charged (September 19, 2026). The number was never a bill.
 | `spawn.pid` | the singleton lock |
 | `PAUSE` | present = the spawner idles; `touch` to pause, `rm` to resume |
 | `current` | the card the running (or crashed) tick holds; reconciled at the top of every poll |
-| `attempts/<n>` | attempt count for card n; reset on a success that left In progress, or when Steve moves a parked card back |
+| `attempts/<n>` | attempt count for card n; reset on a success that left In progress, or when the owner moves a parked card back |
 | `parked/<n>` | the one Stuck comment for card n was posted |
 | `parked-ok/<n>` | the move to Stuck actually landed |
 | `stage-sweep.last` | when this lane last ran the closed-card Stage sweep (epoch seconds) |
@@ -572,8 +572,8 @@ money he had been charged (September 19, 2026). The number was never a bill.
 |---|---|---|
 | Done | removed | success; attempts reset |
 | In review | removed | success; attempts reset |
-| Stuck - Needs help | removed | success as far as the tick goes; attempts reset; Steve's turn |
-| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog, so it waits for Steve to move it to Ready again |
+| Stuck - Needs help | removed | success as far as the tick goes; attempts reset; the owner's turn |
+| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog, so it waits for the owner to move it to Ready again |
 | In progress, labeled `awaiting-rebuild` | removed | success: the fix is merged but gated on a known downstream rebuild (`watch.md` §3); attempts reset. `pick_card` skips it until a project's workflow drops the label, or the stale-label sweep parks it after 12 hours |
 | In progress, with THIS lane's label (or none) | removed | no progress; attempts +1; at 2 the spawner parks it |
 | In progress, with ANOTHER lane's label | removed | success: the tick relabeled it for that lane (a triage, or `/watch` routing a design card); attempts reset, the other lane starts its own count |
@@ -584,8 +584,8 @@ money he had been charged (September 19, 2026). The number was never a bill.
 
 ## Discord
 
-Steve does not sit on the board; he gets pinged — **only when a card is stuck, something
-broke, or the Monday digest is due.** When `DISCORD_WEBHOOK_URL` is set (in
+The owner does not sit on the board; they get pinged — **only when a card is stuck,
+something broke, or the Monday digest is due.** When `DISCORD_WEBHOOK_URL` is set (in
 `/etc/watcher/env` for the box, or in a project's env file), `board.py` posts to the
 channel **after** a change lands, so the board is always the record and Discord only ever
 repeats it. Every post names the card and links to it, except the digest, which has no
@@ -593,7 +593,7 @@ single card behind it (below).
 
 | Event | Posted by | Looks like |
 |---|---|---|
-| **a move to Stuck** | the tick (comment first, then move), the spawner's park, or the deployer's held card | 🚨 **Needs Steve:** the ask, quoted from the card, red, with the PR when there is one; `DISCORD_MENTION` pings someone |
+| **a move to Stuck** | the tick (comment first, then move), the spawner's park, or the deployer's held card | 🚨 `Needs @<login>:` the ask, quoted from the card, red, with the PR when there is one; `DISCORD_MENTION` pings someone |
 | a run died holding the card | the spawner's sweeper or reconciliation | ⚠️ `the run ended without finishing`; the next poll may retry |
 | the product detector filed a card | `bin/detect.sh`, after the card lands in Backlog | 📉 **Something broke:** the metric, the reading and the average, and the page to look at |
 | the Monday digest | `bin/metrics.py --digest --post`, on `watcher-metrics.timer` | 📊 the loop's own numbers, per lane: ticks, first-pass rate, parks, median turns per shipped card and deaths for the week just ended, each with last week's number in parentheses |
@@ -605,9 +605,10 @@ a fixed schedule rather than per event, the way `stuck`/`released`/`breach` each
 card changing column, crossing into a new stage, shipping, or being closed by hand posts
 nothing, and neither does a run that ended with its PR open (the next poll merges it): the
 floor page shows all of that live. Until October 1, 2026 every one of them posted, and
-Steve asked for the channel back: "Now that we have the floor page I don't think we need to
-be so verbose to discord. Can we only hit the discord when something is stuck or broken?"
-A channel that repeats every step is a channel nobody is reading when the alert comes.
+the owner asked for the channel back: "Now that we have the floor page I don't think we
+need to be so verbose to discord. Can we only hit the discord when something is stuck or
+broken?" A channel that repeats every step is a channel nobody is reading when the alert
+comes.
 
 Nothing is posted per poll, per tick, or for a quiet tick, and the digest is the one post
 on a clock instead of an event — `watcher-metrics.timer` fires Monday 06:00 Central
@@ -621,8 +622,8 @@ lanes are under `WATCHER_STATE_ROOT`.
 ## Watching the product
 
 The spawner's sweeps keep the *loop* healthy. Nothing above watches the product itself — a
-regression that ships to a project's own staging box waited for Steve to notice it, until
-card [#36](https://github.com/roloc/watcher/issues/36). `bin/detect.sh` closes that gap the
+regression that ships to a project's own staging box waited for the owner to notice it,
+until card [#36](https://github.com/roloc/watcher/issues/36). `bin/detect.sh` closes that gap the
 same way the deployer closes its own: a small script on a timer, no model, deterministic.
 
 - **Generic in the watcher, specific in the project.** `bin/detect.sh <project>` does
@@ -636,9 +637,9 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   nothing else. At or above the large band: a card, filed in **Backlog** with the metric,
   the rolling average, the readings behind it, and (best-effort) the commit on `main` at
   the time — evidence, not a diagnosis. **No second card while the first stays open** —
-  closing it, however Steve closes it, is what allows the next one.
-- **The card is written like one of Steve's**, with no `agent:` label, so a project with a
-  triage lane routes it the same as anything else he might have filed. It names the
+  closing it, however the owner closes it, is what allows the next one.
+- **The card is written like one of the owner's**, with no `agent:` label, so a project
+  with a triage lane routes it the same as anything else they might have filed. It names the
   artifact that shows the problem (`DETECT_LOOK_URL`, when the project has one) — the same
   "look before you diagnose" rule `commands/watch.md` §2 holds every tick to.
 - **Discord stays a repeater.** `bin/detect.sh` never talks to Discord itself; once the
@@ -655,14 +656,14 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   crossing each band, run against stubbed `gh`/`board` — and CI runs it the same as the
   other two.
 
-## Where Steve comes in
+## Where the owner comes in
 
-- He moves cards in. He answers Stuck cards by replying on the card and moving it back to
-  In progress. He can pause the box with a file and read the logs.
-- **Every message aimed at him follows `docs/talking-to-steve.md`.** First line is the ask,
-  bullets, one question, lettered options, how to answer. This is a hard rule for the tick,
-  the reviewer's escalations, and the spawner's comments alike.
-- He does not read reviewer reports, log files, or code comments unless he goes looking.
+- They move cards in. They answer Stuck cards by replying on the card and moving it back
+  to In progress. They can pause the box with a file and read the logs.
+- **Every message aimed at them follows `docs/talking-to-the-owner.md`.** First line is
+  the ask, bullets, one question, lettered options, how to answer. This is a hard rule for
+  the tick, the reviewer's escalations, and the spawner's comments alike.
+- They do not read reviewer reports, log files, or code comments unless they go looking.
   Those can be as dense as they need to be.
 
 ## Hard rules for every agent
@@ -675,11 +676,11 @@ same way the deployer closes its own: a small script on a timer, no model, deter
 - Never wait on an external reviewer. There is none. The reviewer runs in the session and
   returns.
 - Remove `in-flight` on every exit. A leaked label strands the card.
-- A product decision is Steve's. Do not guess it; park the card with the options laid out.
+- A product decision is the owner's. Do not guess it; park the card with the options laid out.
 - **A fact is not a product decision.** What drew, what the value was, whether it
   reproduces — go and look, including at the project's own live data where its `CLAUDE.md`
-  says how. Ask Steve for judgment, never for something a machine recorded, and never mix
-  the two in one card.
+  says how. Ask the owner for judgment, never for something a machine recorded, and never
+  mix the two in one card.
 - **A symptom card is not done until its symptom is checked again.** Fetch the artifact the
   card names one more time before the card closes, and say in one sentence what it now
   shows. Still there? The card does not close, however green the build, and however good
@@ -694,10 +695,10 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   filed it, and says which sentence of the root it is serving. When the last card off a root
   closes, the root's own symptom is checked again and the answer is commented on the root.
 - **What a card asks for lands where the person who asked can open it.** The plan's first
-  line says what Steve gets and where; a command on the box is never the deliverable for
-  someone who reads the board on his phone. When a card can be read two ways that land in
-  different places, build the one he can open; only when he could open both is it a
-  question, and then it is asked before building, not after.
+  line says what the owner gets and where; a command on the box is never the deliverable
+  for someone who reads the board on their phone. When a card can be read two ways that
+  land in different places, build the one they can open; only when they could open both
+  is it a question, and then it is asked before building, not after.
 - **A screen is run before it ships, and looked at in a browser when it is reported
   broken.** A fetch is not a look: the server answering says nothing about what was drawn.
 - **A screen change gets `usability`'s look too, before `reviewer`'s** — the one pass
@@ -734,5 +735,5 @@ Deploying a new watcher version happens by itself: `watcher-deploy.timer` runs
 commit and every lane is idle (README, "Deploys happen by themselves"). A held commit is a
 Stuck card on the Watcher board. `deploy/rollout.sh` is the manual fallback for a session;
 it stops the deployer's timer while it runs. Neither ever signals a tick. The watcher's own files live at `/opt/watcher` on the box; the spawner exports that path to
-the tick as `WATCHER_HOME`, so `cat "$WATCHER_HOME/docs/talking-to-steve.md"` works from any
-worktree.
+the tick as `WATCHER_HOME`, so `cat "$WATCHER_HOME/docs/talking-to-the-owner.md"` works from
+any worktree.

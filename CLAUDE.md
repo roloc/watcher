@@ -2,7 +2,7 @@
 
 A headless Claude Code loop that turns a GitHub Projects board into merged PRs. Read
 `docs/how-it-works.md` before changing anything here; it is the map. Read
-`docs/talking-to-steve.md` before writing any text a human will read.
+`docs/talking-to-the-owner.md` before writing any text a human will read.
 
 ## Layout
 
@@ -24,9 +24,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   and blocks when the person the card names could not do the thing from a phone shot.
   Read-only, blocking findings only, one round.
 - `bin/board.py`, `bin/worktree.sh` — the board CLI and the worktree helper. `bin/test-board.py`
-  is `board.py`'s offline suite — the Needs-Steve comment reading (`ask`, and `images`: the
-  mockups and screenshots under a Stuck comment's `Look:` section, which `bin/floor.py` shows
-  inline instead of making Steve click through to the card, card #91). `python3 bin/test-board.py`
+  is `board.py`'s offline suite — the Needs-the-owner comment reading (`ask`, and `images`:
+  the mockups and screenshots under a Stuck comment's `Look:` section, which `bin/floor.py`
+  shows inline instead of making the owner click through to the card, card #91). `python3 bin/test-board.py`
   (CI runs it); run it after touching either of those two readers.
 - `bin/notify.py` — Discord posts, called only from `board.py` (a `move` to Stuck, and
   `notify`). It posts when a card is stuck or something broke, and for nothing else.
@@ -81,8 +81,8 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   review that never ran, fails it instead of merging silently. Required alongside `verify`
   in `.github/workflows/ci.yml`'s `review-receipt` job. `bash bin/test-receipt.sh` is its
   offline suite (CI runs it); run it after touching the file.
-- `docs/` — for agents (`how-it-works.md`, `talking-to-steve.md`) and for Steve
-  (`steve-cheat-sheet.md`).
+- `docs/` — for agents (`how-it-works.md`, `talking-to-the-owner.md`) and for the owner
+  (`owner-cheat-sheet.md`).
 - `deploy/autodeploy.sh` — **the deploy path.** A timer on the box (`watcher-deploy.timer`)
   ships `main` by itself: `verify` green on the commit, the replay suite green in a scratch
   clone, then a fresh release folder cloned, installed, and the `/opt/watcher` pointer
@@ -114,10 +114,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 
 ## Rules for editing this repo
 
-- **Anything Steve reads follows `docs/talking-to-steve.md`.** That includes the Stuck
-  comment template in `watch.md`, the reviewer's `For Steve` block, and the comment bodies
-  in `spawn.sh`. First line is the ask, bullets, one question, lettered options, how to
-  answer. A test in `test-spawn.sh` checks the spawner's park comment keeps that shape.
+- **Anything the owner reads follows `docs/talking-to-the-owner.md`.** That includes the
+  Stuck comment template in `watch.md`, the reviewer's `For the owner` block, and the
+  comment bodies in `spawn.sh`. First line is the ask, bullets, one question, lettered
+  options, how to answer. A test in `test-spawn.sh` checks the spawner's park comment keeps
+  that shape.
 - Keep `watch.md` and `reviewer.md` generic. If a rule only makes sense for one project, it
   belongs in that project's `CLAUDE.md` or its `.claude/commands/watch.md` override.
 - `spawn.sh` and `--dry-run` share `print_claude_cmd`; never let the real launch and the
@@ -167,15 +168,15 @@ above:
   PR body and the Done comment say, in plain words, that it goes live on its own once the
   lanes are idle, and flag anything that changes how every lane behaves (`commands/`,
   `agents/`, `bin/spawn.sh`).
-- **Steve can open three things: the board, the Discord channel, and the floor page — all
-  from his phone.** He does not ssh. So a card that asks for a way to *see*, *watch*,
+- **The owner can open three things: the board, the Discord channel, and the floor page —
+  all from their phone.** They do not ssh. So a card that asks for a way to *see*, *watch*,
   *check* or *look at* something is asking for it in one of those places — the floor page,
   unless its words say otherwise — and a command on the box is not an answer to it, however
   literally the title reads as one. A command is a fine *part* of the work (the floor
-  page's Peek is `bin/tail.py` underneath); it is never the thing he gets. When a card can
+  page's Peek is `bin/tail.py` underneath); it is never the thing they get. When a card can
   be built two ways that land in different places, that is the card's real question: build
-  the one he can reach, and say which in the first line of the plan; if you cannot tell,
-  that is one question for Stuck before anything is built, not a guess he finds afterwards.
+  the one they can reach, and say which in the first line of the plan; if you cannot tell,
+  that is one question for Stuck before anything is built, not a guess they find afterwards.
   (Card [#63](https://github.com/roloc/watcher/issues/63), September 30, 2026: "a way to
   tail the log for a lane" shipped as `bin/tail.sh`, a command that needs ssh. He reopened
   it: "I would like to view these things from the floor page.")
@@ -193,14 +194,14 @@ above:
   `python3 bin/browse.py check http://192.168.176.45:8787/` loads the live page the way a
   browser does and prints every error its own code raised; `shot` gives you the picture.
   The page draws itself with a script, so `curl` returning 200 and a full document says the
-  service is up and nothing about what Steve saw. A page you only fetched is a page you did
-  not look at, and "it loads fine from here" on the strength of `curl` is not a finding to
-  take to Stuck. (Card [#71](https://github.com/roloc/watcher/issues/71), October 1, 2026:
+  service is up and nothing about what the owner saw. A page you only fetched is a page you
+  did not look at, and "it loads fine from here" on the strength of `curl` is not a finding
+  to take to Stuck. (Card [#71](https://github.com/roloc/watcher/issues/71), October 1, 2026:
   five clean fetches, then a Stuck card asking Steve what he had seen. `check` says it in
   one line.)
-- **The Done comment says where to look and what is there right now.** Steve's next move
-  after a card closes is to open the thing. So the closing comment names the place — the
-  floor page's link, for anything on it — and says what he will see when he opens it
+- **The Done comment says where to look and what is there right now.** The owner's next
+  move after a card closes is to open the thing. So the closing comment names the place —
+  the floor page's link, for anything on it — and says what they will see when they open it
   *today*, including when the honest answer is "nothing yet". A feature that only shows in
   a state the box is not in right now reads as a feature that did not ship; if that is
   what you are about to write, the design is usually not finished. (Card #63 once more:

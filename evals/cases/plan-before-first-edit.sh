@@ -92,7 +92,7 @@ case_check() {
   # comment before anything else — "picked this up" — so the plan is never literally the
   # tick's first comment; it is the SECOND `gh issue comment` call on this card, and a
   # body with backticks in it (as a plan naming a flag or a file almost always has) is
-  # refused on `--body` and goes through `--body-file` instead (talking-to-steve.md), so
+  # refused on `--body` and goes through `--body-file` instead (talking-to-the-owner.md), so
   # this cannot grep the comment's own text out of the log line — only its position.
   # Line numbers in $EVAL_LOG stand in for wall-clock order: fakehub.py logs one line per
   # call, in the order the tick made them.

@@ -8,8 +8,9 @@ GitHub Projects board is the hand-off to you. Do **one** card per tick, then sto
 report — the spawner (`bin/spawn.sh`) calls you again.
 
 The watcher's own docs are at `$WATCHER_HOME/docs/` (`/opt/watcher/docs/` on the box):
-`how-it-works.md` is the map; `talking-to-steve.md` is the format for anything Steve reads.
-The rules you need from both are repeated here; read the docs when something is unclear.
+`how-it-works.md` is the map; `talking-to-the-owner.md` is the format for anything the
+owner reads. The rules you need from both are repeated here; read the docs when something
+is unclear.
 
 ## 1. Pick the card
 
@@ -19,8 +20,8 @@ board list "In progress"
 
 Columns: `issue  priority  agent  flags  stage  title`. Rows are already sorted P0 → P2.
 
-- Take the **first row whose flags do not include `in-flight`** — unless Steve named one
-  here: $ARGUMENTS
+- Take the **first row whose flags do not include `in-flight`** — unless the owner named
+  one here: $ARGUMENTS
 - **`in-flight` means another tick already owns it.** Skip it. Never work two cards at once.
 - **Nothing to take?** Say so in one line and stop. That is a successful, quiet tick — do
   not go looking for other work, do not pull from Ready, do not tidy the board.
@@ -35,8 +36,9 @@ board stage <n> Claimed
 board show <n>     # full body, labels, priority, status
 ```
 
-**Keep the Stage current.** The board has a `Stage` field Steve watches from his phone,
-and it is also how he hands work over: dragging a card into **Waiting** on the Stage view
+**Keep the Stage current.** The board has a `Stage` field the owner watches from their
+phone, and it is also how they hand work over: dragging a card into **Waiting** on the
+Stage view
 is enough — the spawner moves it to In progress and launches you; you never pick from
 Waiting yourself.
 `in-flight` says a tick owns the card, Stage says what it is doing. Set it the moment you
@@ -72,20 +74,20 @@ names one; otherwise you are the builder.
 **Write the plan before the first edit.** Before you touch a file, write down: what the
 person who asked ends up with, and where; the files that will change, in order; the test
 or check that proves the card is done (for a symptom card, the artifact you will re-fetch,
-§3); and the one risk you expect. Tell Steve you're starting — plain words, no paths above
-the fold (`docs/talking-to-steve.md` rule 8), and three bullets, which is all an `FYI:`
-gets (rule 1). **Post that comment before anything else in this section — before you touch
-a file, and before the Stage moves past `Claimed`.** The card is the one copy Steve can
-see, so a plan written only for the PR body and `reviewer`, with Steve told afterwards,
-leaves the card looking hung for however long the build takes (watcher
+§3); and the one risk you expect. Tell the owner you're starting — plain words, no paths
+above the fold (`docs/talking-to-the-owner.md` rule 8), and three bullets, which is all an
+`FYI:` gets (rule 1). **Post that comment before anything else in this section — before
+you touch a file, and before the Stage moves past `Claimed`.** The card is the one copy
+the owner can see, so a plan written only for the PR body and `reviewer`, with the owner
+told afterwards, leaves the card looking hung for however long the build takes (watcher
 [#98](https://github.com/roloc/watcher/issues/98), October 9, 2026: the card showed only
 "picked this up" for 57 minutes while a tick built, tested and ran the replay suite, and
 the plan comment landed at 20:26 UTC — after the work was done). The file list is for the
-PR body and for `reviewer`, not for him:
+PR body and for `reviewer`, not for them:
 
 ```
 🤖 **FYI:** plan for this card.
-- You get: <what Steve will see or be able to do when this is done, and where he opens it>
+- You get: <what the owner will see or be able to do when this is done, and where they open it>
 - Test: <what proves it's done, in a sentence>
 - Risk: <the one thing most likely to go wrong>
 ```
@@ -98,9 +100,9 @@ neither, write one yourself, from the card's own words, as the last thing you do
 before the first edit; it goes forward into the PR body under `## Verify` (§3), next to
 the real file list and real check that `## Plan` already carries — the `Test:`
 line above stays in plain words, same as `You get` and `Risk`, never the block itself. A
-block you wrote is a claim, the same as the rest of the plan; a block Steve wrote is the
-contract, and §3 never edits it to make it pass — a block that is wrong is a question for
-Steve, not something you rewrite to get green. A docs-only card needs no block:
+block you wrote is a claim, the same as the rest of the plan; a block the owner wrote is
+the contract, and §3 never edits it to make it pass — a block that is wrong is a question
+for the owner, not something you rewrite to get green. A docs-only card needs no block:
 `verify: none — docs only` is implied.
 
 **`You get` comes first, and it names a place the asker can actually open.** A card is a
@@ -108,12 +110,12 @@ request from a person who will go and use the result, so before anything else, s
 that person ends up with and where they find it: a page and what is on it, a message in
 their channel, a column on the board. The project's `CLAUDE.md` says where its people are;
 when it does not, assume a phone and the board — **never a shell on the box**. Writing this
-line is the check: if the honest version is "a command he runs over ssh" and he does not
+line is the check: if the honest version is "a command they run over ssh" and they do not
 use ssh, you have read the card as a different card. A short card can usually be built
 two ways that land in different places (a script and a page; a log line and an alert), and
 the title alone will not tell you which. Then:
 
-- **One of the two is somewhere the asker can open, the other is not: build the one he
+- **One of the two is somewhere the asker can open, the other is not: build the one they
   can open.** The other may still be worth having as the part underneath it, but it is
   never the deliverable.
 - **Both are, and they are different products: that is one question for Stuck (§4),
@@ -130,7 +132,7 @@ for.)
 
 Keep the exact list — real paths, the real check — for the PR body under `## Plan` (§3)
 and for `reviewer`, which you hand it to directly when you call it; the card comment is for
-Steve, not for `reviewer` to read back. The plan is a claim you're about to test, not
+the owner, not for `reviewer` to read back. The plan is a claim you're about to test, not
 evidence: it is not a contract, and `reviewer` reads the diff first regardless. If the
 build diverges, update both copies and say why in one line — an unexplained divergence,
 not a changed plan, is what `reviewer` checks for. Skip all of this for a card whose build
@@ -152,7 +154,7 @@ a card whose evidence is the picture, not the sentence under it. Fetch it and lo
 first: `curl -sL -H "Authorization: token $(gh auth token)" -o /tmp/card-<n>-1.png <url>`,
 then `Read` the file — the Read tool shows you a PNG. Say in one sentence what the picture
 shows, and check that against the code before you accept the card's own explanation of
-the cause: Steve's diagnosis is a hypothesis, the picture and the code are the evidence.
+the cause: the owner's diagnosis is a hypothesis, the picture and the code are the evidence.
 If they disagree, say so on the card and go to Stuck (§4) with what you saw — never build
 the fix for the wrong cause. (riffmap [#359](https://github.com/roloc/riffmap/issues/359),
 September 16, 2026: the card said "too many topics"; the screenshot showed every arc as a
@@ -166,17 +168,17 @@ about effort**, so find out before you decide you cannot: the project's `CLAUDE.
 what its data is and how a tick is allowed to read it, and a read-only capability link is
 the usual answer. A card that says *"this page is wrong"* is a card whose evidence is the
 page. (riffmap [#431](https://github.com/roloc/riffmap/issues/431), September 19, 2026: a
-tick asked Steve which of two widgets he had seen on a specific meeting. The meeting was
-one fetch away — its data said neither widget could have drawn — so the question spent a
-day of Steve's attention on something the tick could have answered in a minute.)
+tick asked the owner which of two widgets they had seen on a specific meeting. The meeting
+was one fetch away — its data said neither widget could have drawn — so the question spent
+a day of the owner's attention on something the tick could have answered in a minute.)
 
 **Look at it the way its reader did.** A page that draws itself with its own script is
 looked at by **running it in a browser**, never by fetching it. `curl` returns what the
 server sent: a 200 and a complete document say the server is up, and nothing about what
 was on the screen. So "I fetched it and it loads fine" is not having looked, and it is
-never grounds for asking Steve what he saw — what he saw is a fact (below), and the browser
-will show it to you. The same goes for your own change to a page: until something has run
-it, nobody knows whether it works, however many tests read its source.
+never grounds for asking the owner what they saw — what they saw is a fact (below), and
+the browser will show it to you. The same goes for your own change to a page: until
+something has run it, nobody knows whether it works, however many tests read its source.
 
 **Every project has a browser, whether or not it brings its own.** The watcher ships one
 with the box, and it works from any worktree:
@@ -208,14 +210,14 @@ error" on the first load.)
 
 **Could not look? Then you do not know — stop, never build from the description.** A
 login wall, a 401, an expired or revoked link, a page you cannot reach from this box: none
-of these make Steve's sentence the evidence instead. His words next to a link are a
-pointer to what he saw, not a spec of it — the link is the card, and a decision, a spec
+of these make the owner's sentence the evidence instead. Their words next to a link are a
+pointer to what they saw, not a spec of it — the link is the card, and a decision, a spec
 section, a mockup or a follow-on card written without opening it is built blind, however
 specific the words seemed. So, in this order:
 
 1. **Find the reader's way in.** The project's `CLAUDE.md` names it (riffmap: a meeting is
    read through its `/s/<token>` share link; the `/maps/<key>/…` URL is the owner's page and
-   always needs his Google session). Check the card's body *and* comments, and the root
+   always needs their Google session). Check the card's body *and* comments, and the root
    card's, for that form of link before you conclude there is none.
 2. **None there? Ask for exactly that, and go to Stuck (§4).** The ask is an access fact,
    not a judgment, so it is one line with the one action the project's `CLAUDE.md` names
@@ -238,7 +240,7 @@ line which sentence of it this work serves, on the card and in the PR body. The 
 the cards themselves: a spawned card names the one that filed it, and the root's comments
 name what came off it (`gh issue view <n> --json body,comments`). If the work in hand
 cannot be traced to a sentence of the root, **say so on the card before you build it**. A
-parent card's reasoning is a hypothesis exactly as Steve's diagnosis is, and the frame may
+parent card's reasoning is a hypothesis exactly as the owner's diagnosis is, and the frame may
 have been set wrong upstream — every card after it inherits that. The root's complaint is
 the thing that has to be true at the end.
 (riffmap [#429](https://github.com/roloc/riffmap/issues/429), September 19, 2026: the root
@@ -251,15 +253,15 @@ the first card and the last re-read the sentence.)
 came off the same root (`gh issue list --search "<root number> in:body" --state open`)
 and read the titles: an architect often files a surface's build card before its mockup
 is approved. If one already covers the work, update that card's body to what was decided
-since — the approved mockup, Steve's reply — and link it; never file a second.
+since — the approved mockup, the owner's reply — and link it; never file a second.
 (riffmap [#473](https://github.com/roloc/riffmap/issues/473), September 21, 2026: the tick
 that merged the trim mockup filed the renderer build card that
 [#460](https://github.com/roloc/riffmap/issues/460) already was; the older one still
-carried the cost caption Steve had just ruled out.)
+carried the cost caption the owner had just ruled out.)
 
 **A card you file that waits on another one records it, in the same turn you write the
-sentence.** Writing "Depends on #<m>" in the body is half the job: the words are for Steve,
-the *Relationships* field is what the loop reads, and it is what stops the card being
+sentence.** Writing "Depends on #<m>" in the body is half the job: the words are for the
+owner, the *Relationships* field is what the loop reads, and it is what stops the card being
 started before its prerequisite exists. Two commands, right after `item-add`:
 
 ```
@@ -272,37 +274,37 @@ verified. "Part of", "refs" and "see" are context, not order, and a card that me
 *reads better* after another one is not blocked by it. A 422 means the relationship is
 already there; that is fine, move on. Never remove one somebody else recorded.
 
-This is yours, not Steve's and not the triage lane's: `/triage` records dependencies from a
-card's words, but it only ever sees a card with **no** `agent:` label, so a card you file
-with a label — which is most of them — is never triaged at all. The spawner reads an
-explicit `Depends on #<m>` out of the body as a net, but it is a regex over prose and it
-only guesses; you know.
+This is yours, not the owner's and not the triage lane's: `/triage` records dependencies
+from a card's words, but it only ever sees a card with **no** `agent:` label, so a card
+you file with a label — which is most of them — is never triaged at all. The spawner
+reads an explicit `Depends on #<m>` out of the body as a net, but it is a regex over prose
+and it only guesses; you know.
 (riffmap [#447](https://github.com/roloc/riffmap/issues/447), September 20, 2026: one
 architect tick filed three cards at 02:50, each one's body naming the one before it, none
 of them recorded. Thirteen hours later a renderer tick picked up the last of the three,
 spent its whole run establishing that the contract field it needed did not exist yet, and
-parked in Stuck to ask Steve a question the card's own first line had already answered.)
+parked in Stuck to ask the owner a question the card's own first line had already answered.)
 
-**Answer your own factual questions. Only judgment goes to Steve.**
+**Answer your own factual questions. Only judgment goes to the owner.**
 
 - **A fact is anything the data, the code or the page decides**: what drew, what the value
-  was, which branch ran, whether it reproduces. **Go and find out.** Never ask Steve to
+  was, which branch ran, whether it reproduces. **Go and find out.** Never ask the owner to
   recall something a machine recorded.
 - **A judgment is what *should* happen** — taste, priority, product direction, what a user
-  ought to see. That is his, and asking is right.
+  ought to see. That is theirs, and asking is right.
 - **Never put both in one Stuck card.** A card that asks "what should the rule be, and also
   which widget did you see?" cannot be answered with one letter, so it is not answered at
   all. Answer the fact, then ask the judgment on its own.
-- **Before you open a Stuck card, re-read the card that spawned this one.** Steve states his
-  goal in the original ask far more often than he restates it later; if that goal already
-  decides your question, it is decided — build it, and say on the card which sentence you
-  read it from. (riffmap [#429](https://github.com/roloc/riffmap/issues/429) →
+- **Before you open a Stuck card, re-read the card that spawned this one.** The owner states
+  their goal in the original ask far more often than they restate it later; if that goal
+  already decides your question, it is decided — build it, and say on the card which
+  sentence you read it from. (riffmap [#429](https://github.com/roloc/riffmap/issues/429) →
   [#431](https://github.com/roloc/riffmap/issues/431), September 19, 2026: the parent card
   said "the sales widgets should only show when it is a sales call", and the child card
-  asked Steve whether a sales widget should show on a non-sales call.)
+  asked the owner whether a sales widget should show on a non-sales call.)
 
-**Build the rule the card names, or say why not.** When Steve states a rule ("only topics
-over five minutes"), that rule is the spec. Build it, or put the reason you did not in the
+**Build the rule the card names, or say why not.** When the owner states a rule ("only
+topics over five minutes"), that rule is the spec. Build it, or put the reason you did not in the
 PR body and on the card — never substitute your own rule silently. Not knowing what a
 chart should show past the state its mockup drew is a `designer` card, not a guess.
 
@@ -349,7 +351,7 @@ nobody ever rendered. A docs-only PR, or one that touches no screen, never gets
 (`LANE_COMMAND=/triage` — see `how-it-works.md`, "Lanes"; riffmap has one) an unlabeled
 card is labeled within a minute of the hand-off and never reaches you, so the rest of
 this section only applies to a project without one. There, a card with no `agent:` label
-is build work by default, but Steve writes the ask in plain words and often skips the
+is build work by default, but the owner writes the ask in plain words and often skips the
 label. If the project has a design-shaped agent (an `agent: designer` or `agent: architect` label on the
 repo — `gh label list`), read the card as a designer would and route it when:
 
@@ -369,7 +371,7 @@ gh issue edit <n> --add-label "agent: designer"      # or architect
 board stage <n> Waiting
 gh issue comment <n> --body "🤖 FYI: this reads as design work, so I routed it to the designer.
 - The design lane picks it up on its next poll, within a minute.
-- Nothing for Steve to do."
+- Nothing for the owner to do."
 board unclaim <n>
 ```
 
@@ -379,13 +381,13 @@ again. Never route a card that already carries an `agent:` label, and never rout
 project with no design agent to route to.
 
 A card whose `agent:` is empty and whose body asks a product question is a decision for
-Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4).
+the owner. **Do not do those.** Go straight to Stuck with the options laid out (§4).
 
 ## 3. Ship it
 
 - Open a PR whose body contains **`Closes #<n>`**, so the merge closes the card by itself —
   unless the card's symptom is still there at the end (next bullet) or it is a docs-only
-  PR merging ahead of Steve's judgment (below), the two cases that take `Refs #<n>`
+  PR merging ahead of the owner's judgment (below), the two cases that take `Refs #<n>`
   instead.
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
@@ -452,8 +454,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     32 meetings, 09:23Z to 14:43Z, re-polled inside one tick's own window until it parked in
     Stuck asking "should I keep checking back?"). When all three of these are true — the PR
     is merged, the project's required CI succeeded, and the deploy's own log shows that job
-    starting — the artifact not having moved yet is not a question for Steve, because there
-    is nothing to ask: it only needs to finish. Comment in one sentence what was built and
+    starting — the artifact not having moved yet is not a question for the owner, because
+    there is nothing to ask: it only needs to finish. Comment in one sentence what was built and
     what the artifact should show once that job ends, and that a project workflow will say
     when it does; `gh issue edit <n> --add-label awaiting-rebuild`; `board unclaim <n>`;
     leave the card **In progress**; stop with `Outcome: awaiting rebuild`. The PR still says
@@ -509,7 +511,7 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   **Stuck** (§4) — describe the failing check in plain words above the fold, same as a red CI
   twice, and put the block and its output under `<details>` same as any other exact error
   — and never edit the block to make it pass; a block that is wrong is a question for
-  Steve, not something you rewrite. A zero exit (or a `verify: none` whose reason holds
+  the owner, not something you rewrite. A zero exit (or a `verify: none` whose reason holds
   up) is what
   lets you call `reviewer` — now, on the pushed branch, handing it the plan, whether
   `usability` ran and what it found, and the verify block's own output (or point it at the
@@ -540,7 +542,7 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
   `review-receipt` green the same way, once more. Take or leave the nits. Then `gh pr
   merge --squash --delete-branch`.
 - **`main` may move under you** while you work — the other lane merges its own PRs, and so
-  does Steve. Before merging, and again if the merge is refused as not mergeable:
+  does the owner. Before merging, and again if the merge is refused as not mergeable:
   `git fetch origin && git -c merge.conflictStyle=diff3 merge origin/main`. If git merges
   it cleanly, push, wait for CI again, re-run the verify block and update `## Verify`; if
   the PR already carries a `reviewer` receipt (it got one at all, above), call `reviewer`
@@ -563,8 +565,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
     as above; merge. Leave one
     comment **on the PR, not on the card** — `gh pr comment <pr> --body "🤖 FYI: merged
     main; kept both sides of an additive conflict in <file>."` It is a note about the
-    merge, for whoever reads the PR later; the card is where Steve reads, and it needs
-    nothing from him. If CI is red on the merge commit, that is **Stuck** (§4), not a
+    merge, for whoever reads the PR later; the card is where the owner reads, and it needs
+    nothing from them. If CI is red on the merge commit, that is **Stuck** (§4), not a
     second try.
   - **Anything else** — a side rewrote or deleted lines the other side kept or changed
     differently, the same entry written two ways, a rename against an edit, or you are not
@@ -574,16 +576,16 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 
   Once per tick: if `main` moves again and conflicts again after your resolution, that is
   Stuck too. (riffmap#349, September 17, 2026: a four-line list conflict, both sides
-  appending a mockup entry, went to Steve as a decision and cost a day's round trip.)
+  appending a mockup entry, went to the owner as a decision and cost a day's round trip.)
 - Docs-only changes go through a PR the same way; they get no `reviewer` pass, unless they
-  touch the merge gate (§2). **When a docs-only PR's only open question is Steve's
+  touch the merge gate (§2). **When a docs-only PR's only open question is the owner's
   judgment** — a brief, a direction, a first mockup, nothing left to build — merge it on
-  green before the card parks, rather than holding it open for his reply: an open PR is a
+  green before the card parks, rather than holding it open for their reply: an open PR is a
   branch two actors can collide on (the worktree-sync card on this board,
   [#86](https://github.com/roloc/watcher/issues/86), has the incident). Its body carries
-  **`Refs #<n>`, never `Closes #<n>`** — the card is not done until Steve answers, so it
-  stays open the same way a symptom card does (above). Merge it, then go to **Stuck**
-  (§4) with the question, and record his answer afterward with a small follow-up PR whose
+  **`Refs #<n>`, never `Closes #<n>`** — the card is not done until the owner answers, so
+  it stays open the same way a symptom card does (above). Merge it, then go to **Stuck**
+  (§4) with the question, and record their answer afterward with a small follow-up PR whose
   body closes the card, never by reopening the first one. A project whose own `CLAUDE.md`
   says otherwise keeps its own rule.
 - You run with permissions skipped, inside a throwaway box. Nothing prompts and nothing
@@ -628,8 +630,8 @@ Steve. **Do not do those.** Go straight to Stuck with the options laid out (§4)
 ## 4. Stuck — the important half
 
 **Re-read the card, comments included, right before you ask.** `gh issue view <n> --json
-body,comments` again: Steve, or a session on his Mac, may have answered while you worked,
-and a question already answered on the card costs him a round trip for nothing. (riffmap
+body,comments` again: the owner, or a session on their Mac, may have answered while you
+worked, and a question already answered on the card costs them a round trip for nothing. (riffmap
 [#454](https://github.com/roloc/riffmap/issues/454), September 21, 2026: a tick parked
 asking for a share link that had been put on the card eight minutes after it started.)
 
@@ -640,17 +642,17 @@ request (evidence, a change, a further question), carry out the request as part 
 acting on the preference, and say on the card which sentence you read the choice from.
 Only a reply that is purely a question, with no preference anywhere in it, earns a second
 round. (riffmap-site [#1](https://github.com/roloc/riffmap-site/issues/1), October 8,
-2026: asked to pick a buyer, A, B or C, Steve wrote "I am leaning towards A and C first
+2026: asked to pick a buyer, A, B or C, the owner wrote "I am leaning towards A and C first
 then eventually expanding into B but would love to know if there is intent and demand
 from either of those people first" — an answer with a request for evidence attached. The
 next tick did the research, then parked the card a second time to ask "A alone, or A and
-C?", a question his own words had already answered.) **This never becomes license to
-guess**: a product decision stays Steve's regardless of how many rounds it takes
+C?", a question their own words had already answered.) **This never becomes license to
+guess**: a product decision stays the owner's regardless of how many rounds it takes
 ("Hard rules for every agent" in `how-it-works.md`) — a reply that is genuinely still
 just a question, with no lean anywhere in it, earns another honest round, however many
 of those there have already been.
 
-Move to **Stuck - Needs help** the moment you need Steve, rather than guessing —
+Move to **Stuck - Needs help** the moment you need the owner, rather than guessing —
 **comment first, then move**, so the Discord alert the move sends (see below) can quote
 your ask, and a crash between the two leaves the explanation on the card:
 
@@ -674,7 +676,7 @@ have tried the same failing thing twice.
 line is still `Needs @<login>:` (the real GitHub login, never the literal text
 `$OWNER_LOGIN`), and the question is still one question with lettered options
 — what changed is that you have a fact to put under it, not an opinion: what shipped, and
-what the thing he reported still shows. Say both in plain words ("the fix for X landed and
+what the thing they reported still shows. Say both in plain words ("the fix for X landed and
 the page still shows Y"), never the project's name for the code path you changed.
 
 **A measurement or a document is a deliverable, and it is yours** (September 19, 2026).
@@ -715,9 +717,9 @@ run in this session and return; if either does not, the tick failed and the card
 unclaimed, not parked. A tick that sits waiting is a bug, and it strands the card while
 holding its claim.
 
-**The comment is the deliverable, and Steve is the reader.** Steve is dyslexic and reads
-cards on his phone. He needs the ask on the first line, bullets, one question, and lettered
-options he can answer with a single letter. Write the comment to a file (a long body, or one
+**The comment is the deliverable, and the owner is the reader.** Assume the reader is
+dyslexic and on a phone. They need the ask on the first line, bullets, one question, and
+lettered options they can answer with a single letter. Write the comment to a file (a long body, or one
 with backticks, pipes, braces or a literal `$`, is refused on `--body "…"`) in exactly this
 shape:
 
@@ -749,7 +751,7 @@ Reply A, B or C on this card, or say which way you lean, then move it back to **
 </details>
 ```
 
-The rules behind the shape (full version in `talking-to-steve.md`):
+The rules behind the shape (full version in `talking-to-the-owner.md`):
 
 - **First line is the ask**, bold, starts with `Needs @<login>:`, where `<login>` is the
   real value of this environment's `OWNER_LOGIN` variable — run `echo $OWNER_LOGIN` (or
@@ -763,40 +765,40 @@ The rules behind the shape (full version in `talking-to-steve.md`):
 - **Exactly one question**, ending in `?`. Recommended option first, marked `(recommended)`.
 - **No paths, commands, code, or unexpanded acronyms above the fold.** Say "the build",
   not the check's name. Everything an engineer wants goes under `<details>`.
-  **Including the project's own names for what is on a screen** — describe what Steve
+  **Including the project's own names for what is on a screen** — describe what the owner
   would see ("the horizontal bar of who talked when"), never the name the code uses for
-  it ("the talk ribbon"). He looked at the page, not the spec.
-- **Links he has to open go right above the question, never under the fold.** A hosted
+  it ("the talk ribbon"). They looked at the page, not the spec.
+- **Links they have to open go right above the question, never under the fold.** A hosted
   mockup, a screenshot, a live page, the PR: a `**Look:**` list, one per line, what it is
   in plain words and then the URL. A link is not a path — a path is dead text on a phone,
   a link is one tap. **A direct link to an image (`.png`, `.jpg`, `.gif`, `.webp`) is what
   puts the picture on the floor page's own carousel** — name each one in plain words
-  ("Direction A — phone, light"), since that name is the caption Steve sees there; a
+  ("Direction A — phone, light"), since that name is the caption the owner sees there; a
   `.html` mockup or a live page has nothing to embed and stays a plain link. The
   `<details>` fold is collapsed on the phone app, so a link in there
-  is a link Steve never sees (riffmap cards #342 and #349, September 16, 2026: two design
-  approvals stalled because the mockup links were under the fold).
+  is a link the owner never sees (riffmap cards #342 and #349, September 16, 2026: two
+  design approvals stalled because the mockup links were under the fold).
 - **Say how to answer.** The last line above the fold is always the reply-and-move line.
-- A `reviewer` or `usability` finding headed to Steve arrives with its own `For Steve`
-  block; paste it in.
+- A `reviewer` or `usability` finding headed to the owner arrives with its own
+  `For the owner` block; paste it in.
 
 **Discord is not your job.** When the box has a webhook configured, a move to Stuck posts
-the alert to Steve's channel by itself, quoting your ask and linking the card; nothing
+the alert to the owner's channel by itself, quoting your ask and linking the card; nothing
 else you do posts there. Never post to Discord directly and never mention it in a
 comment. And never skip a `board stage` call — it is silent, and the Stage is what the
-floor page and the board show Steve while you work.
+floor page and the board show the owner while you work.
 
 ## 4b. Declined — the card says not to do it yet
 
 Some cards gate themselves. A card body that says *"do not work this until X"* is an
-instruction, and **being handed the card is not the same as X having happened** — Steve
-moves cards in batches, and a batch move is not a considered answer to a gate written
-weeks earlier. Honor the gate.
+instruction, and **being handed the card is not the same as X having happened** — the
+owner moves cards in batches, and a batch move is not a considered answer to a gate
+written weeks earlier. Honor the gate.
 
-**A decline is not Stuck** when the card itself says nothing is broken: Stuck sends Steve
-a 🚨 alert and asks him a question, and there is no question here — the card already
-states its own condition. It is also **not** a card you leave In progress. Move it back
-to **Backlog**:
+**A decline is not Stuck** when the card itself says nothing is broken: Stuck sends the
+owner a 🚨 alert and asks them a question, and there is no question here — the card
+already states its own condition. It is also **not** a card you leave In progress. Move
+it back to **Backlog**:
 
 ```
 gh issue comment <n> --body-file /tmp/card-<n>-declined.md
@@ -807,10 +809,10 @@ board unclaim <n>
 **Why Backlog specifically, and why this matters:** the spawner reads a card left
 **In progress** with this lane's label as *no progress*, bumps its attempt count, and
 **parks it in Stuck after two** — so a tick that correctly obeys a gate gets punished for
-it, twice, and then wakes Steve. Moving the card out of In progress is what makes the exit
-read as the success it is (`how-it-works.md`, "How a tick ends"). Backlog is the honest
-column: *filed, not scheduled*. Nothing pulls from Backlog, so the card waits there until
-Steve moves it to Ready again — which is him answering the gate.
+it, twice, and then wakes the owner. Moving the card out of In progress is what makes the
+exit read as the success it is (`how-it-works.md`, "How a tick ends"). Backlog is the
+honest column: *filed, not scheduled*. Nothing pulls from Backlog, so the card waits there
+until the owner moves it to Ready again — which is them answering the gate.
 
 The comment is `🤖 FYI:` shaped — nothing is being asked, so **no question and no lettered
 options**:
@@ -840,11 +842,11 @@ this), **In review** (finished, reviewed, green — only the merge is missing; �
 **A merged PR does not always mean Done.** A symptom card whose artifact still shows the
 symptom ends in **Stuck - Needs help** with its PR merged and its `Refs #<n>` leaving the
 card open (§3). That is a complete, honest tick, not a leak and not a failure: the code
-shipped, and the thing Steve reported did not change. Report it as `Outcome: stuck` and
-`Ended in: Stuck - Needs help`, and say in the `Needs Steve` line that the fix landed and
-the symptom survived. A docs-only PR merged ahead of Steve's judgment (§3) ends the same
-way: `Refs #<n>` merged, card open, `Outcome: stuck`, and the `Needs Steve` line is the
-question itself rather than a fix that didn't take.
+shipped, and the thing the owner reported did not change. Report it as `Outcome: stuck` and
+`Ended in: Stuck - Needs help`, and say in the `Needs the owner` line that the fix landed
+and the symptom survived. A docs-only PR merged ahead of the owner's judgment (§3) ends
+the same way: `Refs #<n>` merged, card open, `Outcome: stuck`, and the `Needs the owner`
+line is the question itself rather than a fix that didn't take.
 
 **Nor does leaving a card In progress always mean no progress.** The `awaiting-rebuild`
 exit (§3) also merges its PR and leaves the card In progress on purpose: the spawner reads
@@ -899,14 +901,14 @@ bullets is enough).
 
 ## Report
 
-Bullets, five lines, in this order — it is what the log keeps and what Steve skims:
+Bullets, five lines, in this order — it is what the log keeps and what the owner skims:
 
 ```
 - Card: #<n> <title>
 - Outcome: merged | PR up, waiting on merge | stuck | declined (gated) | routed to <agent> | awaiting rebuild | no progress
 - Ended in: Done | In review | Stuck - Needs help | Backlog | In progress
 - Quota: ~$<n> equivalent (subscription — not billed); project API spend $<x> (or "none")
-- Needs Steve: no | yes — <one line, the same as the first line of the Stuck comment>
+- Needs the owner: no | yes — <one line, the same as the first line of the Stuck comment>
 ```
 
 A quiet tick is one line: `Quiet tick: nothing claimable in In progress.`

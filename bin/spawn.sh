@@ -51,7 +51,7 @@
 #
 # A card that GitHub says is blocked by an open issue (the issue's "Relationships" field,
 # or what /triage recorded from the card's own words) is skipped by every lane until the
-# blocker closes, so Steve can hand over a batch of cards in one go and the prerequisite
+# blocker closes, so the owner can hand over a batch of cards in one go and the prerequisite
 # is worked first. With nothing recorded there, the card's own body is read for an explicit
 # "depends on #<m>" and honored the same way. One FYI comment per card says what it waits on.
 #
@@ -88,9 +88,9 @@
 # Exported to the tick (so `/watch` can read the watcher's own docs from any worktree):
 #   WATCHER_HOME       this repo's root                          (default: parent of bin/)
 #
-# Every comment this script leaves on a card is read by Steve on his phone. The shape is
-# fixed by docs/talking-to-steve.md: first line is the ask, bullets, one question, lettered
-# options, how to answer. test-spawn.sh checks the park comment keeps that shape.
+# Every comment this script leaves on a card is read by the owner on their phone. The shape
+# is fixed by docs/talking-to-the-owner.md: first line is the ask, bullets, one question,
+# lettered options, how to answer. test-spawn.sh checks the park comment keeps that shape.
 #
 #   bin/spawn.sh              # the daemon loop (what systemd runs)
 #   bin/spawn.sh --dry-run    # print the pick + the exact claude command, exit 0
@@ -224,7 +224,7 @@ POLL_INTERVAL="${POLL_INTERVAL:-60}"
 # Self-pull. Off by default: a project opts in from its env file, because pulling from
 # Ready means the loop starts work nobody handed it, and that is a policy choice, not a
 # default. With it on, Ready is the THIRD place a card can come from, tried only after
-# In progress and Waiting are both dry (see do_poll) — so a card Steve moved by hand is
+# In progress and Waiting are both dry (see do_poll) — so a card the owner moved by hand is
 # always served first.
 #
 # WIP_MAX is a board-wide budget, not a per-lane one: it counts every open card in the
@@ -350,7 +350,7 @@ poll_board() {
   if ROWS="$($WATCHER_BOARD list "In progress" 2>"$errfile")"; then
     BOARD_ERR="$(cat "$errfile" 2>/dev/null)"
     rm -f "$errfile"
-    # The Waiting stage: cards Steve dragged there on the Stage-grouped view. Best-effort —
+    # The Waiting stage: cards the owner dragged there on the Stage-grouped view. Best-effort —
     # a failure here must not stop In progress from being served, so it only logs.
     QUEUE_ROWS="$($WATCHER_BOARD queue 2>/dev/null)" || { QUEUE_ROWS=""; log "board.py queue failed; serving In progress only"; }
     # The Ready column, when this lane is allowed to pull from it. Best-effort in exactly
@@ -545,7 +545,7 @@ print(" ".join(sorted(found, key=int)))
 #
 # <source> is `body` when the dependency was read out of the card's own words rather than
 # its Relationships field (body_blockers), and then the comment says so and how to undo it:
-# a dependency nobody recorded is the one kind Steve may actually need to overrule. The
+# a dependency nobody recorded is the one kind the owner may actually need to overrule. The
 # marker keys on the blocker list alone, so the same dependency later recorded properly
 # does not earn a second comment.
 note_waiting() {
@@ -557,11 +557,11 @@ note_waiting() {
   links=""
   for b in $blockers; do links="${links:+$links, }[#$b](https://github.com/$PROJECT_REPO/issues/$b)"; done
   where=""
-  undo="- Nothing for Steve to do, unless one of those cards is not on its way."
+  undo="- Nothing for the owner to do, unless one of those cards is not on its way."
   if [ "$source" = body ]; then
     where="- Where I got that: this card's own words say so, and its Relationships field is empty.
 "
-    undo="- Nothing for Steve to do, unless one of those cards is not on its way — or the card's words are wrong, in which case edit them and I stop waiting."
+    undo="- Nothing for the owner to do, unless one of those cards is not on its way — or the card's words are wrong, in which case edit them and I stop waiting."
   fi
   if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card waits on $links, so I am not starting it yet.
 $where- I start it on my own once every card it waits on is closed.
@@ -587,7 +587,7 @@ note_awaiting_rebuild() {
   [ -f "$noted" ] && return 0
   if $WATCHER_GH issue comment "$n" --body "🤖 FYI: this card is waiting on a downstream rebuild, so I am not launching a tick for it.
 - I pick it up again on the poll after the label drops.
-- Nothing for Steve to do."; then
+- Nothing for the owner to do."; then
     : > "$noted"
   else
     log "awaiting-rebuild FYI comment failed for #$n; retried on a later poll"
@@ -658,12 +658,12 @@ pick_card() {
     # Round 5, N1: this row came from `board.py list "In progress"` — the card is In
     # progress RIGHT NOW. If parked-ok/<r_issue> also exists (park_stuck's own move for
     # this card actually succeeded, not merely attempted), the only way both can be true
-    # is Steve moved it back himself: a genuinely-parked card sits in Stuck - Needs help,
+    # is the owner moved it back themselves: a genuinely-parked card sits in Stuck - Needs help,
     # never In progress, and nothing else clears this marker. Checking parked-ok/<n>
     # specifically (not parked/<n>, which park_stuck also writes when the move FAILS) —
     # a card whose move simply failed was never actually elsewhere, so it reappearing in
     # this same list poll after poll is not a retry signal, it's the original failure
-    # persisting; treating that as "Steve retried it" would relaunch a card whose
+    # persisting; treating that as "the owner retried it" would relaunch a card whose
     # board.py move is simply broken on the very next poll. Before this branch existed at
     # all, a genuinely parked-then-retried card stayed parked forever: attempts/<n> was
     # never touched by a manual board move, so it sat at >= 2 and pick_card's safety net
@@ -677,11 +677,11 @@ pick_card() {
     if [ -f "$parked_ok" ]; then
       if [ "${DRY_RUN:-0}" != 1 ]; then
         rm -f "$parked_ok" "$parked_tried" "$attn"
-        log "#$r_issue: In progress with a confirmed parked-ok marker on file — Steve moved it back; attempts cleared, picking normally"
+        log "#$r_issue: In progress with a confirmed parked-ok marker on file — the owner moved it back; attempts cleared, picking normally"
       else
         # Cosmetic (round 6): --dry-run's whole contract is "claim/write nothing" — see
         # test 1 — so nothing was actually cleared here; say so, don't claim it was.
-        log "#$r_issue: In progress with a confirmed parked-ok marker on file — Steve moved it back; attempts would clear, picking normally"
+        log "#$r_issue: In progress with a confirmed parked-ok marker on file — the owner moved it back; attempts would clear, picking normally"
       fi
       attempts=0
     fi
@@ -766,7 +766,7 @@ bump_attempts() {
 #
 #   parked-ok/<n>  — "the move actually landed": written ONLY when `board.py move`
 #                     reports success. This is what pick_card's own reconciliation (above)
-#                     treats as "Steve must have moved it back" — board.py list only ever
+#                     treats as "the owner must have moved it back" — board.py list only ever
 #                     shows a card that's genuinely In progress right now, and the ONLY way
 #                     a card that was genuinely moved to Stuck shows up there again is a
 #                     human moving it back. A card whose move simply failed was NEVER
@@ -795,7 +795,7 @@ park_stuck() {
   local n="$1" detail="$2" transcript="${3:-}"
   local tried="$WATCHER_STATE/parked/$n" ok="$WATCHER_STATE/parked-ok/$n"
   mkdir -p "$WATCHER_STATE/parked" "$WATCHER_STATE/parked-ok"
-  # A card that reaches Stuck starts over when Steve sends it back: sweep_in_review's
+  # A card that reaches Stuck starts over when the owner sends it back: sweep_in_review's
   # "already had its one turn" marker must not outlive the park.
   rm -f "$WATCHER_STATE/inreview/$n.requeued"
 
@@ -823,10 +823,10 @@ park_stuck() {
   # retry there costs nothing, and a parked card with no explanation on it is what the
   # marker exists to prevent, not to cause.
   #
-  # The body is for Steve (docs/talking-to-steve.md): the ask on line one, bullets, one
-  # question, lettered options with the recommendation first, and how to answer. The
+  # The body is for the owner (docs/talking-to-the-owner.md): the ask on line one, bullets,
+  # one question, lettered options with the recommendation first, and how to answer. The
   # spawner only knows the card failed twice, not why, so the options are the three moves
-  # Steve can make; $detail, the log path and the transcript (card #143, when there is
+  # the owner can make; $detail, the log path and the transcript (card #143, when there is
   # one) are the engineer's crumbs, kept short.
   local transcript_line=""
   [ -n "$transcript" ] && transcript_line=$'\n- Transcript kept: '"$(basename "$transcript")"
@@ -1253,7 +1253,7 @@ try:
 except Exception:
     print("no")' "$show")"
   # The tick parked the card itself (its own Stuck exit, invisible to park_stuck): same
-  # rule as there — Steve's answer starts the card over, so sweep_in_review's one-turn
+  # rule as there — the owner's answer starts the card over, so sweep_in_review's one-turn
   # marker goes. Without this a card re-queued once, parked, answered and finished days
   # later would be parked again within a minute of reaching In review, with a comment
   # about a re-queue long past (review of watcher#19).
@@ -1288,7 +1288,7 @@ except Exception:
   if [ "$has_in_flight" = yes ] && [ "$(cat "$CURRENTFILE" 2>/dev/null || true)" = "$n" ]; then
     $WATCHER_BOARD unclaim "$n" || log "unclaim failed for #$n"
     # Two exits look identical from here — the tick's process is gone, the card still
-    # in-flight — and Steve reads them very differently. A run that DIED holding the card is
+    # in-flight — and the owner reads them very differently. A run that DIED holding the card is
     # the failure the second wording below was written for. A run that opened the card's PR
     # and then ended its turn before merging has done the work: riffmap#305, September 14,
     # 2026, ended with "waiting on CI — I'll be notified when the background check
@@ -1309,8 +1309,8 @@ $transcript_note
     fi
     pr="$(open_pr_for "$n" || true)"
     if [ -n "$pr" ]; then
-      # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve; the PR is the
-      # thing to look at, so it is the link, and no log path sits above the fold.
+      # FYI-shaped (docs/talking-to-the-owner.md): nothing is asked of the owner; the PR is
+      # the thing to look at, so it is the link, and no log path sits above the fold.
       $WATCHER_GH issue comment "$n" --body "🤖 FYI: PR #${pr%% *} is up for this card, but the run ended before merging it. I released the card; the next poll picks it up and merges once the checks are green.
 - PR: ${pr#* }
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
@@ -1319,7 +1319,7 @@ $transcript_note
       # No Discord post: nothing is broken — the work is done and the next poll merges it.
       # A second exit like this one parks the card, and the park is what alerts.
     else
-      # FYI-shaped (docs/talking-to-steve.md): nothing is asked of Steve here — the card is
+      # FYI-shaped (docs/talking-to-the-owner.md): nothing is asked of the owner here — the card is
       # released and the next poll may retry it; two of these in a row become a park.
       $WATCHER_GH issue comment "$n" --body "🤖 FYI: the run ended without finishing this card. I released it; the next poll may retry once.
 - Exit: ${rc}/${subtype} after ${elapsed_min} min
@@ -1478,7 +1478,7 @@ $transcript_note
 
 # --- the In review sweep ---------------------------------------------------------------------
 # In review used to be a column nothing read: the spawner's only input is In progress, so a
-# card that landed there stayed until Steve happened to look. Two riffmap cards did, for most
+# card that landed there stayed until the owner happened to look. Two riffmap cards did, for most
 # of a day (watcher#18, September 18, 2026): #378's tick ran out of budget before its review
 # and wrote "next tick needs to…" on a card no tick would ever open again, and #391 was
 # dropped there by hand six seconds after it was filed, with no PR at all. So every poll,
@@ -1488,7 +1488,7 @@ $transcript_note
 #     says somebody is. The grace covers the moments between a merge and the card closing.
 #   - an open PR, for INREVIEW_STALE_SEC        → back to In progress, ONCE: a tick finishes
 #     it (merge main, review if none ran, merge). `requeued` remembers that it had its turn.
-#   - back in In review after that turn         → Stuck. The bots had two goes; it needs Steve.
+#   - back in In review after that turn         → Stuck. The bots had two goes; it needs the owner.
 # State is three files per card under inreview/: <n>.seen (epoch of the first poll that saw
 # it here; removed when the card leaves the column), <n>.said (this round's comment went out
 # — a move that fails is retried every poll, the comment is not repeated), <n>.requeued.
@@ -1584,7 +1584,7 @@ Reply if you chose B, then move the card."
       fi
     else
       if $WATCHER_BOARD move "$r_issue" "$target" --why "$why"; then
-        # Steve's answer starts the card over: its next visit to In review gets its own turn.
+        # The owner's answer starts the card over: its next visit to In review gets its own turn.
         rm -f "$seen" "$said" "$requeued"
         log "#$r_issue: In review → Stuck ($why)"
       else
@@ -1702,7 +1702,7 @@ park_stale_rebuild() {
       # pick_card's own skip, above) from ever looking at this card again, so it must not
       # happen before the move actually lands — otherwise a failed move above leaves this
       # card unlabeled and with attempts still at 0, and the very next poll's pick_card
-      # launches a fresh tick on it while this comment is telling Steve it is parked.
+      # launches a fresh tick on it while this comment is telling the owner it is parked.
       $WATCHER_GH issue edit "$n" --remove-label in-flight --remove-label awaiting-rebuild || true
     else
       log "move to Stuck failed for #$n; will keep retrying on later polls"

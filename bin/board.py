@@ -13,9 +13,9 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
     python3 scripts/board.py notify <issue> released|breach ["<detail>"]
     python3 scripts/board.py dump                   # every open+closed item, as JSON (one call)
-    python3 scripts/board.py ask <issue>             # first line of the newest "Needs Steve" comment, or ""
+    python3 scripts/board.py ask <issue>             # first line of the newest "Needs @<login>" comment, or ""
     python3 scripts/board.py images <issue>          # direct image links under its "Look:" section, one per line
-    python3 scripts/board.py images <issue> --all-rounds  # every Needs Steve round, as JSON (bin/floor.py's carousel)
+    python3 scripts/board.py images <issue> --all-rounds  # every Needs @<login> round, as JSON (bin/floor.py's carousel)
     python3 scripts/board.py plan <issue>            # timestamp of the card's plan comment, or "" if none yet
     python3 scripts/board.py ratelimit               # cached GraphQL remaining/resetAt/limit, as JSON (never a call of its own)
     python3 scripts/board.py ledger                  # this hour's GraphQL spend by caller, as JSON (reads ledger.jsonl, no call of its own)
@@ -39,11 +39,11 @@ GitHub's side leaves a window where a concurrent reader can re-warm the cache wi
 stale, pre-mutation snapshot, which then serves for the rest of the TTL with nothing left
 to invalidate it a second time. `project()`
 (the board's fields and options) is cached the same way, for 10 minutes, and a miss on a
-field or option name invalidates it and retries once live — a column Steve just renamed is
-seen on that retry, not after the cache ages out on its own.
+field or option name invalidates it and retries once live — a column the owner just
+renamed is seen on that retry, not after the cache ages out on its own.
 
 Discord: when DISCORD_WEBHOOK_URL is set (see notify.py), a move to Stuck posts the alert
-after it lands (with the ask taken from the card's latest `Needs Steve` comment, or from
+after it lands (with the ask taken from the card's latest `Needs @<login>` comment, or from
 `--why`), and `notify` posts the two things that mean something broke (a run that died
 holding a card, a product check the detector filed a card for). Every other `move`, and
 every `stage`, is silent: the floor page shows those. A failed post is one stderr line,
@@ -80,7 +80,7 @@ import notify  # noqa: E402  (bin/notify.py, beside this file)
 OWNER = os.environ.get("BOARD_OWNER") or "roloc"
 # Card #154: a Stuck/park comment addresses a GitHub login instead of the word "Steve" —
 # `Needs @<login>:` — going forward, but every comment already on a board before this
-# shipped still says the old `Needs Steve:`. Every reader of a Needs-Steve-shaped comment
+# shipped still says the old `Needs Steve:`. Every reader of a Needs-shaped comment
 # (here, and bin/floor.py's board_ask/board_images/board_rounds, which call this module
 # rather than keeping a second copy) matches either form through this one pattern.
 NEEDS_RE = re.compile(r"Needs (?:Steve|@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?):")
@@ -107,8 +107,8 @@ BOARD_URL = f"https://github.com/users/{OWNER}/projects/{NUMBER}"
 # each other ever actually shared one; card #114, measured October 9, 2026); 0 disables the
 # whole cache — reads and writes both — which is what the offline suites set, so a test
 # never touches a real directory or sees a stale value a previous case wrote. `project()`
-# (the board's fields and options, which only change when Steve edits the board) gets its
-# own, longer TTL.
+# (the board's fields and options, which only change when the owner edits the board) gets
+# its own, longer TTL.
 BOARD_CACHE_SEC_DEFAULT = 120
 PROJECT_CACHE_SEC_DEFAULT = 600
 RATELIMIT_CACHE_NAME = "ratelimit.json"
@@ -568,7 +568,7 @@ def resolve_status(name):
     for o in opts:
         if o.lower() == name.lower():
             return o
-    # A miss invalidates the cache and tries once live — a column Steve just renamed is
+    # A miss invalidates the cache and tries once live — a column the owner just renamed is
     # invisible to project()'s 10-minute cache otherwise, and this is the only path that
     # would ever notice (card #98).
     _cache_invalidate(_project_cache_name())
@@ -624,7 +624,7 @@ def set_option(issue, field_name, value):
 def pr_for(issue):
     """The card's pull request, found by its branch (`card-<n>`, worktree.sh's naming).
     Returns {"url", "state"} or None. One `gh pr list`, so only called for the Stuck
-    alert, where the PR is usually the thing Steve has to look at."""
+    alert, where the PR is usually the thing the owner has to look at."""
     n = issue_num(issue)
     try:
         r = subprocess.run(["gh", "pr", "list", "--head", f"card-{n}", "--state", "all",
@@ -639,7 +639,7 @@ def pr_for(issue):
 def _comments(issue):
     """Every comment on the card, oldest first, straight from `gh issue view --json
     comments` — the one read both `_latest_needs_steve_comment` and `needs_steve_rounds`
-    build on, so there is exactly one reader of "what did Steve get asked", not two that
+    build on, so there is exactly one reader of "what was the owner asked", not two that
     could disagree."""
     n = issue_num(issue)
     try:
@@ -651,7 +651,7 @@ def _comments(issue):
 
 
 def _latest_needs_steve_comment(issue):
-    """The full body of the card's newest `Needs Steve`-shaped comment, or "" if it has
+    """The full body of the card's newest `Needs @<login>`-shaped comment, or "" if it has
     none. Shared by `needs_steve_ask` (the first line) and `needs_steve_images` (the
     `**Look:**` section below it) so there is exactly one reader of "which comment is the
     ask", not two that could disagree."""
@@ -665,7 +665,7 @@ def _latest_needs_steve_comment(issue):
 
 
 def needs_steve_ask(issue):
-    """The first line of the card's newest `Needs Steve` comment, or "". The tick posts
+    """The first line of the card's newest `Needs @<login>` comment, or "". The tick posts
     that comment before it moves the card to Stuck (watch.md §4), so the alert can carry
     the ask; the spawner passes its own reason with `--why` instead."""
     body = _latest_needs_steve_comment(issue)
@@ -692,7 +692,7 @@ def plan_posted_at(issue):
 # --- the `**Look:**` section: every direct image link under it, lettered by direction ---
 #
 # The section sits between the `**Look:**` heading and the next bold heading line
-# (talking-to-steve.md rule 10: "one link per line, what it is in plain words and then the
+# (talking-to-the-owner.md rule 10: "one link per line, what it is in plain words and then the
 # URL"). A regex anchored on the literal word "Question" used to find that end, which broke
 # the moment a card asked more than one question (riffmap-site#19's `**Question 1:**` /
 # `**Question 2:**`): the terminator never matched, and the "section" ran to the end of the
@@ -828,14 +828,14 @@ def _parse_look_images(body, max_images=MAX_LOOK_IMAGES):
 
 
 def needs_steve_images(issue):
-    """Direct image links — a mockup or a screenshot — under the newest `Needs Steve`
+    """Direct image links — a mockup or a screenshot — under the newest `Needs @<login>`
     comment's `**Look:**` section (card #91: bin/floor.py's inline preview, so a reader
     never has to open the card to find the picture its own ask is about)."""
     return [d["url"] for d in _parse_look_images(_latest_needs_steve_comment(issue))]
 
 
 def needs_steve_rounds(issue):
-    """Every `Needs Steve`-shaped comment — the same ones `_latest_needs_steve_comment`
+    """Every `Needs @<login>`-shaped comment — the same ones `_latest_needs_steve_comment`
     picks from, not only ones with a formal `**Question:**` heading (riffmap-site#18 asks
     with a plain "Reply with a letter…" line and still carries three directions of
     pictures) — newest first, as `{"when": <ISO timestamp>, "images": [{"url", "label",
@@ -867,9 +867,9 @@ QUEUE_STAGE = "Waiting"
 
 
 def cmd_queue():
-    """Cards Steve dragged into the `Waiting` stage from any column but In progress, Done
-    or Stuck — the spawner moves the one it picks to In progress before launching, so
-    Status stays truthful and the Stage-grouped board view is the only thing he touches."""
+    """Cards the owner dragged into the `Waiting` stage from any column but In progress,
+    Done or Stuck — the spawner moves the one it picks to In progress before launching, so
+    Status stays truthful and the Stage-grouped board view is the only thing they touch."""
     rows = [i for i in items() if i["state"] == "OPEN" and i["stage"] == QUEUE_STAGE
             and i["status"] not in ("In progress", "Done", "Stuck - Needs help")]
     rows.sort(key=lambda r: (PRI_ORDER.get(r["priority"], 3), r["number"]))
@@ -884,7 +884,7 @@ def cmd_move(issue, status, *rest):
     """`move <issue> "<status>" [--why "<one line>"]`. `--why` is only read for a move to
     Stuck: it becomes the ask in the Discord alert (the spawner uses it, since its own
     comment goes out after the move). Without it the alert quotes the card's newest
-    `Needs Steve` comment."""
+    `Needs @<login>` comment."""
     why = ""
     rest = list(rest)
     if rest and rest[0] == "--why":
@@ -913,8 +913,8 @@ CLEAR_FIELD = """mutation($p:ID!,$i:ID!,$f:ID!){ clearProjectV2ItemFieldValue(in
 
 def clear_stage(issue):
     """Empty the card's Stage. The spawner calls it when a card closes: a Done card still
-    reading "Merging" or "Claimed" sits in the wrong group on the Stage-grouped view Steve
-    works from (riffmap#425, #454, September 21, 2026). Quiet — no Discord post."""
+    reading "Merging" or "Claimed" sits in the wrong group on the Stage-grouped view the
+    owner works from (riffmap#425, #454, September 21, 2026). Quiet — no Discord post."""
     proj, fields = project()
     f = fields.get(STAGE_FIELD)
     if not f:
@@ -953,7 +953,7 @@ def _sweep_stamp_name():
 def cmd_sweep_stages():
     """Empty the Stage on every CLOSED card that still has one. `clear_stage` only runs
     for the card a tick was holding when it closed; a card that closes with no tick on it
-    — Steve merging a parked card's PR, or closing a card by hand — kept its last Stage
+    — the owner merging a parked card's PR, or closing a card by hand — kept its last Stage
     for good and sat in Done reading "Parked" (watcher#35, #36, #40, #43 and #44,
     September 28, 2026). Quiet — no Discord post.
 
@@ -999,8 +999,8 @@ def cmd_sweep_stages():
 def cmd_stage(issue, stage):
     """What the tick is doing right now: Claimed | Designing | Building | Testing |
     Reviewing | PR open | Merging | Parked. Status says who owns the card; Stage says
-    where it is. A board view grouped by Stage shows the columns Steve asked for, and the
-    floor page shows it on the lane's desk. Quiet — no Discord post. `-` empties it
+    where it is. A board view grouped by Stage shows the columns the owner asked for, and
+    the floor page shows it on the lane's desk. Quiet — no Discord post. `-` empties it
     (clear_stage)."""
     if stage == "-":
         rc = clear_stage(issue)
@@ -1081,9 +1081,9 @@ def cmd_dump():
 
 
 def cmd_ask(issue):
-    """The first line of the card's newest `Needs Steve` comment, or "" if it has none —
+    """The first line of the card's newest `Needs @<login>` comment, or "" if it has none —
     `needs_steve_ask` on its own, for a caller that only wants the ask (bin/floor.py's
-    Needs Steve pill) without moving the card."""
+    Needs-the-owner pill) without moving the card."""
     print(needs_steve_ask(issue))
     return 0
 

@@ -232,7 +232,7 @@ check "first fail: retried later, no card yet"         not_called "issue create"
 check "first fail: the step file says step 3 (the replay suite)" [ "$(sed -n 1p "$TMP/dstate/step")" = 3 ]
 run
 check "second fail: one card filed"                    [ "$(count 'gh issue create')" = 1 ]
-check "…in the talking-to-steve shape (the ask first)" called "Deploy held: ${T:0:7} is not live"
+check "…in the talking-to-the-owner shape (the ask first)" called "Deploy held: ${T:0:7} is not live"
 check "…put on the watcher board"                      called "gh project item-add 2 --owner roloc"
 check "…and moved to Stuck"                            called "board move 77 Stuck - Needs help owner=roloc number=2"
 check "…and the box did not move"                      [ "$(head_)" != "$T" ]
@@ -405,7 +405,7 @@ canary_tick_log error_during_execution
 run   # sees the dead tick
 check "canary C: the canary checkout rolls back"        [ "$(canary_head)" = "$OLD" ]
 check "canary C: the commit is held, not promoted"      [ "$(head_)" != "$T" ]
-check "canary C: one card filed (talking-to-steve shape)" called "Deploy held: ${T:0:7} is not live"
+check "canary C: one card filed (talking-to-the-owner shape)" called "Deploy held: ${T:0:7} is not live"
 check "canary C: …and moved to Stuck"                   called "board move 77 Stuck - Needs help owner=roloc number=2"
 
 # D. A quiet canary (DEPLOY_CANARY_QUIET_MIN=60) promotes on time, with no ticks at all

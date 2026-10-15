@@ -30,7 +30,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/hygiene.sh        the weekly debt sweep: stale branches, old TODOs, orphan scripts, dead doc
                           links; .github/workflows/hygiene.yml files one card from it on Mondays (see "The weekly hygiene card")
     deploy/add-project.sh the dozen hand steps of putting a new project on the watcher, as one
-                          idempotent script — run from Steve's Mac, never by a tick (see below)
+                          idempotent script — run from the owner's Mac, never by a tick (see below)
     templates/project-CLAUDE.md  the section a project's own CLAUDE.md needs for /watch to run
                           against it, built from what watch.md/triage.md/reviewer.md actually read
     bin/detect.sh         the product detector: a metric, a rolling baseline, fixed bands (see below)
@@ -45,8 +45,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     agents/reviewer.md    the last review pass: blocking findings only, one round
     agents/usability.md   a second, earlier pass on a screen change: the ask and the pictures only
     docs/how-it-works.md  the map, written for the agents: pieces, board, life of a card, state
-    docs/talking-to-steve.md  the format for anything a human reads (see below)
-    docs/steve-cheat-sheet.md one page for Steve: columns, answering a Stuck card, pause, logs
+    docs/talking-to-the-owner.md  the format for anything a human reads (see below)
+    docs/owner-cheat-sheet.md one page for the owner: columns, answering a Stuck card, pause, logs
     CLAUDE.md             rules for editing this repo
     projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, PROJECT_REPO,
                           WORKTREE_COPY_DIRS, and LANE_AGENTS for a lane
@@ -75,7 +75,7 @@ with its own state directory; a deploy restarts them all. Details in
 `docs/how-it-works.md`, "Lanes".
 
 **Dependencies.** A card GitHub says is *blocked by* an open issue (the issue's
-Relationships field, recorded by the tick that filed the card, set by Steve, or read by
+Relationships field, recorded by the tick that filed the card, set by the owner, or read by
 `/triage` from the card's words) is skipped by every lane until the blocker closes, so a
 batch of cards handed over at once is worked in order. With nothing recorded there, the
 spawner reads the card's own body for an explicit `Depends on #<m>` and honors that the
@@ -87,7 +87,7 @@ when In progress and Waiting are both dry, moving it to In progress before it la
 `WIP_MAX` (default 2) is the ceiling, counted across the whole In progress column rather
 than per lane, so the loop keeps a fixed number of cards moving and leaves the rest of
 Ready alone. Off by default: starting work nobody handed over is a policy choice, not a
-default. Order is always In progress, then Waiting, then Ready — a card Steve moved by
+default. Order is always In progress, then Waiting, then Ready — a card the owner moved by
 hand is never overtaken by one the loop chose. Details in `docs/how-it-works.md`,
 "Self-pull".
 
@@ -110,34 +110,34 @@ worktree.
 (card [#40](https://github.com/roloc/watcher/issues/40)) is a small stdlib HTTP server,
 always on (`watcher-floor.service`), that groups every lane in `projects/*.env` by the
 board it works and shows one of five states per lane — working (the card, its Stage,
-minutes since launch), idle (why), needs Steve (the card and the first line of its ask),
+minutes since launch), idle (why), needs the owner (the card and the first line of its ask),
 paused, or sleeping after a failure — plus the last few ticks across every project. Each
 board's lanes read in SDLC order — the triage lane drawn as a smaller dispatcher, then
 design, then build — and end at a **ship station**: the check runs on the newest `main`
 commit (`gh api`, REST only), and on the board whose repo is this checkout, the deployer's
 state from `/var/lib/watcher-deploy` (live, checking, testing, waiting, swapping, held — a
-held commit counts as needing Steve). It reads `projects/*.env`, each lane's state
+held commit counts as needing the owner). It reads `projects/*.env`, each lane's state
 directory, one `board.py dump` per board and two REST calls per project (all cached,
 refreshed about once a minute); it never changes anything. Read-only, LAN-only
 (reached off-site over WireGuard), runs as the unprivileged `watcher` user.
 `bin/test-floor.py` is its offline suite: fixture state directories, a stubbed board.
 
-## Talking to Steve
+## Talking to the owner
 
-Steve is the only human in the loop, and he is dyslexic. Every message aimed at him — a
-Stuck comment from the tick, a park comment from the spawner, a reviewer finding headed his
-way — follows `docs/talking-to-steve.md`:
+The owner is the only human in the loop. Assume they are dyslexic and on a phone. Every
+message aimed at them — a Stuck comment from the tick, a park comment from the spawner, a
+reviewer finding headed their way — follows `docs/talking-to-the-owner.md`:
 
-- **First line is the ask**, bold, starting `Needs Steve:` (or `FYI:` when nothing is needed).
+- **First line is the ask**, bold, starting `Needs @<login>:` (or `FYI:` when nothing is needed).
 - **Bullets, not paragraphs.** At most 8 above the fold, one fact each.
 - **One question**, ending in `?`, with lettered options. Recommended option first.
 - **How to answer**, always: reply A, B or C on the card, move it back to In progress.
-- **Links he has to open** (a mockup, a screenshot, the PR) **go right above the question**,
-  as a `Look:` list — the fold is collapsed on his phone.
+- **Links they have to open** (a mockup, a screenshot, the PR) **go right above the
+  question**, as a `Look:` list — the fold is collapsed on their phone.
 - **Paths, logs and code go under `<details>`**, never above the fold.
 
-He answers by replying on the card and moving it. Moving a parked card back to
-**In progress** resets its attempt count. `docs/steve-cheat-sheet.md` is his one page.
+They answer by replying on the card and moving it. Moving a parked card back to
+**In progress** resets its attempt count. `docs/owner-cheat-sheet.md` is their one page.
 
 ## Discord
 
@@ -255,8 +255,8 @@ script nothing runs, a link to a file that moved — is invisible to CI, which o
 one PR. `bin/hygiene.sh` sweeps for it; `.github/workflows/hygiene.yml` runs the sweep
 every Monday and files **one** card, `Weekly hygiene sweep — <date>`, with the report as
 its body — or files nothing when the sweep is clean. Auto-add lands it in **Backlog**;
-Steve moves it to **Ready** when he wants the week's debt paid, and the watcher's own lane
-works it like any other card. While a hygiene card is open the next sweep comments the
+the owner moves it to **Ready** when they want the week's debt paid, and the watcher's own
+lane works it like any other card. While a hygiene card is open the next sweep comments the
 fresh list on it instead of filing a second one. The same routine runs on riffmap
 ([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711)) and riffmap-site
 ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)); the script is
@@ -327,7 +327,7 @@ State is in `/var/lib/watcher-deploy/`. Knobs (environment on the unit): `DEPLOY
 is exactly what keeps one there to point back at.
 
 **The manual fallback**, for a Claude session when the deployer itself is broken or to try
-a branch on the box before it merges — never for Steve:
+a branch on the box before it merges — never for the owner:
 
     /opt/watcher/deploy/rollout.sh riffmap            # main
     /opt/watcher/deploy/rollout.sh riffmap <branch>   # a branch, before it merges
@@ -340,8 +340,8 @@ branch, run it again for `main`.
 
 Putting a project on the watcher used to be a dozen hand steps, written down in three
 places, most of them found only when they broke (card #39 — setting up this repo's own
-board, PR #38, is what surfaced them). Now it is one idempotent script, run from Steve's
-Mac (or wherever), authenticated as **yourself** — never as the bot, since two of its steps
+board, PR #38, is what surfaced them). Now it is one idempotent script, run from the
+owner's Mac (or wherever), authenticated as **yourself** — never as the bot, since two of its steps
 (main's branch protection, the board itself) need admin/ownership the bot is never given:
 
     TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>

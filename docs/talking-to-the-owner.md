@@ -1,24 +1,27 @@
-# Talking to Steve
+# Talking to the owner
 
-Steve is the CEO and the only human in this loop. He is dyslexic. He reads bot comments on a
-phone between meetings. A wall of prose does not get read. A short list with one clear
-question gets answered in a minute.
+The owner is the only human in this loop. Assume the reader is dyslexic and on a phone
+between meetings — that is the design assumption behind every rule here, not a biography.
+A wall of prose does not get read. A short list with one clear question gets answered in a
+minute.
 
-This contract covers **every message aimed at Steve**:
+This contract covers **every message aimed at the owner**:
 
 - a **Stuck** card comment written by the `/watch` tick;
 - the spawner's own park / sweeper comments (`bin/spawn.sh`);
-- a reviewer finding that is headed to Steve;
+- a reviewer finding that is headed to the owner;
 - the tick's end-of-run report;
-- a PR description or decision doc Steve is expected to read.
+- a PR description or decision doc the owner is expected to read.
 
 It does **not** cover agent-to-agent text (a reviewer report the tick consumes, a code
 comment, a log line). Those can be as dense as they need to be.
 
 ## The rules
 
-1. **First line is the ask.** Bold, one sentence, starts with `Needs Steve:`. If nothing is
-   needed from him, start with `FYI:` instead and keep the whole message to three bullets.
+1. **First line is the ask.** Bold, one sentence, starts with `Needs @<login>:` (the real
+   GitHub login that environment's `OWNER_LOGIN` variable names; the old unadorned
+   `Needs Steve:` only if it is somehow unset). If nothing is needed from them, start with
+   `FYI:` instead and keep the whole message to three bullets.
 2. **Bullets, not paragraphs.** At most 8 bullets above the fold. One fact per bullet. Aim
    for 15 words or fewer per bullet.
 3. **Exactly one question**, written as a question and ending in `?`. Never two questions.
@@ -34,47 +37,48 @@ comment, a log line). Those can be as dense as they need to be.
    read the choice from. Only a reply that is purely a question, with no preference
    anywhere in it, gets a second round — and a third, and however many it honestly takes:
    this is never license to guess the decision yourself. A product decision stays
-   Steve's, no matter how many rounds it takes to get.
+   the owner's, no matter how many rounds it takes to get.
 7. **Bold only what decides.** Bold the option labels and the one word that differs between
    options. Do not bold whole sentences.
 8. **Plain words above the fold.** No file paths, commands, code, stack traces, or
    unexpanded acronyms in the bullets. Say "the build" not "CI `verify`", say "the meeting
    summary format" not "the `MeetingMap` contract".
    **This covers the project's own names for the things on a screen.** A widget, panel,
-   chart or field has an internal name in the spec and the renderer, and Steve did not
-   read either — he looked at the page. Describe what he would see: "the horizontal bar
-   of who talked when", not "the talk ribbon". If a name cannot be avoided, describe it
-   first and put the name in brackets after. **Asking him to choose between two things he
-   has no name for is asking him nothing at all** (riffmap
+   chart or field has an internal name in the spec and the renderer, and the owner did not
+   read either — they looked at the page. Describe what they would see: "the horizontal
+   bar of who talked when", not "the talk ribbon". If a name cannot be avoided, describe it
+   first and put the name in brackets after. **Asking them to choose between two things
+   they have no name for is asking them nothing at all** (riffmap
    [#431](https://github.com/roloc/riffmap/issues/431), September 19, 2026: a card asked
-   whether he had seen "the ruler" or "the ribbon"; his answer was that there is nothing
-   called a ribbon on that page. Both are real names in `template.html`. Neither is a
-   name a reader has).
+   whether the owner had seen "the ruler" or "the ribbon"; their answer was that there is
+   nothing called a ribbon on that page. Both are real names in `template.html`. Neither is
+   a name a reader has).
 9. **Details go under a fold.** Everything an engineer would want (paths, diffs, logs, the
    exact error) goes at the bottom inside `<details><summary>Details</summary> … </details>`.
    A link is not a detail — see the next rule.
-10. **Links he has to open go right above the question.** A hosted mockup, a screenshot, a
-    live page, the PR that shows the thing: a `**Look:**` list between the bullets and the
-    question, one link per line, what it is in plain words and then the URL. The fold is
-    collapsed on the phone app, and Steve reviews on his phone, so a link under it is a
-    link he never sees. A repo path is not a link; it stays under the fold. A direct link
-    to an image (`.png`, `.jpg`, `.gif`, `.webp`) is also what the floor page's Needs Steve
-    carousel shows inline, captioned with the plain words written next to it — a `.html`
-    mockup or a live page has nothing to embed there and stays a link.
+10. **Links they have to open go right above the question.** A hosted mockup, a
+    screenshot, a live page, the PR that shows the thing: a `**Look:**` list between the
+    bullets and the question, one link per line, what it is in plain words and then the
+    URL. The fold is collapsed on the phone app, and the owner reviews on their phone, so a
+    link under it is a link they never see. A repo path is not a link; it stays under the
+    fold. A direct link to an image (`.png`, `.jpg`, `.gif`, `.webp`) is also what the
+    floor page's Needs-the-owner carousel shows inline, captioned with the plain words
+    written next to it — a `.html` mockup or a live page has nothing to embed there and
+    stays a link.
 11. **American English**, dates like *September 7, 2026*. Never *favour*, *optimise*,
     *behaviour*.
 12. **Never write "needs input".** Say what input. Never restate the card title as the ask.
 
-A good test: could Steve answer with a single letter, from the first screen, without opening
-the details? If the answer needs him to look at something, is the link to it on that first
-screen? If not, rewrite.
+A good test: could the owner answer with a single letter, from the first screen, without
+opening the details? If the answer needs them to look at something, is the link to it on
+that first screen? If not, rewrite.
 
 ## Templates
 
 ### A Stuck card comment (the tick)
 
 ```
-🤖 **Needs Steve: <one sentence saying what you need decided>**
+🤖 **Needs @<login>: <one sentence saying what you need decided>**
 
 - Card: <what the card asked for, in plain words>
 - Done so far: <what you tried>
@@ -104,15 +108,15 @@ Reply A, B or C on this card, or say which way you lean, then move it back to **
 ### The spawner's park comment (generated by `bin/spawn.sh`)
 
 The spawner cannot know *why* a card failed, only that it failed twice. Its comment says
-that, offers the three moves Steve can make, and points at the log under the fold.
+that, offers the three moves the owner can make, and points at the log under the fold.
 Keep any edit to it inside these rules; a test in `bin/test-spawn.sh` checks the shape.
 
-### A reviewer finding headed to Steve
+### A reviewer finding headed to the owner
 
-The reviewer talks to the tick, not to Steve. But when a finding is going to end up on the
-card (a blocking finding the tick disagrees with, or a third round), the reviewer adds a
-`For Steve` block at the end of its report in the shape above, so the tick can paste it
-into the Stuck comment unchanged.
+The reviewer talks to the tick, not to the owner. But when a finding is going to end up on
+the card (a blocking finding the tick disagrees with, or a third round), the reviewer adds
+a `For the owner` block at the end of its report in the shape above, so the tick can paste
+it into the Stuck comment unchanged.
 
 ### The tick's end-of-run report
 
@@ -121,7 +125,7 @@ into the Stuck comment unchanged.
 - Outcome: merged | PR up, waiting on merge | stuck | declined (gated) | routed to <agent> | no progress | quiet tick
 - Ended in: Done | In review | Stuck - Needs help | Backlog | In progress
 - Quota: ~$<n> equivalent (subscription — not billed); project API spend $<x> (or "none")
-- Needs Steve: no | yes — <one line, same as the first line of the Stuck comment>
+- Needs the owner: no | yes — <one line, same as the first line of the Stuck comment>
 ```
 
 A quiet tick (nothing claimable) is one line: `Quiet tick: nothing claimable in In progress.`
@@ -139,7 +143,7 @@ A quiet tick (nothing claimable) is one line: `Quiet tick: nothing claimable in 
 
 **After:**
 
-> 🤖 **Needs Steve: pick where speaker names live in the meeting summary.**
+> 🤖 **Needs @roloc: pick where speaker names live in the meeting summary.**
 >
 > - Card: add speaker names to the meeting summary.
 > - Done so far: the code change is ready either way.

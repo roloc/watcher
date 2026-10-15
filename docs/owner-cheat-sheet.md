@@ -1,11 +1,9 @@
-# Steve's cheat sheet
+# The owner's cheat sheet
 
 **You stock Ready. The bots do the rest.** One page, no code above the fold.
 
 **The floor page** shows what every bot is doing right now, without asking anyone:
-`http://192.168.176.45:8787/` (the box's LAN address today — it's on DHCP, so `hostname -I`
-on the box is the source of truth if this ever stops loading), reached off-site over
-whatever WireGuard tunnel already reaches the box. Each board reads left to right in the
+`http://<your box>:8787/`. Each board reads left to right in the
 order work flows: the **dispatcher** (triage, sorting new cards to the right bot), then
 **design**, then **build**, then **ship** — the build check on `main`, and for the
 watcher's own board whether the newest version is live, being tested, waiting for the bots
@@ -15,7 +13,7 @@ changes a card.
 
 **A board whose cards are waiting on you gets its own strip, pictures and all.** Any card
 in Stuck shows there — not only the one a lane's desk happens to be sitting on — with the
-ask above it and every picture its Needs Steve comment pointed at: flip through with the
+ask above it and every picture its Needs-the-owner comment pointed at: flip through with the
 arrows (or a swipe), lettered A/B/C when there were directions to choose from, the
 recommended one marked. Asked more than once? It opens on the newest round; older ones are
 still there, past the last picture, each dated. Nothing to approve yet — the card linked a
@@ -153,8 +151,8 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 | Comment starts with | Meaning | You need to do |
 |---|---|---|
 | 🤖 Watcher picked this up | a tick started on the card | nothing |
-| 🤖 **Needs Steve:** | a decision or an answer is needed | pick A, B or C, move the card |
-| 🤖 **Needs Steve:** the fix landed and it still looks the same | the code shipped and the thing you reported did not change, so the card stayed open | pick A, B or C, move the card |
+| 🤖 `Needs @<login>:` | a decision or an answer is needed | pick A, B or C, move the card |
+| 🤖 `Needs @<login>:` the fix landed and it still looks the same | the code shipped and the thing you reported did not change, so the card stayed open | pick A, B or C, move the card |
 | 🤖 **FYI:** I labeled this for the … lane | the triage bot picked the lane | nothing, unless you disagree — then change the label |
 | 🤖 **FYI:** not doing this yet — the card gates itself | the card's own text says to wait; the bot obeyed and put it back in Backlog | nothing, unless the wait is over — then edit that line out and move it to Ready |
 | 🤖 **FYI:** this card waits on … | it is blocked by an open card; it starts when that closes | nothing, unless that card is not on its way |
@@ -171,7 +169,7 @@ starting, each step, a card shipping — is on the floor page, not in the channe
 
 | Message starts with | Meaning | You need to do |
 |---|---|---|
-| 🚨 **Needs Steve:** | a card is in Stuck; the ask is in the message | open the card, pick A, B or C, move it back to In progress |
+| 🚨 `Needs @<login>:` | a card is in Stuck; the ask is in the message | open the card, pick A, B or C, move it back to In progress |
 | ⚠️ #n: the run ended without finishing | the tick died; it will be retried once | nothing, unless it comes back as 🚨 |
 | 📉 **Something broke:** | a product check failed; a card with the numbers is in Backlog | open the link in the message and look; move the card to In progress to have it fixed |
 | 📊 Weekly digest | Monday morning's numbers, per lane — ticks, first-pass rate, parks, turns, deaths, this week next to last | nothing |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A live, read-only page for the agents box: what every lane is doing right now, without
-ssh or journalctl (card #40 — mocked up with Steve on September 28, 2026).
+ssh or journalctl (card #40 — mocked up with the owner on September 28, 2026).
 
     python3 bin/floor.py [--host 0.0.0.0] [--port 8787]
                           [--projects-dir DIR] [--state-root DIR] [--refresh-sec N]
@@ -9,7 +9,7 @@ One page for the whole box, not one per project: it groups every lane in `projec
 by the board it works, and for each lane shows one of exactly five states — **working**
 (a card, its Stage, minutes since launch, and whether its plan comment is up yet — amber,
 the same as Ship reads when something is blocked, once it has worked past
-`PLAN_LATE_MIN` minutes with none; card #103), **idle** (why), **needs Steve** (the card, the
+`PLAN_LATE_MIN` minutes with none; card #103), **idle** (why), **needs the owner** (the card, the
 first line of its ask, and — when its Stuck comment points at a mockup or a screenshot —
 a Review button that opens it full-window, zoomable and flippable, on the floor and in
 the studio alike, so approving it never means clicking through to the card first; card
@@ -129,8 +129,8 @@ ALLOWED_FIELDS = {
     # lands at the latest
     "step", "detail", "alive", "running", "since_sec", "next_in_sec", "stale",
     "waiting_for", "launched_at", "deadline_at", "lands_by",
-    # the Needs Steve strip (card #96): every Stuck card on the board, whichever lane last
-    # touched it, with every round it has been asked, newest first
+    # the Needs-the-owner strip (card #96): every Stuck card on the board, whichever lane
+    # last touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
     # the account's GraphQL budget (card #98), read from board.py's own cache — never a
     # call of its own
@@ -506,7 +506,7 @@ def deploy_status(repo_dir, deploy_state, repo, git=_git, lanes=(), now=None, ru
     evals = _read(os.path.join(deploy_state, "evals", target)) if target else None
     # Live comes before held: a commit shipped with deploy-anyway keeps its own held/<sha>
     # file (the deployer only clears the OTHER held cards), and the page must not call a
-    # live commit Blocked, or count it as needing Steve.
+    # live commit Blocked, or count it as needing the owner.
     if not target or live == target:
         out["state"] = "live"
     elif held is not None:
@@ -578,7 +578,7 @@ def _minutes_since(when, now):
 
 def _idle_reason(lane, items_by_number, last_tick):
     """Plain words for why the desk is empty right now — never the internal name of
-    anything (`docs/talking-to-steve.md`, rule 8). Best-effort, not a re-implementation of
+    anything (`docs/talking-to-the-owner.md`, rule 8). Best-effort, not a re-implementation of
     the spawner's own pick: it only has to be honest about what it can see."""
     pending = any(
         it.get("state") == "OPEN"
@@ -681,7 +681,7 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
 
     # The board is authoritative over the lane's own log: a card the SPAWNER parked (two
     # died ticks, no Stuck-shaped comment from the tick itself) is just as much "needs
-    # Steve" as one the tick parked itself, so this is checked before — not only when —
+    # the owner" as one the tick parked itself, so this is checked before — not only when —
     # the last tick "died" is false.
     if last_tick is not None:
         it = items_by_number.get(last_tick.issue) or {}
@@ -786,8 +786,8 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
     `describe_tool_use` already caps what it returns at ~200 characters — this hands that
     back unchanged, not a second, looser copy of the same limit).
 
-    A lane holding a card is `live`. A lane that is not — idle, paused, waiting on Steve —
-    shows the session of its **last** tick instead, `live: false`: a desk with nobody at it
+    A lane holding a card is `live`. A lane that is not — idle, paused, waiting on the
+    owner — shows the session of its **last** tick instead, `live: false`: a desk with nobody at it
     still has something worth peeking at, and a button that only exists while a lane is
     working reads, the rest of the time, as a feature that never shipped (card #63, third
     visit).
@@ -852,8 +852,8 @@ _HOUSEKEEPING = ("Set up job", "Complete job", "Post ", "Run actions/")
 def _fetch_live_pr_run(repo, get):
     """The newest pull_request-triggered run that has not finished, shaped like one of
     `fetch_ci_runs`'s own entries — or None. A PR's own commit never reaches `branch` until
-    it merges, so the push history below can never show it: this is the window Steve meant
-    by "the CI windows" (card #77) — the wait before every merge, which is most of the time
+    it merges, so the push history below can never show it: this is the window the owner
+    meant by "the CI windows" (card #77) — the wait before every merge, which is most of the time
     CI is actually running. Best-effort: a failure here never stops the push history from
     being read, since watching a PR's check is a nicety on top of it, not the main job."""
     try:
@@ -1417,7 +1417,7 @@ def systemctl_is_active(unit, timeout=5):
 
 
 def board_ask(issue, project_repo, board_py=None, timeout=20):
-    """The first line of the card's newest `Needs Steve` comment (`board.py ask`, which
+    """The first line of the card's newest `Needs @<login>` comment (`board.py ask`, which
     wraps `needs_steve_ask` — a plain `gh issue view`, no board/GraphQL involved). `gh`
     itself still has to be told which repo, though: with several projects on one box,
     `GH_REPO` is what `spawn.sh` sets before every repo-scoped `gh` call (its own comment:
@@ -1435,8 +1435,8 @@ def board_ask(issue, project_repo, board_py=None, timeout=20):
 
 
 def board_images(issue, project_repo, board_py=None, timeout=20):
-    """Direct image links — a mockup or a screenshot — under the card's newest `Needs
-    Steve` comment (`board.py images`, which wraps `needs_steve_images`): the floor
+    """Direct image links — a mockup or a screenshot — under the card's newest
+    `Needs @<login>` comment (`board.py images`, which wraps `needs_steve_images`): the floor
     page's inline preview (card #91), so a reader never has to open the card to find the
     picture its own ask is about. Same `GH_REPO` pinning as `board_ask`, for the same
     reason — several projects share this one box."""
@@ -1453,9 +1453,9 @@ def board_images(issue, project_repo, board_py=None, timeout=20):
 
 
 def board_rounds(issue, project_repo, board_py=None, timeout=20):
-    """Every `Needs Steve` round for this card, newest first — `board.py images
+    """Every `Needs @<login>` round for this card, newest first — `board.py images
     --all-rounds`, which wraps `needs_steve_rounds` — each with its own pictures, lettered
-    by direction (card #96: the Needs Steve strip's Review overlay, card #100, which flips
+    by direction (card #96: the Needs-the-owner strip's Review overlay, card #100, which flips
     through every round a card has been asked, not only the lane's own single-thumbnail
     desk pill). Same `GH_REPO` pinning as `board_ask`/`board_images`, for the same reason.
     `[]` on any failure — a card the strip then shows with its ask and no pictures, never
@@ -1592,14 +1592,14 @@ INDEX_HTML = """<!doctype html>
   /* card #110: a working desk that is also pausing — a second fact, not a replacement
      for the Working pill, so it reads small and amber beside the detail line. */
   .pausing { font-size: 12px; margin-top: 2px; color: var(--paused); }
-  /* A mockup or a screenshot a Needs Steve comment pointed at, shown right on the desk
-     instead of making Steve click through to the card to find it (card #91). */
+  /* A mockup or a screenshot a Needs-the-owner comment pointed at, shown right on the desk
+     instead of making the owner click through to the card to find it (card #91). */
   .mockups { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .mockup-thumb {
     max-width: 120px; max-height: 90px; border-radius: 6px; border: 1px solid var(--line);
     object-fit: cover;
   }
-  /* The Needs Steve strip (card #96, reshaped by #100): every card Stuck on this board,
+  /* The Needs-the-owner strip (card #96, reshaped by #100): every card Stuck on this board,
      whichever lane last touched it — its ask, the directions it offers, and a Review
      button that opens the full-window overlay (below) rather than a sliver inline. */
   .needs-strip { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
@@ -2089,7 +2089,7 @@ function needsLabel(ownerLogin) {
 // Card #110: a working lane can also be pausing (a PAUSE file sits beside its held card).
 // The backend hands back the file's own first line as `pausing_reason` — "deploy <sha>"
 // for the deployer and the canary stage, "" for a hand-touched one — and this turns it
-// into plain words, never the sha or the file's path (`talking-to-steve.md`, rule 8).
+// into plain words, never the sha or the file's path (`talking-to-the-owner.md`, rule 8).
 function pausingLine(d) {
   if (!d.pausing) return "";
   const forDeploy = (d.pausing_reason || "").startsWith("deploy");
@@ -2257,8 +2257,8 @@ function shipHTML(ship, project) {
   </div>`;
 }
 
-// A mockup or a screenshot a Needs Steve card's own Stuck comment pointed at (card #91),
-// shown right here instead of making Steve click through to the card to find it. Several
+// A mockup or a screenshot a Needs-the-owner card's own Stuck comment pointed at (card
+// #91), shown right here instead of making the owner click through to the card to find it. Several
 // thumbnails stack in one row; a broken or slow image collapses to nothing rather than a
 // visible placeholder box, since a missing picture is not itself news.
 function mockupThumbsHTML(images, cls) {
@@ -2268,7 +2268,7 @@ function mockupThumbsHTML(images, cls) {
          onerror="this.style.display='none'">`).join("")}</div>`;
 }
 
-// A card's own `Needs Steve:` ask, read back from the comment that made it (board #96's
+// A card's own `Needs @<login>:` ask, read back from the comment that made it (board #96's
 // first line keeps the comment's own `**...**` wrapping) — rendered, not shown raw, so no
 // `**` ever reaches the page (card #100: "the ask line shows raw ** markdown"). `esc()`
 // first, so the regexes only ever see the three markers, never anything a title injected.
@@ -2279,8 +2279,8 @@ function renderAsk(text) {
     .replace(/_(.+?)_/g, "<em>$1</em>");
 }
 
-// The Needs Steve carousel's own state (card #96): every picture a Stuck card's Needs
-// Steve comments have shown, newest round first, lettered by direction when the comment
+// The Needs-the-owner carousel's own state (card #96): every picture a Stuck card's
+// `Needs @<login>` comments have shown, newest round first, lettered by direction when the comment
 // named one — shared by the strip, the studio's in-tray, the podium's held thumbnail and
 // the Review overlay (#100), so none of them ever disagree about which picture a card is
 // "on". The slide a viewer left a card on persists across refreshes (keyed by card
@@ -2868,7 +2868,7 @@ function characterSVG(pill, look) {
   const armL = armsUp
     ? `<rect x="2" y="7" width="3" height="8" rx="1" style="fill:${c}" transform="rotate(-35 3.5 15)"/>`
     : `<rect x="3" y="15" width="3" height="7" rx="1" style="fill:${c}"/>`;
-  // Paused: both hands up, still. Needs Steve: it is waving — one arm animated (wrapped in
+  // Paused: both hands up, still. Needs the owner: it is waving — one arm animated (wrapped in
   // its own <g>, so the CSS animation's `transform` adds to the SVG attribute's rotation
   // instead of replacing it).
   const armRRaised = `<rect x="21" y="7" width="3" height="8" rx="1" style="fill:${c}" transform="rotate(35 22.5 15)"/>`;
@@ -3813,7 +3813,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeBub
 // never a network fetch, so the demo and the screenshot script work with no network.
 const DEMO_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAAG0lEQVR4nGPIrvlPFcQwatCoQaMGjRo03AwCAEzKNE7D7YuQAAAAAElFTkSuQmCC";
 // Three directions of four shots each (commands/watch.md's own words for the fixture a
-// screen change ships with) — one Needs Steve round, lettered and recommended like a
+// screen change ships with) — one Needs-the-owner round, lettered and recommended like a
 // real one (card #96).
 function demoDirectionShots() {
   const labels = ["phone light", "phone dark", "desktop light", "desktop dark"];

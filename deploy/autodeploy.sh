@@ -52,7 +52,7 @@
 #      always keeping the newest two.
 #
 # A HELD commit (red check, the suite failing twice, or a canary tick that did not finish
-# clean) gets one card on the watcher's board in Stuck, in the talking-to-steve.md shape.
+# clean) gets one card on the watcher's board in Stuck, in the talking-to-the-owner.md shape.
 # Moving it to In progress lets the watcher fix the cause; adding the `deploy-anyway` label
 # ships it (and skips both the suite and the canary stage). Nothing here ever signals a
 # tick, force-pushes, or posts to Discord except through that card's move (board.py posts
