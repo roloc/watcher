@@ -38,16 +38,19 @@ if [ -d "$WATCHER_DIR/.git" ]; then
     # `useradd` below has even happened, nothing has chowned anything yet, so whoever
     # is running this script (root, per the header above) still owns the checkout it
     # just made by hand — a plain call is correct there, and only there. `|| true` on
-    # the git call itself, never on the assignment: under `set -e`, a failing command
-    # substitution here would kill the script before the `:?` below ever runs —
-    # silently, with none of this file's own messages.
+    # the git call itself: under `set -e`, a failing command substitution would kill
+    # the whole script right here, for a value nothing downstream even reads in this
+    # branch (next comment).
     if id watcher >/dev/null 2>&1; then
       REPO_URL="$(su - watcher -c "git -C '$WATCHER_DIR' remote get-url origin" 2>/dev/null || true)"
     else
       REPO_URL="$(git -C "$WATCHER_DIR" remote get-url origin 2>/dev/null || true)"
     fi
+    # Never required here (no `:?`, unlike the else branch below): REPO_URL is read ONLY
+    # at the one-time clone further down, which this branch's own `.git` check already
+    # rules out — so a git/su hiccup deriving it for its own sake must never abort an
+    # install that was never going to read it.
   fi
-  : "${REPO_URL:?install.sh: could not read the git origin already at $WATCHER_DIR, and WATCHER_REPO is unset — set WATCHER_REPO=<the git URL of your fork>}"
 else
   REPO_URL="${WATCHER_REPO:?install.sh: set WATCHER_REPO=<the git URL of your fork> — $WATCHER_DIR is missing, or not a git checkout (a copy made by rsync has no origin to read), so there is nothing to derive it from}"
 fi
