@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bin/tail.sh + bin/tail.py's cases. No network, no real ~/.claude/projects: a fake
-# CLAUDE_PROJECTS_DIR holds synthetic session transcripts, a fake WATCHER_DIR holds the
+# CLAUDE_PROJECTS_DIR holds synthetic session transcripts (and a fake
+# CLAUDE_CANARY_PROJECTS_DIR the canary lane's, card #164), a fake WATCHER_DIR holds the
 # project env files, a fake WATCHER_STATE holds the `current` marker. Every case runs
 # --no-follow, so there is no polling loop to race.
 #
@@ -19,11 +20,13 @@ flunk() { n=$((n+1)); fail=1; say "$1" "FAIL${2:+ — $2}"; }
 check() { local what="$1"; shift; if "$@"; then pass "$what"; else flunk "$what"; fi; }
 
 WDIR="$TMP/opt"; STATE_ROOT="$TMP/state"; PROJECTS="$TMP/claude-projects"
-mkdir -p "$WDIR/projects" "$STATE_ROOT" "$PROJECTS"
+CANARY="$TMP/claude-canary-projects"
+mkdir -p "$WDIR/projects" "$STATE_ROOT" "$PROJECTS" "$CANARY"
 
 run() {
   local lane="${LANE:-testlane}"
-  WATCHER_DIR="$WDIR" CLAUDE_PROJECTS_DIR="$PROJECTS" WATCHER_STATE="$STATE_ROOT/$lane" \
+  WATCHER_DIR="$WDIR" CLAUDE_PROJECTS_DIR="$PROJECTS" CLAUDE_CANARY_PROJECTS_DIR="$CANARY" \
+    WATCHER_STATE="$STATE_ROOT/$lane" \
     bash "$TAIL" "$lane" --no-follow \
     > "$TMP/out" 2> "$TMP/err"
   echo $? > "$TMP/rc"
@@ -35,6 +38,7 @@ out_lacks() { ! grep -qF -- "$1" "$TMP/out"; }
 
 # encode_dir mirrors tail.py's own: every "/" becomes "-".
 session_dir_for() { echo "$PROJECTS/$(echo "$1" | sed 's#/#-#g')"; }
+canary_session_dir_for() { echo "$CANARY/$(echo "$1" | sed 's#/#-#g')"; }
 
 write_transcript() {
   # $1 = target .jsonl path. Covers: an assistant Bash tool_use with a description, an
@@ -54,8 +58,8 @@ EOF
 }
 
 fresh() {
-  rm -rf "$STATE_ROOT" "$PROJECTS"
-  mkdir -p "$STATE_ROOT" "$PROJECTS"
+  rm -rf "$STATE_ROOT" "$PROJECTS" "$CANARY"
+  mkdir -p "$STATE_ROOT" "$PROJECTS" "$CANARY"
   rm -f "$WDIR/projects"/*.env
   LANE=testlane
 }
@@ -203,6 +207,60 @@ CLAUDE_PROJECTS_DIR="$PROJECTS" python3 "$HERE/tail.py" --path 99 \
 echo $? > "$TMP/rc"
 check "--path, no session: exits non-zero"                 [ "$(rc)" != 0 ]
 check "--path, no session: says so on stderr"                err_has "no session transcript found"
+
+# 13. Card #164: the canary lane (LANE_CHANNEL=canary) runs under its own CLAUDE_CONFIG_DIR
+# (bin/spawn.sh), so its transcript is under THAT dir's projects/, and nothing under the
+# default one. On October 15, 2026 tail.sh (and the floor page's Peek, which shares the
+# lookup) said "waiting for a session" for the whole tick. Seen in the state dir as
+# `release` naming the canary folder — not read here: the transcript is found wherever it is.
+fresh
+cat > "$WDIR/projects/testlane.env" <<EOF
+PROJECT_NAME=testlane
+PROJECT_ROOT=$TMP/repo
+LANE_CHANNEL=canary
+EOF
+mkdir -p "$STATE_ROOT/testlane"; echo 42 > "$STATE_ROOT/testlane/current"
+echo watcher-canary > "$STATE_ROOT/testlane/release"
+write_transcript "$(canary_session_dir_for "$TMP/repo-worktrees/card-42")/session-1.jsonl"
+run
+check "canary lane: exits 0"                               [ "$(rc)" = 0 ]
+check "canary lane: the session under the canary config dir is decoded" out_has "Card #42 looks claimable."
+check "canary lane: not stuck on 'waiting for a session'"   out_lacks "waiting for a session"
+# The same card worked earlier on the stable release left an OLDER session under the
+# default dir: the newest across both wins, so the live tick is what shows.
+write_transcript "$(session_dir_for "$TMP/repo-worktrees/card-42")/session-0.jsonl"
+touch -t 202001010000 "$(session_dir_for "$TMP/repo-worktrees/card-42")/session-0.jsonl"
+CLAUDE_PROJECTS_DIR="$PROJECTS" CLAUDE_CANARY_PROJECTS_DIR="$CANARY" python3 "$HERE/tail.py" --path 42 \
+  --workdir-mode card --worktree-base "$TMP/repo-worktrees" \
+  > "$TMP/out" 2> "$TMP/err"
+echo $? > "$TMP/rc"
+check "--path, canary: the newer canary session wins over the older stable one" \
+  out_has "$(canary_session_dir_for "$TMP/repo-worktrees/card-42")/session-1.jsonl"
+# With no session anywhere, the waiting line names both places it looked.
+fresh
+cat > "$WDIR/projects/testlane.env" <<EOF
+PROJECT_NAME=testlane
+PROJECT_ROOT=$TMP/repo
+EOF
+mkdir -p "$STATE_ROOT/testlane"; echo 42 > "$STATE_ROOT/testlane/current"
+run
+check "no session anywhere: the waiting line names the canary dir too" out_has "$(canary_session_dir_for "$TMP/repo-worktrees/card-42")"
+# The derivation itself, the way spawn.sh does it: WATCHER_CANARY_CLAUDE_CONFIG_DIR, else
+# /home/watcher/.claude-canary; CLAUDE_CANARY_PROJECTS_DIR names the projects dir outright.
+derived() {  # $1 = what the "no session" line must name; the rest = VAR=value pairs
+  local want="$1"; shift
+  env -i PATH="$PATH" HOME="$TMP" "$@" python3 "$HERE/tail.py" --path 1 \
+    --workdir-mode root --worktree-base /r > /dev/null 2> "$TMP/err"
+  grep -qF -- "$want" "$TMP/err"
+}
+check "default: /home/watcher/.claude-canary/projects, spawn.sh's own default" \
+  derived "/p/-r or /home/watcher/.claude-canary/projects/-r" CLAUDE_PROJECTS_DIR=/p
+check "WATCHER_CANARY_CLAUDE_CONFIG_DIR=/c: /c/projects" \
+  derived "/p/-r or /c/projects/-r" CLAUDE_PROJECTS_DIR=/p WATCHER_CANARY_CLAUDE_CONFIG_DIR=/c
+check "CLAUDE_CANARY_PROJECTS_DIR=/x wins outright" \
+  derived "/p/-r or /x/-r" CLAUDE_PROJECTS_DIR=/p WATCHER_CANARY_CLAUDE_CONFIG_DIR=/c CLAUDE_CANARY_PROJECTS_DIR=/x
+check "the two naming one dir: looked in once" \
+  derived "found under /p/-r" CLAUDE_PROJECTS_DIR=/p CLAUDE_CANARY_PROJECTS_DIR=/p
 
 echo
 if [ "$fail" -eq 0 ]; then

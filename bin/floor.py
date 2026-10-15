@@ -43,8 +43,9 @@ Where the data comes from (`how-it-works.md`, "State on disk" and "Lanes"):
   own poll. Never one call per page view.
 - `systemctl is-active <unit>` for whether the lane's unit is up at all.
 - for Peek, the lane's own session transcript under `~/.claude/projects/<cwd>/<session>.jsonl`
-  (`CLAUDE_PROJECTS_DIR` to override), decoded by `bin/tail.py`'s own functions — reused,
-  never re-implemented, so the two never drift apart on what a line means.
+  (`CLAUDE_PROJECTS_DIR` to override) — or, for the canary lane, under its own config
+  dir's `projects/` (`tail.projects_dirs`, card #164) — decoded by `bin/tail.py`'s own
+  functions — reused, never re-implemented, so the two never drift apart on what a line means.
 
 Read-only, and nothing but: no endpoint here can change a card, a `PAUSE` file, or
 anything else. The JSON endpoint (`/api/state.json`) serves exactly the fields in
@@ -752,14 +753,17 @@ def _session_ended_near(session_dir, when, launched=None):
     working (its session is the one being written), and wrong for "this lane's last tick":
     a project's lanes share one worktree per card, and a triage lane runs every tick in
     the project root, so the newest file in the folder can be another lane's later session
-    on the same card, shown under this lane's name."""
+    on the same card, shown under this lane's name. `session_dir` is one directory or a
+    list of them (the canary lane's transcripts live under another projects dir, card
+    #164), searched as one."""
     best = None
-    try:
-        names = [n for n in os.listdir(session_dir) if n.endswith(".jsonl")]
-    except OSError:
-        return None
-    for name in names:
-        path = os.path.join(session_dir, name)
+    paths = []
+    for d in tail._as_dirs(session_dir):
+        try:
+            paths += [os.path.join(d, n) for n in os.listdir(d) if n.endswith(".jsonl")]
+        except OSError:
+            continue
+    for path in paths:
         try:
             mtime = os.path.getmtime(path)
         except OSError:
@@ -815,9 +819,10 @@ def tail_status(info, claude_projects_dir, card=None, file=None, pos=None):
         if last is None:
             return {"status": "idle"}
         n, ended, launched = last
-    session_dir = os.path.join(
-        claude_projects_dir,
-        tail.encode_dir(tail.card_dir(n, info["workdir_mode"], info["worktree_base"])))
+    # `claude_projects_dir`: one directory, or the list `tail.projects_dirs()` gives
+    # (card #164: the canary lane's transcripts are under its own config dir).
+    session_dir = tail.session_dirs(tail._as_dirs(claude_projects_dir), n,
+                                    info["workdir_mode"], info["worktree_base"])
     f = (tail.newest_jsonl(session_dir) if live
          else _session_ended_near(session_dir, ended, launched))
     if f is None:
@@ -4108,7 +4113,9 @@ def main(argv):
     deploy_state = os.environ.get("DEPLOY_STATE") or "/var/lib/watcher-deploy"
     deploy_repo = watcher_repo(REPO_ROOT)
 
-    claude_projects_dir = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+    # Both places a transcript can be (card #164): CLAUDE_PROJECTS_DIR, then the canary
+    # lane's own config dir's projects/ — `tail.projects_dirs` is the one derivation.
+    claude_projects_dir = tail.projects_dirs()
 
     def build_lanes():
         # Peek's own lookup, kept separate from `build()`'s state so a lane's worktree

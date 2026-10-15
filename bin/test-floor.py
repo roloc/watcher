@@ -1068,6 +1068,59 @@ check("a negative pos (a malformed request, never one this endpoint produces its
       "replays instead of crashing on fh.seek()",
       r5["status"] == "ok" and r5["reset"] is True and r5["lines"] == ["line one", "line two", "line three"])
 
+print("20a. card #164: the canary lane's session is under its own config dir's projects/")
+TS_CANARY = os.path.join(TS_ROOT, "claude-canary-projects")
+os.makedirs(TS_CANARY)
+check("tail.projects_dirs: the default dir, then spawn.sh's own canary config dir's projects/",
+      tail.projects_dirs({"CLAUDE_PROJECTS_DIR": "/p"}) == ["/p", "/home/watcher/.claude-canary/projects"]
+      and tail.projects_dirs({"CLAUDE_PROJECTS_DIR": "/p", "WATCHER_CANARY_CLAUDE_CONFIG_DIR": "/c"})
+      == ["/p", "/c/projects"]
+      and tail.projects_dirs({"CLAUDE_PROJECTS_DIR": "/p", "CLAUDE_CANARY_PROJECTS_DIR": "/x"}) == ["/p", "/x"]
+      and tail.projects_dirs({"CLAUDE_PROJECTS_DIR": "/p", "CLAUDE_CANARY_PROJECTS_DIR": "/p"}) == ["/p"])
+with open(os.path.join(TS_STATE, "current"), "w") as f:
+    f.write("78\n")
+ts_canary_dir = os.path.join(TS_CANARY,
+                             tail.encode_dir(os.path.join(ts_info["worktree_base"], "card-78")))
+os.makedirs(ts_canary_dir)
+ts_canary_transcript = os.path.join(ts_canary_dir, "session-c.jsonl")
+with open(ts_canary_transcript, "w") as f:
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"on the canary"}]}}\n')
+check("looking only under the default dir, the canary lane reads as waiting — the bug",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "waiting", "card": 78})
+r10 = floor.tail_status(ts_info, [TS_CLAUDE, TS_CANARY])
+check("looking under both, its live session is found and decoded",
+      r10["status"] == "ok" and r10["card"] == 78 and r10["live"] is True
+      and r10["lines"] == ["on the canary"] and r10["file"] == "session-c.jsonl", r10)
+# The same card, worked earlier on the stable release: an OLDER session under the default
+# dir must not shadow the live one on the canary.
+ts_stable_dir = os.path.join(TS_CLAUDE, tail.encode_dir(os.path.join(ts_info["worktree_base"], "card-78")))
+os.makedirs(ts_stable_dir)
+ts_stable_transcript = os.path.join(ts_stable_dir, "session-s.jsonl")
+with open(ts_stable_transcript, "w") as f:
+    f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"on stable, earlier"}]}}\n')
+os.utime(ts_stable_transcript, (1_600_000_000, 1_600_000_000))
+r11 = floor.tail_status(ts_info, [TS_CLAUDE, TS_CANARY])
+check("the newest session across both dirs wins, so the canary's live one still shows",
+      r11["file"] == "session-c.jsonl" and r11["lines"] == ["on the canary"], r11)
+# Idle after a tick on the canary: the last session is looked for under both dirs too.
+os.remove(os.path.join(TS_STATE, "current"))
+os.makedirs(os.path.join(TS_STATE, "logs"), exist_ok=True)
+canary_log = os.path.join(TS_STATE, "logs", "card-78-20261015T120000Z.json")
+with open(canary_log, "w") as f:
+    f.write('{"subtype": "success"}')
+ended78 = os.path.getmtime(canary_log)
+os.utime(ts_canary_transcript, (ended78 - 3, ended78 - 3))
+r12 = floor.tail_status(ts_info, [TS_CLAUDE, TS_CANARY])
+check("idle after that tick: its last session is the canary one, marked not live",
+      r12["status"] == "ok" and r12["card"] == 78 and r12["live"] is False
+      and r12["file"] == "session-c.jsonl", r12)
+check("...and with only the default dir it would read as idle with nothing to show",
+      floor.tail_status(ts_info, TS_CLAUDE) == {"status": "idle"})
+shutil.rmtree(os.path.join(TS_STATE, "logs"))  # 20b makes it itself
+shutil.rmtree(ts_stable_dir)
+with open(os.path.join(TS_STATE, "current"), "w") as f:
+    f.write("77\n")
+
 print("20b. a lane that is not working shows its LAST session (card #63: no Peek on a quiet floor)")
 os.remove(os.path.join(TS_STATE, "current"))
 os.makedirs(os.path.join(TS_STATE, "logs"))

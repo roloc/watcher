@@ -94,7 +94,10 @@ ROOT = tempfile.mkdtemp(prefix="watcher-floor-browser-")
 PROJECTS = os.path.join(ROOT, "projects")
 STATE = os.path.join(ROOT, "state")
 CLAUDE = os.path.join(ROOT, "claude-projects")
-for d in (PROJECTS, STATE, CLAUDE):
+# Card #164: the canary lane's own CLAUDE_CONFIG_DIR's projects/ (bin/spawn.sh), where ITS
+# transcripts go — the fixture passes both to the page, the way `tail.projects_dirs` does.
+CANARY = os.path.join(ROOT, "claude-canary-projects")
+for d in (PROJECTS, STATE, CLAUDE, CANARY):
     os.makedirs(d)
 
 
@@ -145,8 +148,8 @@ def run(description):
         {"type": "tool_use", "name": "Bash", "input": {"description": description, "command": "x"}}]}}) + "\n"
 
 
-def transcript(worktree_base, card, lines):
-    d = os.path.join(CLAUDE, tail.encode_dir(os.path.join(worktree_base, f"card-{card}")))
+def transcript(worktree_base, card, lines, under=CLAUDE):
+    d = os.path.join(under, tail.encode_dir(os.path.join(worktree_base, f"card-{card}")))
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "session-1.jsonl")
     with open(path, "w") as f:
@@ -259,7 +262,7 @@ class LiveCache:
 
 def tail_lookup(lane, card, file, pos):
     info = {l["lane"]: l for l in floor.discover_lanes(PROJECTS, STATE)}.get(lane)
-    return None if info is None else floor.tail_status(info, CLAUDE, card, file, pos)
+    return None if info is None else floor.tail_status(info, [CLAUDE, CANARY], card, file, pos)
 
 
 class QuietServer(ThreadingHTTPServer):
@@ -601,6 +604,34 @@ try:
               b.wait_for(PANEL_TEXT + ".includes('Nothing to show yet')"), b.eval(PANEL_TEXT))
         b.key("Escape")
         check("still no errors after all of that", b.errors == [], b.errors)
+
+        print("7a. card #164: Peek on a lane running the canary release, whose session is under")
+        print("    the canary config dir's projects/ and nowhere under the default one")
+        # October 15, 2026: watcher@watcher on #155, `release` saying watcher-canary, the
+        # claude process alive and its transcript growing under ~/.claude-canary — and Peek
+        # saying "waiting" for the whole tick. alpha plays that lane for this one case.
+        transcript(f"{ROOT}/alpha-worktrees", 8,
+                   [say("Soaking on the canary: reading card eight."), run("Run the tail suite")],
+                   under=CANARY)
+        with open(os.path.join(STATE, "alpha", "current"), "w") as f:
+            f.write("8\n")
+        with open(os.path.join(STATE, "alpha", "release"), "w") as f:
+            f.write("watcher-canary")
+        b.click(peek_button("alpha"))
+        check("the panel opens on the canary lane's live session, decoded",
+              b.wait_for(PANEL_TEXT + ".includes('$ Run the tail suite')")
+              and b.eval(PANEL_TEXT).split("\n") == ["Soaking on the canary: reading card eight.",
+                                                     "$ Run the tail suite"], b.eval(PANEL_TEXT))
+        check("...and says it is live, on that card — not 'waiting for its session'",
+              b.eval(PANEL_SUB) == "working on #8 — live", b.eval(PANEL_SUB))
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "peek-canary-desktop.png", full_page=False)
+        b.key("Escape")
+        b.wait_for("!" + PANEL_OPEN, timeout=3)
+        with open(os.path.join(STATE, "alpha", "current"), "w") as f:
+            f.write("7\n")
+        with open(os.path.join(STATE, "alpha", "release"), "w") as f:
+            f.write("aaaaaaaaaaaa")
 
         print("7b. Peek on a ship station: what CI did on the newest commit, and what came before")
         b.click('.peek-btn[data-peek-ship="alpha"]')

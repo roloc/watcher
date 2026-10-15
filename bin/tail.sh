@@ -5,7 +5,9 @@
 # file is written once, at exit (see the comment above `print_claude_cmd` in spawn.sh).
 # The one thing that updates while a tick runs is its own session transcript, kept under
 # `~/.claude/projects/<cwd>/<session>.jsonl` (same comment) because spawn.sh never passes
-# `--no-session-persistence`. This script finds that file for a lane's CURRENT card and
+# `--no-session-persistence` — or, for the canary lane (LANE_CHANNEL=canary, card #46),
+# under its own config dir, `/home/watcher/.claude-canary/projects/` (card #164; tail.py
+# looks in both and takes the newest). This script finds that file for a lane's CURRENT card and
 # hands it to `tail.py`, which decodes it as it grows into one short line per tool call or
 # assistant message — never the raw JSON, never a tool's full output.
 #
@@ -29,6 +31,9 @@
 #   WATCHER_DIR          this repo's checkout            (default: parent of bin/)
 #   WATCHER_STATE        the lane's state dir            (default: ~/.local/state/watcher/<name>)
 #   CLAUDE_PROJECTS_DIR  where session transcripts live  (default: ~/.claude/projects)
+#   CLAUDE_CANARY_PROJECTS_DIR  where the canary lane's live
+#                        (default: $WATCHER_CANARY_CLAUDE_CONFIG_DIR/projects, i.e.
+#                        /home/watcher/.claude-canary/projects — spawn.sh's own default)
 set -uo pipefail
 
 WATCHER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

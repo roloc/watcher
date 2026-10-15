@@ -289,7 +289,11 @@ prompt reaches only the board that opted in before it reaches everyone else. `bi
 itself carries the mechanism: right after it reads the lane's project file, a canary lane
 re-execs into `/opt/watcher-canary/bin/spawn.sh` with its own `CLAUDE_CONFIG_DIR` (so a
 personal or project `commands/`/`agents/` cannot win over the checkout under test, the same
-trick `bin/eval.sh` uses) and a freshly-computed `WATCHER_HOME`. Same systemd unit, same
+trick `bin/eval.sh` uses) and a freshly-computed `WATCHER_HOME`. That config dir is also
+where the CLI writes the canary lane's session transcripts (`<dir>/projects/`, not
+`~/.claude/projects`), so `bin/tail.py` — and with it `bin/tail.sh` and the floor page's
+Peek — looks under both and takes the newest session for the card (card #164; before it,
+Peek on the canary lane said "waiting" for the whole tick). Same systemd unit, same
 pid — exec replaces the process image, not the process — so nothing about the pidfile lock
 or the deployer's own cgroup lookup changes; the only thing a canary lane does differently
 is which checkout's code it is actually running. `deploy/autodeploy.sh`'s own header

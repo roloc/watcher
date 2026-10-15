@@ -43,14 +43,51 @@ def card_dir(n, workdir_mode, worktree_base):
     return os.path.join(worktree_base, "card-%s" % n)
 
 
+# The canary lane's own Claude config dir (card #46): bin/spawn.sh exports
+# CLAUDE_CONFIG_DIR to this (or to WATCHER_CANARY_CLAUDE_CONFIG_DIR) before it re-execs
+# into /opt/watcher-canary, so that lane's transcripts land under <this>/projects/, never
+# under ~/.claude/projects. Must stay the same literal spawn.sh uses.
+DEFAULT_CANARY_CONFIG_DIR = "/home/watcher/.claude-canary"
+
+
+def projects_dirs(env=None):
+    """Every directory a lane's session transcript can be under, the default one first:
+    `~/.claude/projects` (`CLAUDE_PROJECTS_DIR` overrides it), then the canary config
+    dir's `projects/` (card #164) — derived the way spawn.sh derives the config dir,
+    honoring `WATCHER_CANARY_CLAUDE_CONFIG_DIR`; `CLAUDE_CANARY_PROJECTS_DIR` names it
+    outright, for a test. Looked in regardless of which release the lane says it is on:
+    a transcript is wherever the CLI wrote it, and the newest one for the card wins."""
+    env = os.environ if env is None else env
+    main = env.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+    canary = env.get("CLAUDE_CANARY_PROJECTS_DIR") or os.path.join(
+        env.get("WATCHER_CANARY_CLAUDE_CONFIG_DIR") or DEFAULT_CANARY_CONFIG_DIR, "projects")
+    return [main] if canary == main else [main, canary]
+
+
+def session_dirs(projects_dirs, n, workdir_mode, worktree_base):
+    """The card's session directory under each projects dir, in the same order."""
+    enc = encode_dir(card_dir(n, workdir_mode, worktree_base))
+    return [os.path.join(p, enc) for p in projects_dirs]
+
+
+def _as_dirs(session_dir):
+    # Every reader here takes one directory (a string) or several (a list) — the floor
+    # page's own tests pass one, the box passes both (`projects_dirs`).
+    return [session_dir] if isinstance(session_dir, str) else list(session_dir)
+
+
 def newest_jsonl(session_dir):
-    try:
-        names = [f for f in os.listdir(session_dir) if f.endswith(".jsonl")]
-    except OSError:
+    """The newest `.jsonl` under `session_dir` — one directory, or a list of them, in which
+    case the newest across all of them (a lane that moved from the stable release to the
+    canary has an older session for the same card under the other dir)."""
+    paths = []
+    for d in _as_dirs(session_dir):
+        try:
+            paths += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".jsonl")]
+        except OSError:
+            continue
+    if not paths:
         return None
-    if not names:
-        return None
-    paths = [os.path.join(session_dir, f) for f in names]
     # A file can vanish between listdir and stat (the CLI's own cleanupPeriodDays) — drop
     # it from contention rather than crashing on a live lane.
     mtimes = {}
@@ -179,13 +216,13 @@ def main():
     if args.path is None and not args.state:
         ap.error("--state is required unless --path is given")
 
-    projects_dir = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+    dirs = projects_dirs()
 
     if args.path is not None:
-        session_dir = os.path.join(projects_dir, encode_dir(card_dir(args.path, args.workdir_mode, args.worktree_base)))
+        session_dir = session_dirs(dirs, args.path, args.workdir_mode, args.worktree_base)
         f = newest_jsonl(session_dir)
         if f is None:
-            print("no session transcript found under %s" % session_dir, file=sys.stderr)
+            print("no session transcript found under %s" % " or ".join(session_dir), file=sys.stderr)
             return 1
         print(f)
         return 0
@@ -218,12 +255,12 @@ def main():
             last_card, last_file, pos = n, None, 0
         last_status = None
 
-        session_dir = os.path.join(projects_dir, encode_dir(card_dir(n, args.workdir_mode, args.worktree_base)))
+        session_dir = session_dirs(dirs, n, args.workdir_mode, args.worktree_base)
         f = newest_jsonl(session_dir)
 
         if f is None:
             if last_status != "waiting":
-                print("waiting for a session under %s" % session_dir, flush=True)
+                print("waiting for a session under %s" % " or ".join(session_dir), flush=True)
                 last_status = "waiting"
             if args.no_follow:
                 return 0
