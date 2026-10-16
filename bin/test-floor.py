@@ -441,6 +441,89 @@ check("no plan callable at all (an older caller): neither field present, never a
       "'no plan' on a lane this was never asked about",
       "plan_posted" not in d and "plan_late" not in d, d)
 
+print("5d. lane_desk: the Waiting line (card #165) — a working desk whose newest tool call "
+      "has sat open past WAITING_GRACE_MIN, read off the same session Peek decodes")
+CPD = os.path.join(ROOT, "claude-projects")
+os.makedirs(CPD, exist_ok=True)
+WAIT_WORKTREE_BASE = "/repo-worktrees"
+WAIT_CARD_DIR = os.path.join(WAIT_WORKTREE_BASE, "card-700")
+
+
+def write_wait_session(*lines):
+    d = os.path.join(CPD, tail.encode_dir(WAIT_CARD_DIR))
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "s1.jsonl"), "w") as f:
+        for line in lines:
+            f.write(json.dumps(line) + "\n")
+
+
+def assistant_tool_use(minutes_ago, desc, tool_id="t1"):
+    return {"type": "assistant", "timestamp": ts_iso(minutes_ago),
+            "message": {"content": [{"type": "tool_use", "id": tool_id, "name": "Bash",
+                                      "input": {"description": desc}}]}}
+
+
+def user_tool_result(minutes_ago, tool_id="t1"):
+    return {"type": "user", "timestamp": ts_iso(minutes_ago),
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id, "content": "ok"}]}}
+
+
+def ts_iso(minutes_ago):
+    return (NOW - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+wait_dir = lane_dir("wait-fixture")
+wait_current = os.path.join(wait_dir, "current")
+with open(wait_current, "w") as f:
+    f.write("700\n")
+set_mtime(wait_current, 5)
+wait_lane = {"lane": "w", "unit": "watcher@w", "project_repo": "roloc/w",
+             "state_dir": wait_dir, "lane_agents": "", "lane_command": "/watch",
+             "workdir_mode": "card", "worktree_base": WAIT_WORKTREE_BASE}
+wait_items = {700: {"url": "https://github.com/roloc/w/issues/700", "stage": "Building"}}
+
+d = floor.lane_desk(wait_lane, wait_items, "https://board", NOW, claude_projects_dir=[CPD])
+check("no session on file at all: no waiting field", "waiting" not in d, d)
+
+write_wait_session(assistant_tool_use(5, "Check debug trial progress"))
+d = floor.lane_desk(wait_lane, wait_items, "https://board", NOW, claude_projects_dir=[CPD])
+check("an open call past the grace: the waiting line names it and how long",
+      d.get("waiting") == {"on": "$ Check debug trial progress", "minutes": 5}, d)
+
+write_wait_session(assistant_tool_use(1, "Quick call"))
+d = floor.lane_desk(wait_lane, wait_items, "https://board", NOW, claude_projects_dir=[CPD])
+check("an open call still inside the grace: no waiting field yet",
+      "waiting" not in d, d)
+
+write_wait_session(assistant_tool_use(5, "Check debug trial progress"), user_tool_result(0))
+d = floor.lane_desk(wait_lane, wait_items, "https://board", NOW, claude_projects_dir=[CPD])
+check("the call already returned: no waiting field, whatever its own age",
+      "waiting" not in d, d)
+
+d = floor.lane_desk(plan_lane, plan_items, "https://board", NOW, plan=plan_absent)
+check("no claude_projects_dir given at all (an older caller): never computed, no field, "
+      "no crash even though this lane has no workdir_mode/worktree_base of its own",
+      "waiting" not in d, d)
+
+check("'waiting' only ever reaches the page via the allowed fields",
+      {"waiting", "on"} <= floor.ALLOWED_FIELDS)
+
+# build_state itself: the plumbing from main()'s own claude_projects_dir argument down to
+# lane_desk, exercised end to end rather than only at lane_desk's own level above — riffmap's
+# existing working-on-#501 fixture (section 5, below) gets a session showing an open call.
+riffmap_card_dir = os.path.join(os.path.dirname("/x"), os.path.basename("/x") + "-worktrees", "card-501")
+d_ = os.path.join(CPD, tail.encode_dir(riffmap_card_dir))
+os.makedirs(d_, exist_ok=True)
+with open(os.path.join(d_, "s1.jsonl"), "w") as f:
+    f.write(json.dumps(assistant_tool_use(6, "Soaking the canary release")) + "\n")
+state_wait = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
+                                ask_fn=stub_ask, images_fn=stub_images, rounds_fn=stub_rounds,
+                                plan_fn=stub_plan, now=NOW, box_name="test-box",
+                                ratelimit_fn=stub_ratelimit, claude_projects_dir=[CPD])
+d = next(l for p in state_wait["projects"] for l in p["lanes"] if l["lane"] == "riffmap")
+check("build_state wires claude_projects_dir down to lane_desk's own waiting field",
+      d.get("waiting") == {"on": "$ Soaking the canary release", "minutes": 6}, d)
+
 print("6. header and counts")
 check("needs_steve_total counts every Stuck CARD on every board (riffmap: #777 and #778; "
       "fourth: #99) — not how many lane pills happen to read needs_steve, so #778 (no "
@@ -1317,7 +1400,7 @@ check("no plain-quoted string in the page's scripts spills onto a second line",
       all(script_quotes_ok(sc) for sc in scripts22))
 check("...and the checker itself catches the real bug: a bare newline where \\n belonged",
       not script_quotes_ok(script22.replace(
-          'pre.textContent ? "\\n" : ""', 'pre.textContent ? "\n" : ""')))
+          'newest + "\\n" + pre.textContent', 'newest + "\n" + pre.textContent')))
 
 print("23. a failed first load says so, out loud, instead of sitting blank forever (card #71)")
 check("the page carries a visible load-error banner, starting hidden",

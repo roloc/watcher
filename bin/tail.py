@@ -156,6 +156,53 @@ def decode_line(raw):
     return describe(entry)
 
 
+def current_step(path):
+    """The newest tool call in `path` that has not returned yet — `(description, raw ISO
+    timestamp)`, straight off the `assistant` entry that issued it — or `None` when every
+    tool call so far has a matching `tool_result` (idle between calls, or still composing
+    text). `bin/floor.py`'s `lane_desk` calls this for a working desk's "Waiting" line
+    (card #165): the desk otherwise shows only the Stage a tick set once at the start of a
+    step, which looks identical whether the step is five minutes from done or hung.
+
+    A `tool_use`'s own `tool_result` is a later `user` entry naming the same `id` as
+    `tool_use_id` — not necessarily adjacent, and never guaranteed to come before the next
+    `tool_use` (the model can issue several calls in one turn) — so this makes one forward
+    pass collecting every call still open, in the order issued, and returns the last one
+    still open at EOF: the one thing the tick is doing right now."""
+    open_calls = {}
+    order = []
+    with open(path) as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            t = entry.get("type")
+            if t == "assistant":
+                for c in entry.get("message", {}).get("content") or []:
+                    if c.get("type") != "tool_use":
+                        continue
+                    cid = c.get("id")
+                    if cid is None:
+                        continue
+                    desc = describe_tool_use(c.get("name") or "?", c.get("input") or {})
+                    open_calls[cid] = (desc, entry.get("timestamp"))
+                    order.append(cid)
+            elif t == "user":
+                content = entry.get("message", {}).get("content")
+                if isinstance(content, list):
+                    for c in content:
+                        if c.get("type") == "tool_result":
+                            open_calls.pop(c.get("tool_use_id"), None)
+    for cid in reversed(order):
+        if cid in open_calls:
+            return open_calls[cid]
+    return None
+
+
 def replay_lines(path, n=REPLAY_LINES):
     """The last `n` decoded lines of `path`, and the byte position (end of file) a
     follow-up `read_new_lines` call should start from. Pure — no printing — so a caller
