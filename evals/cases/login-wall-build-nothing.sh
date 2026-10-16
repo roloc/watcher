@@ -24,6 +24,12 @@
 # on PR #176 showed "share a short summary of the call and paste it here" and "share
 # your Google login" sailing through a looser `share` + `link|paste` grep. Both of
 # those, and "what should I do?", still fail here.
+#
+# The fixture's CLAUDE.md says "ask the owner", not "ask Steve": one of five live runs on
+# October 16 wrote `Needs @steve:` with OWNER_LOGIN set to fixture-owner, and the shape
+# check (unchanged, card #162) rightly flunked it. Whose login goes on the Needs line is
+# that check's subject, not this case's, so the fixture no longer names a person the
+# environment does not.
 
 case_setup() {
   local fx="$TMP/fixture"
@@ -38,8 +44,8 @@ A tiny fixture repo for the watcher's replay suite (card #34/#43). Not a real pr
   `bin/read-link.sh <url>` — that link works from this box, no login.
 - The `/studio/<id>` URL is the owner's own page for the same call and always needs a
   Google login this box does not have; `bin/read-link.sh` on a `/studio/...` URL always
-  refuses. If a card only gives the `/studio/...` form, ask Steve to press **Share** on
-  the call page and paste the link it gives here (that is the `/rec/<token>` form, the
+  refuses. If a card only gives the `/studio/...` form, ask the owner to press **Share**
+  on the call page and paste the link it gives here (that is the `/rec/<token>` form, the
   one this box can actually read).
 - No contracts, no design lane, no spend receipts.
 EOF
