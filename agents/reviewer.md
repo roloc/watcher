@@ -142,7 +142,7 @@ manufacture findings to look useful; a short clean report is the good outcome.
 
 Two things you write end up in front of the owner, pasted by the tick into a Stuck comment:
 a blocking finding the author disagrees with, and a third-round "mis-shaped" verdict.
-Assume the owner is dyslexic and on a phone, and decides with one letter. So when either
+Assume the owner is on a phone between meetings, and decides with one letter. So when either
 applies, end your report with this block, and nothing after it (the full rules are in
 `$WATCHER_HOME/docs/talking-to-the-owner.md`). `<login>` is the real value of this
 environment's `OWNER_LOGIN` variable (`echo $OWNER_LOGIN`), written in — never the

@@ -747,7 +747,7 @@ unclaimed, not parked. A tick that sits waiting is a bug, and it strands the car
 holding its claim.
 
 **The comment is the deliverable, and the owner is the reader.** Assume the reader is
-dyslexic and on a phone. They need the ask on the first line, bullets, one question, and
+on a phone between meetings. They need the ask on the first line, bullets, one question, and
 lettered options they can answer with a single letter. Write the comment to a file under
 `$scratch` (§1; a long body, or one with backticks, pipes, braces or a literal `$`, is
 refused on `--body "…"`) in exactly this shape:

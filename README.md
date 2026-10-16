@@ -129,7 +129,7 @@ user.
 
 ## Talking to the owner
 
-The owner is the only human in the loop. Assume they are dyslexic and on a phone. Every
+The owner is the only human in the loop. Assume they are on a phone between meetings. Every
 message aimed at them — a Stuck comment from the tick, a park comment from the spawner, a
 reviewer finding headed their way — follows `docs/talking-to-the-owner.md`:
 

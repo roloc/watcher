@@ -1,7 +1,7 @@
 # Talking to the owner
 
-The owner is the only human in this loop. Assume the reader is dyslexic and on a phone
-between meetings — that is the design assumption behind every rule here, not a biography.
+The owner is the only human in this loop. Assume the reader is on a phone between meetings
+— that is the design assumption behind every rule here.
 A wall of prose does not get read. A short list with one clear question gets answered in a
 minute.
 

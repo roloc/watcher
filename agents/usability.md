@@ -82,7 +82,7 @@ is the good outcome.
 ## For the owner
 
 A blocking finding the tick disagrees with, or a third-round verdict, ends up in front of
-the owner. Assume they are dyslexic and on a phone, and decide with one letter. End your
+the owner. Assume they are on a phone between meetings, and decide with one letter. End your
 report with this block, and nothing after it, when either applies (full rules in
 `$WATCHER_HOME/docs/talking-to-the-owner.md`). `<login>` is the real value of this
 environment's `OWNER_LOGIN` variable (`echo $OWNER_LOGIN`), written in — never the
