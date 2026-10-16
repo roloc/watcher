@@ -8,6 +8,20 @@
 # `dependencies/blocked_by`. This seeds a card whose own scope is small (add a flag) but
 # whose body explicitly asks for a follow-on that cannot be verified until this one merges
 # — the shape that should produce a real recorded dependency, not just words in the body.
+#
+# Reshaped October 16, 2026. Until then the only prerequisite in the fixture was card #100
+# itself — the card in hand — and the card's words were "once this lands, file a follow-on
+# ... it depends on this card". Every tick filed the follow-on after the merge, when #100
+# was already closed, and watch.md §2's own rule limits a recorded dependency to "work that
+# must be **merged** before this card can be built or verified": at that moment there was
+# no such work. Four kept runs on the box still recorded it (each wrote "Depends on #100
+# (merged)"), and the deployer's ledger has two runs (04fd3ef and 0b89b08, October 15)
+# that filed the card, named #100 in its body, and recorded nothing — 6/8, a deploy
+# attempt each — which is the rule read literally, not the riffmap#447 shape. So the
+# prerequisite is now a card that is open when the follow-on is filed: #101, a rewrite of
+# the very file the follow-on edits, in progress on another lane. The follow-on cannot
+# land before #101 does, whatever happens to #100, so the relationship the check looks for
+# is one the rule itself demands.
 
 case_setup() {
   local fx="$TMP/fixture"
@@ -48,6 +62,21 @@ EOF
   seed_repo "$fx"
   new_worktree "card-$ISSUE" main
 
+  # The open prerequisite: another lane is rewriting the file the follow-on will edit.
+  seed_card 101 "Rewrite docs/report.md as a man page" "In progress" "P2" <<'EOF'
+## Summary
+
+Restructure `docs/report.md` into man-page sections (NAME, SYNOPSIS, OPTIONS, EXAMPLES).
+Being built on the other lane now.
+EOF
+  python3 - "$FAKEHUB_STATE" <<'PY'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+d["issues"]["101"]["labels"] = ["agent: builder", "in-flight"]
+json.dump(d, open(path, "w"))
+PY
+
   seed_card "$ISSUE" "Add a --verbose flag to bin/report.sh" "In progress" "P1" <<'EOF'
 ## Summary
 
@@ -60,8 +89,9 @@ Add `--verbose` to `bin/report.sh`: with it, print an extra line `report: genera
 <timestamp>` before the usual output. Keep `--help` accurate.
 
 Once this lands, file a follow-on card to update `docs/report.md`'s flag list to
-describe `--verbose` — that follow-on can't be verified until this one is merged (it
-needs the real flag behavior to check the doc against), so it depends on this card.
+describe `--verbose`. That file is being rewritten right now on #101 (the man-page
+restructure, in progress on the other lane), and the follow-on can't land until #101 has
+merged — its edit goes into the sections #101 is creating — so it depends on #101.
 
 ## Verification
 
@@ -98,25 +128,28 @@ case_check() {
     flunk "unrecorded-dep: no card 200" "$(state issues.200.title 2>&1)"
   fi
 
-  if state issues.200.body 2>/dev/null | grep -qE '#100\b'; then
-    pass "unrecorded-dep: the follow-on's body names card 100 as what it waits on"
+  if state issues.200.body 2>/dev/null | grep -qE '#101\b'; then
+    pass "unrecorded-dep: the follow-on's body names card 101 as what it waits on"
   else
-    flunk "unrecorded-dep: follow-on body has no mention of #100" "$(state issues.200.body 2>&1)"
+    flunk "unrecorded-dep: follow-on body has no mention of #101" "$(state issues.200.body 2>&1)"
   fi
 
   # The words are half the job (watch.md §2) — the other half is the real relationship,
-  # recorded with the two `gh api` calls right after filing it: a lookup of #100's own
-  # node id, then a POST of that id to #200's blocked_by.
-  if grep -qE 'api .*issues/100( |$)' "$EVAL_LOG" && grep -qE -- '--jq \.id' "$EVAL_LOG"; then
-    pass "unrecorded-dep: looked up card 100's id (the prerequisite)"
+  # recorded with the two `gh api` calls right after filing it: a lookup of #101's own
+  # node id, then a POST of that id to #200's blocked_by. The stub resolves an id to
+  # `issue-node-<n>` and logs the POST with the id already expanded, so the second grep
+  # checks it was #101's id that went in — a record against #100 alone (merged by then,
+  # harmless, not the prerequisite) does not count.
+  if grep -qE 'api .*issues/101( |$)' "$EVAL_LOG" && grep -qE -- '--jq \.id' "$EVAL_LOG"; then
+    pass "unrecorded-dep: looked up card 101's id (the open prerequisite)"
   else
-    flunk "unrecorded-dep: no id lookup for #100" "$(grep 'api' "$EVAL_LOG")"
+    flunk "unrecorded-dep: no id lookup for #101" "$(grep 'api' "$EVAL_LOG")"
   fi
 
-  if grep -qE 'api -X POST .*issues/200/dependencies/blocked_by' "$EVAL_LOG"; then
-    pass "unrecorded-dep: recorded #200 as blocked_by its prerequisite (real relationship, not just prose)"
+  if grep -qE 'api -X POST .*issues/200/dependencies/blocked_by.*issue_id=issue-node-101' "$EVAL_LOG"; then
+    pass "unrecorded-dep: recorded #200 as blocked_by #101 (real relationship, not just prose)"
   else
-    flunk "unrecorded-dep: no blocked_by POST for #200" "$(grep 'api' "$EVAL_LOG")"
+    flunk "unrecorded-dep: no blocked_by POST naming #101's id for #200" "$(grep 'api' "$EVAL_LOG")"
   fi
 
   if state issues.100.labels | grep -qx 'in-flight'; then

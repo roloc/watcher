@@ -106,6 +106,8 @@ STUB="$TMP/stub-bin"; mkdir -p "$STUB"
 cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$CEILING_LOG.claude"
+# The scratch dir the tick is handed (TMPDIR, run_case) — and whether it exists yet.
+{ printf '%s\n' "${TMPDIR:-}"; [ -d "${TMPDIR:-/nonexistent}" ] && echo exists; } > "$CEILING_LOG.tmpdir"
 echo '{"subtype":"success","num_turns":1,"total_cost_usd":0}'
 EOF
 cat > "$STUB/timeout" <<'EOF'
@@ -148,6 +150,14 @@ check "a case's CASE_MAX_TURNS reaches claude as --max-turns" \
 check "a case's CASE_MAX_BUDGET_USD reaches claude as --max-budget-usd" \
   grep -q -- '--max-budget-usd 0.5 ' "$CEILING_LOG.claude"
 check "...and the case itself ran to its own check" grep -q 'own-ceilings: ran *ok' "$SUITE_TMP/own.log"
+
+# The tick's TMPDIR is a scratch dir of the case's own, made before the launch and gone
+# with the case (October 16, 2026: parallel cases colliding on /tmp/pr-100-body.md).
+TICK_TMPDIR="$(head -1 "$CEILING_LOG.tmpdir" 2>/dev/null)"
+check "the tick is handed a TMPDIR of the case's own, not the shared /tmp" \
+  [ -n "$TICK_TMPDIR" ] && [ "$TICK_TMPDIR" != "${TMPDIR:-/tmp}" ] && [ "$(basename "$TICK_TMPDIR")" = scratch ]
+check "...which exists when claude starts" grep -qx exists "$CEILING_LOG.tmpdir"
+check "...and is gone with the case afterward" [ ! -d "$TICK_TMPDIR" ]
 
 # The very next case sets nothing: it gets the suite's ceilings, not the last case's.
 export CEILING_LOG="$SUITE_TMP/suite"

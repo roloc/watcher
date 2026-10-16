@@ -97,11 +97,18 @@ PY
 
   CASE_COMMAND="/watch $ISSUE"
   # Three measurements, three file edits, a PR, CI, a merge: comfortably 25+ tool calls,
-  # same shape as budget-starved-never-in-review.sh. 15 turns reliably (3/3 runs while
-  # tuning this) leaves the tick starved mid-measurement rather than finishing outright or
-  # failing to even claim the card — tight enough to matter, loose enough that "never got
-  # past claiming" stays a real failure mode rather than the only way this case can end.
-  CASE_MAX_TURNS=15
+  # same shape as budget-starved-never-in-review.sh. The ceiling has to land mid-work:
+  # tight enough to matter, loose enough that "never got past claiming" stays a real
+  # failure mode rather than the only way this case can end. It was 15 until October 16,
+  # 2026, and the deployer's ledger has it passing ten runs in a row at that — then, on
+  # 5bb9fa2, spending all fifteen before `board stage Building` (a slow read of the
+  # fixture and the plan comment, nothing wrong) and flunking "never got past claiming":
+  # a deploy attempt lost to a tick that had not started. Three kept runs on the box
+  # reached the first `bin/measure.sh` at turns 7, 8 and 9 of 15 (claim, read, plan,
+  # measure), so 15 was twice the typical path and once the slow one. 22 is three times
+  # the typical path and still short of the 25+ a finish takes, so the ceiling still
+  # lands mid-work — and a finish inside it is accepted on its own terms anyway (below).
+  CASE_MAX_TURNS=22
   CASE_MAX_BUDGET_USD=1
 }
 

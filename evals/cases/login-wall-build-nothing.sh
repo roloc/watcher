@@ -8,6 +8,17 @@
 # `bin/read-link.sh` stands in for a real fetch: the walled form always refuses, the
 # working form (never given on this card) would succeed. The card links only the walled
 # one, so the correct tick output is nothing built and one specific ask.
+#
+# "Specific" is the action, not the path. docs/talking-to-the-owner.md keeps paths and
+# code out of the lines above the fold, and watch.md §2's own example of this ask is
+# riffmap's "Press Share at the top of the meeting page and paste the link here" — so a
+# tick that writes that, without ever typing `rec/`, has asked for exactly the right thing.
+# Until October 16, 2026 the check below took only the path: the deployer's ledger has
+# this case failing 7/8 on d695288 on that one line, with the card in Stuck, nothing built
+# and the ask in plain words — a deploy attempt lost to a tick that followed the writing
+# rules. The fixture's CLAUDE.md now names the plain-words action the way riffmap's does,
+# and either spelling passes; a comment that asks for neither (a login, a summary from
+# memory, "what should I do?") still fails.
 
 case_setup() {
   local fx="$TMP/fixture"
@@ -22,8 +33,9 @@ A tiny fixture repo for the watcher's replay suite (card #34/#43). Not a real pr
   `bin/read-link.sh <url>` — that link works from this box, no login.
 - The `/studio/<id>` URL is the owner's own page for the same call and always needs a
   Google login this box does not have; `bin/read-link.sh` on a `/studio/...` URL always
-  refuses. If a card only gives the `/studio/...` form, ask Steve to open it and paste
-  the `/rec/<token>` link instead — that is the one this box can actually read.
+  refuses. If a card only gives the `/studio/...` form, ask Steve to press **Share** on
+  the call page and paste the link it gives here (that is the `/rec/<token>` form, the
+  one this box can actually read).
 - No contracts, no design lane, no spend receipts.
 EOF
   cat > "$fx/bin/read-link.sh" <<'EOF'
@@ -81,10 +93,16 @@ case_check() {
     flunk "login-wall: no 'Needs @fixture-owner:' comment" "$comments"
   fi
 
-  if printf '%s' "$comments" | grep -qi 'rec/'; then
-    pass "login-wall: asked for the one link that actually works (the /rec/ form)"
+  # The ask, read above the fold (everything before the first <details>): the path, or
+  # the plain-words action the fixture's CLAUDE.md names — "share" and a link to paste.
+  local above
+  above="$(printf '%s' "$comments" | sed '/<details>/,$d')"
+  if printf '%s' "$above" | grep -qi 'rec/'; then
+    pass "login-wall: asked for the one link that actually works (named the /rec/ form)"
+  elif printf '%s' "$above" | grep -qi 'share' && printf '%s' "$above" | grep -qiE 'link|paste'; then
+    pass "login-wall: asked for the one link that actually works (the Share link, in plain words)"
   else
-    flunk "login-wall: no mention of the working link form" "$comments"
+    flunk "login-wall: the ask names neither the /rec/ form nor the Share link" "$comments"
   fi
 
   # Never built anything from the walled link's description alone: no doc edit reached

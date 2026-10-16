@@ -7,6 +7,16 @@
 # entirely docs-only, and whose own artifact check is wired to never move regardless — the
 # way a live, cached page would not move before its next deploy — to see whether the tick
 # still ships it as `Refs #<n>` and asks Steve, rather than declaring victory on `Closes`.
+#
+# The deployer's ledger has this case failing 6/8 on 4259076 (October 15, 2026), and one
+# of four kept runs on the box on October 16 failed it the same two checks — "wrongly
+# closes" and "card state" — with the card in Stuck and the ask in shape. The body led
+# with `Refs #100` and then explained itself: "Using `Refs #100`, not `Closes #100`", the
+# pairing the merge scan reads, copied from watch.md's own "`Refs #<n>`, never `Closes
+# #<n>`" with the number filled in. That sentence is gone from the prompt and §3's first
+# bullet now says the number appears once in a `Refs` body; the checks here are unchanged
+# (the flunk now prints the offending line). See awaiting-rebuild-exit.sh for the second
+# cause in those runs, scratch files under one name in a shared /tmp.
 
 case_setup() {
   local fx="$TMP/fixture"
@@ -85,7 +95,8 @@ case_check() {
     flunk "symptom-survives: PR body has no Refs #100" "$pr_body"
   fi
   if printf '%s' "$pr_body" | grep -qE '[Cc]loses #100'; then
-    flunk "symptom-survives: PR body wrongly closes the card" "$pr_body"
+    flunk "symptom-survives: PR body wrongly closes the card" \
+      "the pairing: $(printf '%s' "$pr_body" | grep -nE '[Cc]loses #100' | head -3 | tr '\n' ' ')"
   else
     pass "symptom-survives: PR body does not close the card"
   fi

@@ -9,6 +9,20 @@
 # symptom-survives-deploy-gated.sh) but with a project whose `CLAUDE.md` names the
 # downstream job and its own log, to see whether the tick takes the new exit instead of
 # parking in Stuck or looping on the artifact inside its own run.
+#
+# The deployer's ledger (October 15, 2026) has this case failing 5/9 twice (88e19bb,
+# 2918a0f) on commits that never touched a prompt, and four kept runs on the box on
+# October 16 failed it 2/4 the same way: the tick took the rebuild exit correctly — label,
+# unclaim, In progress, no ask — and the card was closed anyway, because its `Refs #100`
+# PR body also said "not `Closes #100`" in the `## Symptom` section, the one pairing the
+# merge scan reads (watch.md §3). The tick was copying watch.md's own sentence, "`Refs
+# #<n>`, never `Closes #<n>`", with the number filled in; that sentence is gone from the
+# prompt, and §3's first bullet now says the number appears once in a `Refs` body. The
+# checks below are unchanged — "PR body wrongly closes the card" is exactly the shape —
+# and a flunk now prints the offending line, not the whole body. A second cause in the
+# same runs: ticks writing `/tmp/pr-100-body.md`, a name every case shares, so parallel
+# cases overwrite each other's bodies (watch.md §1 now gives every tick its own scratch
+# directory).
 
 case_setup() {
   local fx="$TMP/fixture"
@@ -100,7 +114,8 @@ case_check() {
     flunk "awaiting-rebuild-exit: PR body has no Refs #100" "$pr_body"
   fi
   if printf '%s' "$pr_body" | grep -qE '[Cc]loses #100'; then
-    flunk "awaiting-rebuild-exit: PR body wrongly closes the card" "$pr_body"
+    flunk "awaiting-rebuild-exit: PR body wrongly closes the card" \
+      "the pairing: $(printf '%s' "$pr_body" | grep -nE '[Cc]loses #100' | head -3 | tr '\n' ' ')"
   else
     pass "awaiting-rebuild-exit: PR body does not close the card"
   fi

@@ -291,10 +291,18 @@ run_case() {
   local turns="${CASE_MAX_TURNS:-$MAX_TURNS}" budget="${CASE_MAX_BUDGET_USD:-$MAX_BUDGET}"
   local secs="${CASE_TIMEOUT_SEC:-$CASE_TIMEOUT}"
 
+  # The tick's own scratch directory (`scratch="$(mktemp -d)"`, commands/watch.md §1)
+  # lands inside the case's dir: kept with EVAL_KEEP, gone with the case, and never a
+  # name a parallel case's tick can reach. (October 16, 2026: four cases at once, every
+  # tick writing `/tmp/pr-100-body.md` — one case's plan comment went up on another's
+  # card. The fixed-name habit is watch.md's to break; this keeps what `mktemp` makes
+  # with the case that made it.)
+  mkdir -p "$TMP/scratch"
   local out="$TMP/result.json" err="$TMP/result.stderr" rc=0 t0 t1 elapsed
   t0="$(date +%s)"
   ( cd "$WORKTREE" && \
     PATH="$EVALS/stub-bin:$PATH" \
+    TMPDIR="$TMP/scratch" \
     CLAUDE_CONFIG_DIR="$cfg" \
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
     WATCHER_HOME="$REPO" \

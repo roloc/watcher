@@ -34,7 +34,17 @@ gh issue comment <n> --body "🤖 Watcher picked this up at $(date -u +%FT%TZ)."
 gh issue edit <n> --add-label in-flight
 board stage <n> Claimed
 board show <n>     # full body, labels, priority, status
+scratch="$(mktemp -d)"   # every file you write that is not part of the change goes here
 ```
+
+**Scratch files live in that directory, never under a fixed name in `/tmp`.** A PR body,
+a comment body, a screenshot, a server's log: `"$scratch/pr-body.md"`, `"$scratch/stuck.md"`,
+`"$scratch/phone.png"` — and `scratch="$(mktemp -d)"` again in any later call that finds it
+unset. Lanes run side by side on one box, two projects can both be on a card #100 at the
+same time, and `/tmp/pr-100-body.md` is then one file that two ticks write: the body one
+posts is the body the other wrote. (October 16, 2026: four replay cases at once, each a
+card #100. One tick's plan comment went up on its card describing another case's work;
+another found its `Refs` PR body holding a third case's pricing change.)
 
 **Keep the Stage current.** The board has a `Stage` field the owner watches from their
 phone, and it is also how they hand work over: dragging a card into **Waiting** on the
@@ -151,7 +161,7 @@ reviewer, or what the project's `CLAUDE.md` names as its gate) — those always 
 **Look at what the card shows before you decide what is wrong.** A card that carries a
 picture (`<img src="…">` or `![…](…)` in the body — `gh issue view <n> --json body`) is
 a card whose evidence is the picture, not the sentence under it. Fetch it and look at it
-first: `curl -sL -H "Authorization: token $(gh auth token)" -o /tmp/card-<n>-1.png <url>`,
+first: `curl -sL -H "Authorization: token $(gh auth token)" -o "$scratch/card-1.png" <url>`,
 then `Read` the file — the Read tool shows you a PNG. Say in one sentence what the picture
 shows, and check that against the code before you accept the card's own explanation of
 the cause: the owner's diagnosis is a hypothesis, the picture and the code are the evidence.
@@ -186,13 +196,13 @@ with the box, and it works from any worktree:
 ```
 python3 "$WATCHER_HOME/bin/browse.py" check <url>                  # exit 1, and the errors, if the page's own code or a request failed
 python3 "$WATCHER_HOME/bin/browse.py" text  <url>                  # the text a reader sees, after the scripts ran
-python3 "$WATCHER_HOME/bin/browse.py" shot  <url> /tmp/card-<n>.png   # a picture; `Read` it
+python3 "$WATCHER_HOME/bin/browse.py" shot  <url> "$scratch/page.png"   # a picture; `Read` it
 ```
 
 `<url>` is anything this box can reach: the live page, a server you started from the
 worktree the way the project runs locally, or a file (`file://$PWD/site/index.html`). Add
 `--wait '<a JS expression>'` to wait for the page to finish drawing. **A server is started
-and stopped inside one Bash call** — `<serve command> >/tmp/card-<n>-serve.log 2>&1 &
+and stopped inside one Bash call** — `<serve command> >"$scratch/serve.log" 2>&1 &
 pid=$!; <wait for the port>; python3 "$WATCHER_HOME/bin/browse.py" check <url>; kill $pid`
 — never as a call of its own (nothing runs in the background here, so it would hold the
 turn until it timed out) and never left running (the next tick on that port would be
@@ -388,15 +398,30 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
 - Open a PR whose body contains **`Closes #<n>`**, so the merge closes the card by itself —
   unless the card's symptom is still there at the end (next bullet) or it is a docs-only
   PR merging ahead of the owner's judgment (below), the two cases that take `Refs #<n>`
-  instead.
+  instead. **In a `Refs` body the card's number appears exactly once, on that line.** Not
+  in the plan, not in the symptom section, and never in a sentence explaining which
+  keyword you chose and which you did not: the merge scan reads pairs of words, not
+  sentences, and a sentence that says you are *not* closing the card is one more pairing
+  of a closing word with the number — which closes the card (the keyword rule, below).
+  Explain the choice without the number ("this stays open; the live page has not
+  moved"), or explain it in the Stuck comment instead.
+  (October 16, 2026: three of eight replay ticks that had a `Refs` body to write put
+  "`Refs #100`, not `Closes #100`" in it — a sentence this file itself used to model —
+  and every one of them merged with the card closed and the board reading Done.)
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).
 - **The moment the PR exists, post any receipt you already hold.** If the change touched
   a screen, `usability` already ran (above) and its first line is the receipt — post it
-  now, verbatim, as `gh pr comment <pr> --body "🤖 usability: <that line>"`. A code PR
-  carries no `reviewer` receipt yet; that comes after CI (below). A docs-only PR, or one
-  that touched no screen, posts nothing here.
+  now, as `gh pr comment <pr> --body "🤖 usability: <that line>"`, where `<that line>` is
+  the agent's own first line copied character for character, the full 40-character SHA
+  included: the comment reads `🤖 usability: Usability <sha>: no blocking findings`, and
+  nothing shorter is a receipt. `bin/receipt-check.sh` looks for exactly `Usability <sha>:
+  no blocking findings` with the PR's head SHA, so `🤖 usability: no blocking findings` —
+  the paraphrase the replay suite's kept transcripts posted first — fails `review-receipt`,
+  and the verbatim line then goes up as a second comment after a CI round that bought
+  nothing. A code PR carries no `reviewer` receipt yet; that comes after CI (below). A
+  docs-only PR, or one that touched no screen, posts nothing here.
 - **If §2 gave the card a plan, the PR body carries it too**, under `## Plan` — the real
   file list and the real check this time: the FYI comment left the files out and put
   the check in plain words. Diverged
@@ -417,9 +442,9 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
     every one of those may be true, and none of them is the artifact showing the fix. If
     you find yourself reasoning from the explanation instead of from what you just
     fetched, that is the exact judgment call this rule exists to forbid — stop, and answer
-    only "what does the artifact show right now." Its PR body says **`Refs #<n>`, never
-    `Closes #<n>`**, so the merge leaves the card open; merge it, then go to **Stuck** (§4)
-    with what was built, what you expected the artifact to show, what it still shows, and
+    only "what does the artifact show right now." Its PR body says **`Refs #<n>`** and
+    names the card nowhere else (first bullet), so the merge leaves the card open; merge
+    it, then go to **Stuck** (§4) with what was built, what you expected the artifact to show, what it still shows, and
     the reason it hasn't moved if you have one — that reason belongs in the Stuck comment,
     never as grounds to write `Closes` instead.
     **A correct fix for the wrong cause is the outcome this rule exists to catch.**
@@ -459,8 +484,8 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
     what the artifact should show once that job ends, and that a project workflow will say
     when it does; `gh issue edit <n> --add-label awaiting-rebuild`; `board unclaim <n>`;
     leave the card **In progress**; stop with `Outcome: awaiting rebuild`. The PR still says
-    `Refs #<n>`, never `Closes #<n>` (above) — the card is not done, only unblocked from a
-    wasted wait. The spawner skips a card carrying that label until a project's own workflow
+    `Refs #<n>` and nothing else that names the card (above) — the card is not done, only
+    unblocked from a wasted wait. The spawner skips a card carrying that label until a project's own workflow
     removes it (riffmap [#637](https://github.com/roloc/riffmap/issues/637)), then hands it
     to the next tick to re-check the artifact and close or park on what it now shows. Any
     other reason the artifact has not moved — the deploy is red, or its log shows no such
@@ -520,8 +545,10 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
   not fail (no real command, or one that always exits 0) is the same as no block — reject
   it the same way you would a missing one, never treat a trivial pass as done.
   **Post `reviewer`'s first line verbatim as a PR comment the moment it returns** —
-  `gh pr comment <pr> --body "🤖 reviewer: <that line>"` — before you decide what to do
-  with its findings; that comment is the receipt `bin/receipt-check.sh`'s `review-receipt`
+  `gh pr comment <pr> --body "🤖 reviewer: <that line>"`, the line copied whole, so the
+  comment reads `🤖 reviewer: Reviewed <sha>: no blocking findings` with the full SHA
+  (the same shape as the `usability` receipt above; without the SHA it is not a receipt)
+  — before you decide what to do with its findings; that comment is the receipt `bin/receipt-check.sh`'s `review-receipt`
   check reads, and it names the commit you just pushed, so post it whether the verdict is
   clean or blocking.
   **Then make `review-receipt` look again.** It already ran and failed, the moment you
@@ -583,7 +610,8 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
   green before the card parks, rather than holding it open for their reply: an open PR is a
   branch two actors can collide on (the worktree-sync card on this board,
   [#86](https://github.com/roloc/watcher/issues/86), has the incident). Its body carries
-  **`Refs #<n>`, never `Closes #<n>`** — the card is not done until the owner answers, so
+  **`Refs #<n>`**, with no closing word next to the number anywhere in it (first bullet)
+  — the card is not done until the owner answers, so
   it stays open the same way a symptom card does (above). Merge it, then go to **Stuck**
   (§4) with the question, and record their answer afterward with a small follow-up PR whose
   body closes the card, never by reopening the first one. A project whose own `CLAUDE.md`
@@ -657,7 +685,7 @@ Move to **Stuck - Needs help** the moment you need the owner, rather than guessi
 your ask, and a crash between the two leaves the explanation on the card:
 
 ```
-gh issue comment <n> --body-file /tmp/card-<n>-stuck.md
+gh issue comment <n> --body-file "$scratch/stuck.md"
 board move <n> "Stuck - Needs help"
 board stage <n> Parked
 gh issue edit <n> --remove-label in-flight
@@ -719,9 +747,9 @@ holding its claim.
 
 **The comment is the deliverable, and the owner is the reader.** Assume the reader is
 dyslexic and on a phone. They need the ask on the first line, bullets, one question, and
-lettered options they can answer with a single letter. Write the comment to a file (a long body, or one
-with backticks, pipes, braces or a literal `$`, is refused on `--body "…"`) in exactly this
-shape:
+lettered options they can answer with a single letter. Write the comment to a file under
+`$scratch` (§1; a long body, or one with backticks, pipes, braces or a literal `$`, is
+refused on `--body "…"`) in exactly this shape:
 
 ```
 🤖 **Needs @<login>: <one sentence saying what you need decided>**
@@ -801,7 +829,7 @@ already states its own condition. It is also **not** a card you leave In progres
 it back to **Backlog**:
 
 ```
-gh issue comment <n> --body-file /tmp/card-<n>-declined.md
+gh issue comment <n> --body-file "$scratch/declined.md"
 board move <n> Backlog
 board unclaim <n>
 ```
