@@ -83,6 +83,20 @@ step 3 goes in `/etc/watcher/env`; the bot's GitHub login goes in with
 `su - watcher; gh auth login; gh auth setup-git` — then run `/opt/watcher/deploy/install.sh`
 again. It is safe to re-run, and this time it should print `Nothing left by hand`.
 
+**Any Linux host with systemd will do.** Proxmox is what the original box runs on, and it
+is incidental: the repo never talks to it except for optional telemetry on the floor page.
+A cloud VM, a spare Mac mini or laptop running Debian, WSL2 on a desktop that stays on, or
+a guest on whatever hypervisor you already have all work exactly as written above. What the
+watcher does need is a machine that stays on, keeps its disk between restarts, and runs
+systemd: each lane is a systemd unit, the floor page is a service, the deployer and the
+detector are timers, and a deploy swaps a release folder under a running lane without
+killing the tick it is in the middle of (one can run for two hours). That is why there is
+no Docker image or Kubernetes chart yet. Containers are not a safety problem, since a
+container is more throwaway than a VM, but replacing a container kills the tick inside it,
+so a container build needs its own answer to "wait for the lane to be idle" first. If that
+is the shape you need, start with a VM so your first afternoon is about seeing a card
+merge, and file the port as a card once you have.
+
 ## 5. First project
 
 From **your own machine**, never the box, authenticated as **yourself**:
