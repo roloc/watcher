@@ -92,6 +92,9 @@ SLEEP_AFTER_FAILURE_MIN = 10  # spawn.sh: `wsleep 600` after any non-success exi
 PLAN_LATE_MIN = 10  # watch.md §2: the plan comment is the tick's first act — a working
                      # desk still with none past this many minutes reads as the lane's own
                      # warning, not a hung lane with no sign to tell the two apart (card #103)
+WAITING_GRACE_MIN = 2  # card #165: a tool call open less than this long is an ordinary
+                        # fast call, not something to flag — past it, the desk shows what
+                        # the tick's newest open tool call is and how long it has run
 RECENT_PER_LANE = 20   # ticks kept per lane before the global list is trimmed
 RECENT_TOTAL = 15      # ticks shown on the page, across every project
 
@@ -147,6 +150,9 @@ ALLOWED_FIELDS = {
     "wins", "title", "days", "items",
     # card #110: a working lane that is also pausing (a PAUSE file sits beside a held card)
     "pausing", "pausing_reason",
+    # card #165: a working desk whose newest tool call has not returned in a while — what
+    # it is (the same one-line decode Peek shows) and how long
+    "waiting", "on",
 }
 
 WINS_DAYS = 7       # the wins board's window
@@ -624,8 +630,33 @@ def _plan_posted_since(stamp, launched):
     return ts >= launched
 
 
+def _current_waiting(lane, n, claude_projects_dir, now):
+    """`{"on": <one-line decode>, "minutes": n}` for a working desk whose newest tool call
+    has sat open for at least `WAITING_GRACE_MIN` minutes — or `None` (nothing open right
+    now, inside the grace, or no session found). Reuses Peek's own session lookup
+    (`tail.session_dirs`/`tail.newest_jsonl`, canary-aware since card #164) rather than
+    reading the transcript a second way."""
+    session_dir = tail.session_dirs(tail._as_dirs(claude_projects_dir), n,
+                                     lane["workdir_mode"], lane["worktree_base"])
+    f = tail.newest_jsonl(session_dir)
+    if f is None:
+        return None
+    step = tail.current_step(f)
+    if step is None:
+        return None
+    desc, ts = step
+    try:
+        when = datetime.fromisoformat((ts or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    minutes = _minutes_since(when, now)
+    if minutes < WAITING_GRACE_MIN:
+        return None
+    return {"on": desc, "minutes": minutes}
+
+
 def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None,
-              images=None, plan=None):
+              images=None, plan=None, claude_projects_dir=None):
     """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
     `last_tick` is the lane's own newest log entry (a `metrics.Tick`, or None — loaded
     once by the caller, not re-read here: a lane's own `Cache` refresh used to parse every
@@ -638,7 +669,10 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
     for `board.py plan` (card #103): called only for a working desk, and only when given —
     a caller with nothing to inject (an older demo fixture, a test of something else) gets
     the old shape back, no `plan_posted`/`plan_late` fields at all, rather than a guessed
-    "no plan" on a lane this was never asked about.
+    "no plan" on a lane this was never asked about. `claude_projects_dir` is the same shape
+    for the "Waiting" line (card #165) — `tail.projects_dirs()`, or a fixture's own list —
+    called only for a working desk, and only when given; `None` (an older caller) means no
+    `waiting` field at all rather than a guessed "nothing open right now."
 
     A held card always wins the pill (card #110): a `PAUSE` file beside a held card never
     means idle — it means the lane will not pick up anything new once this tick ends. So
@@ -672,6 +706,10 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             posted = _plan_posted_since(plan(n, lane["project_repo"]), launched)
             desk["plan_posted"] = posted
             desk["plan_late"] = (not posted) and minutes >= PLAN_LATE_MIN
+        if claude_projects_dir is not None:
+            waiting = _current_waiting(lane, n, claude_projects_dir, now)
+            if waiting is not None:
+                desk["waiting"] = waiting
         if paused:
             desk["pausing"] = True
             desk["pausing_reason"] = _pause_reason(pause_path)
@@ -1246,7 +1284,7 @@ def make_card_lookup(repos_fn, fetcher=fetch_card, cache_sec=60, clock=time.time
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
                  images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
                  deploy_fn=None, deploy_repo=None, ratelimit_fn=None, box_stats_fn=None,
-                 proxmox_fn=None, ledger_fn=None, plan_fn=None):
+                 proxmox_fn=None, ledger_fn=None, plan_fn=None, claude_projects_dir=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
@@ -1280,7 +1318,8 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
             active = unit_active_fn(lane["unit"]) if unit_active_fn else None
             desk = lane_desk(lane, items_by_number, p["board_url"], now,
                               last_tick=ticks[-1] if ticks else None,
-                              unit_active=active, ask=ask_fn, images=images_fn, plan=plan_fn)
+                              unit_active=active, ask=ask_fn, images=images_fn, plan=plan_fn,
+                              claude_projects_dir=claude_projects_dir)
             lane_out.append(desk)
 
             for t in ticks[-RECENT_PER_LANE:]:
@@ -1597,6 +1636,9 @@ INDEX_HTML = """<!doctype html>
   /* card #110: a working desk that is also pausing — a second fact, not a replacement
      for the Working pill, so it reads small and amber beside the detail line. */
   .pausing { font-size: 12px; margin-top: 2px; color: var(--paused); }
+  /* card #165: a working desk whose newest tool call has sat open past the grace — the
+     one line that tells a slow tick from a hung one, which the Stage word alone cannot. */
+  .waiting { font-size: 12px; margin-top: 2px; color: var(--paused); }
   /* A mockup or a screenshot a Needs-the-owner comment pointed at, shown right on the desk
      instead of making the owner click through to the card to find it (card #91). */
   .mockups { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -2101,6 +2143,15 @@ function pausingLine(d) {
   return `<div class="pausing">pausing after this card${forDeploy ? " for a deploy" : ""}</div>`;
 }
 
+// Card #165: a working desk's newest tool call that has not returned for at least
+// WAITING_GRACE_MIN minutes — `waiting` is absent entirely when nothing has been open
+// that long (the backend's own call, in `_current_waiting`), so this only ever has
+// something to draw.
+function waitingLine(d) {
+  if (!d.waiting) return "";
+  return `<div class="waiting">waiting ${d.waiting.minutes}m: ${esc(d.waiting.on)}</div>`;
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -2421,6 +2472,7 @@ function deskHTML(d) {
       <span class="pill ${esc(d.pill)}${planLate ? " plan-late" : ""}">${d.pill === "needs_steve" ? needsLabel(d.owner_login) : (PILL_LABEL[d.pill] || esc(d.pill))}</span>
       <div class="detail">${detail}</div>
       ${pausingLine(d)}
+      ${waitingLine(d)}
       ${d.pill === "needs_steve" ? mockupThumbsHTML(d.images) : ""}
       ${d.pill === "needs_steve" ? reviewButtonHTML(d.card.number, d.images) : ""}
     </a>
@@ -2554,11 +2606,21 @@ async function pollPeek() {
   if (data.status === "waiting") { peekStatus(`starting #${data.card}`, "The session has not written anything yet."); return; }
   peekSub(data.live ? `working on #${data.card} — live` : `idle — its last session, #${data.card}`, data.live);
   const pre = document.getElementById("peek-lines");
-  if (data.reset) pre.textContent = "";
   peekCard = data.card; peekFile = data.file; peekPos = data.pos;
+  // Card #165: newest first, the current step pinned at the top — the one thing a tick is
+  // doing right now, not the last forty lines in the order they were written. `data.lines`
+  // itself is oldest-to-newest (tail.py's own order); reverse each batch before it joins
+  // the panel. A `reset` replaces the panel outright; new lines since the last poll go
+  // above whatever is already there, same reason — they are newer.
+  if (data.reset) {
+    pre.textContent = data.lines.slice().reverse().join("\\n");
+    pre.scrollTop = 0;
+    return;
+  }
   if (!data.lines.length) return; // nothing new: leave any manual scroll-back alone
-  for (const line of data.lines) pre.textContent += (pre.textContent ? "\\n" : "") + line;
-  pre.scrollTop = pre.scrollHeight;
+  const newest = data.lines.slice().reverse().join("\\n");
+  pre.textContent = pre.textContent ? newest + "\\n" + pre.textContent : newest;
+  pre.scrollTop = 0;
 }
 
 // A phone-friendly local time ("3:48 PM") for an ISO timestamp the server sent — never the
@@ -4142,7 +4204,7 @@ def main(argv):
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=deploy_lookup,
                             ratelimit_fn=board_ratelimit, ledger_fn=board_ledger, box_stats_fn=box_stats,
-                            proxmox_fn=fetch_proxmox)
+                            proxmox_fn=fetch_proxmox, claude_projects_dir=claude_projects_dir)
 
     idle_after_sec = max(refresh_sec * 5, 300)
     cache = Cache(build, refresh_sec, idle_after_sec=idle_after_sec)

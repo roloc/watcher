@@ -262,6 +262,71 @@ check "CLAUDE_CANARY_PROJECTS_DIR=/x wins outright" \
 check "the two naming one dir: looked in once" \
   derived "found under /p/-r" CLAUDE_PROJECTS_DIR=/p CLAUDE_CANARY_PROJECTS_DIR=/p
 
+# 14. current_step (card #165): the newest tool_use with no matching tool_result after it
+# — the fact a working desk's "Waiting" line and Peek's top line both read off. Exercised
+# straight against the Python function (as tail.py's own module, not through tail.sh's
+# CLI): there is no --path-shaped entry point for this, and the function is pure, so
+# importing it is the direct way to check it rather than inventing a flag only a test uses.
+echo
+echo "current_step (card #165)"
+CS="$TMP/current-step"
+mkdir -p "$CS"
+
+current_step() {  # $1 = path; prints "desc|timestamp", or "None"
+  python3 -c "
+import sys
+sys.path.insert(0, '$HERE')
+import tail
+r = tail.current_step(sys.argv[1])
+print('None' if r is None else r[0] + '|' + (r[1] or ''))
+" "$1"
+}
+
+# a. a tool_use with its own tool_result already in: nothing open, nothing to wait on.
+cat > "$CS/a.jsonl" <<'EOF'
+{"type":"assistant","timestamp":"2026-10-15T12:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"description":"List cards"}}]}}
+{"type":"user","timestamp":"2026-10-15T12:00:05.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+EOF
+check "every call closed: None" [ "$(current_step "$CS/a.jsonl")" = "None" ]
+
+# b. one tool_use, no result yet: that is the current step.
+cat > "$CS/b.jsonl" <<'EOF'
+{"type":"assistant","timestamp":"2026-10-15T12:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"description":"Check debug trial progress"}}]}}
+EOF
+check "one open call: its description and its own timestamp" \
+  [ "$(current_step "$CS/b.jsonl")" = '$ Check debug trial progress|2026-10-15T12:00:00.000Z' ]
+
+# c. two calls, the first closed before the second opens: the newest OPEN one wins, not
+# the first (closed) one and not simply "the last tool_use in the file" if that one had
+# already returned too.
+cat > "$CS/c.jsonl" <<'EOF'
+{"type":"assistant","timestamp":"2026-10-15T12:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"description":"first call"}}]}}
+{"type":"user","timestamp":"2026-10-15T12:00:05.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"assistant","timestamp":"2026-10-15T12:00:06.000Z","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"description":"second call"}}]}}
+EOF
+check "two calls, only the second still open: the second" \
+  [ "$(current_step "$CS/c.jsonl")" = '$ second call|2026-10-15T12:00:06.000Z' ]
+
+# d. the result for an EARLIER call arrives after a LATER call was issued (the model can
+# have more than one call outstanding) — the result still closes the call it names, by id,
+# never "the last tool_use before this line."
+cat > "$CS/d.jsonl" <<'EOF'
+{"type":"assistant","timestamp":"2026-10-15T12:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"description":"first call"}}]}}
+{"type":"assistant","timestamp":"2026-10-15T12:00:01.000Z","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"description":"second call"}}]}}
+{"type":"user","timestamp":"2026-10-15T12:00:07.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+EOF
+check "the earlier call's result arrives late: the other one, still open, is current" \
+  [ "$(current_step "$CS/d.jsonl")" = '$ second call|2026-10-15T12:00:01.000Z' ]
+
+# e. a call that returned, followed only by the model composing text: nothing open, same
+# as idle between calls — never the stale description of the call that already finished.
+cat > "$CS/e.jsonl" <<'EOF'
+{"type":"assistant","timestamp":"2026-10-15T12:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"description":"first call"}}]}}
+{"type":"user","timestamp":"2026-10-15T12:00:05.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"assistant","timestamp":"2026-10-15T12:00:06.000Z","message":{"content":[{"type":"text","text":"Done."}]}}
+EOF
+check "closed call, then plain text: still None" [ "$(current_step "$CS/e.jsonl")" = "None" ]
+
 echo
 if [ "$fail" -eq 0 ]; then
   echo "tail: $n checks, all ok"

@@ -29,6 +29,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -180,6 +181,17 @@ def run(description):
         {"type": "tool_use", "name": "Bash", "input": {"description": description, "command": "x"}}]}}) + "\n"
 
 
+def open_call(description, minutes_ago, tool_id="t-wait"):
+    """A `run()` with the two fields `tail.current_step` (card #165) actually needs: a real
+    `id` (so it can be matched against a later `tool_result`, which this never writes — the
+    call stays open) and a `timestamp` real minutes in the past, since the live fixture's
+    own `now` is the wall clock (`LiveCache.get()` passes no `now=` override)."""
+    when = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return json.dumps({"type": "assistant", "timestamp": when, "message": {"content": [
+        {"type": "tool_use", "id": tool_id, "name": "Bash",
+         "input": {"description": description, "command": "x"}}]}}) + "\n"
+
+
 def transcript(worktree_base, card, lines, under=CLAUDE):
     d = os.path.join(under, tail.encode_dir(os.path.join(worktree_base, f"card-{card}")))
     os.makedirs(d, exist_ok=True)
@@ -289,7 +301,11 @@ class LiveCache:
                                  # Card #106: alpha is "the board this box deploys" — the
                                  # Ship desk's per-lane view belongs here, box-wide.
                                  deploy_repo="roloc/alpha",
-                                 deploy_fn=lambda: {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa"})
+                                 deploy_fn=lambda: {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa"},
+                                 # Card #165: the same two directories tail_lookup (below)
+                                 # already searches for Peek — the desk's own "Waiting"
+                                 # line reads the identical session, never a second lookup.
+                                 claude_projects_dir=[CLAUDE, CANARY])
 
 
 def tail_lookup(lane, card, file, pos):
@@ -598,10 +614,11 @@ try:
         check("the new line shows up without touching anything",
               b.wait_for(PANEL_TEXT + ".includes('Opening the pull request now.')", timeout=8),
               b.eval(PANEL_TEXT))
-        check("...added under the earlier lines, which are still there, once each",
-              b.eval(PANEL_TEXT).split("\n") == ["Reading the card before touching anything.",
+        check("...added ABOVE the earlier lines, which are still there, once each — card "
+              "#165: newest first, so the line that just arrived is the one on top",
+              b.eval(PANEL_TEXT).split("\n") == ["Opening the pull request now.",
                                                  "$ Run the spawner suite",
-                                                 "Opening the pull request now."], b.eval(PANEL_TEXT))
+                                                 "Reading the card before touching anything."], b.eval(PANEL_TEXT))
         check("the page redrawing its desks under the panel leaves the panel open",
               b.eval("refresh().then(() => true)") and b.eval(PANEL_OPEN)
               and b.eval("document.querySelectorAll('.peek-btn').length") == 6)
@@ -618,6 +635,35 @@ try:
         b.click_at(6, 6)
         check("a click outside the panel closes it (a phone has no Escape key)",
               b.wait_for("!" + PANEL_OPEN, timeout=3))
+
+        print("6a. card #165: a working desk flags a tool call that has sat open past the "
+              "grace, and Peek's own top line is that same call")
+        # October 15, 2026's own incident: the desk said "Building, 106 min" the whole time
+        # a tick sat mid-`sleep`, re-running the replay suite — alpha's own open call here
+        # plays that back, old enough (well past WAITING_GRACE_MIN) that the test cannot
+        # flake on how long the browser itself takes to load.
+        with open(LIVE, "a") as f:
+            f.write(open_call("Rerunning the replay suite's own canary case", 6))
+        check("the page redrawing its desks shows a Waiting line naming the open call",
+              b.eval("refresh().then(() => true)")
+              and b.wait_for("document.querySelector('[data-peek-lane=\"alpha\"]').closest('.desk')"
+                             ".querySelector('.waiting')?.textContent.includes("
+                             "\"Rerunning the replay suite's own canary case\")"),
+              b.eval("document.querySelector('[data-peek-lane=\"alpha\"]').closest('.desk')"
+                     ".querySelector('.waiting')?.textContent"))
+        shot(b, "waiting-desktop.png", full_page=False)
+        b.click(peek_button("alpha"))
+        check("the panel opens", b.wait_for(PANEL_OPEN))
+        check("Peek's first line is the current step — the newest entry, pinned at the top, "
+              "the same words the desk's own Waiting line just showed",
+              b.wait_for(PANEL_TEXT + ".split('\\n')[0].includes("
+                        "\"Rerunning the replay suite's own canary case\")"),
+              b.eval(PANEL_TEXT))
+        check("the session's earlier lines still follow, oldest last",
+              b.eval(PANEL_TEXT).split("\n")[-1] == "Reading the card before touching anything.",
+              b.eval(PANEL_TEXT))
+        b.key("Escape")
+        check("still no errors after all of that", b.errors == [], b.errors)
 
         print("7. Peek on a lane that is not working shows its last session, and says so")
         b.click(peek_button("alpha-design"))
@@ -650,10 +696,10 @@ try:
         with open(os.path.join(STATE, "alpha", "release"), "w") as f:
             f.write("watcher-canary")
         b.click(peek_button("alpha"))
-        check("the panel opens on the canary lane's live session, decoded",
+        check("the panel opens on the canary lane's live session, decoded, newest first",
               b.wait_for(PANEL_TEXT + ".includes('$ Run the tail suite')")
-              and b.eval(PANEL_TEXT).split("\n") == ["Soaking on the canary: reading card eight.",
-                                                     "$ Run the tail suite"], b.eval(PANEL_TEXT))
+              and b.eval(PANEL_TEXT).split("\n") == ["$ Run the tail suite",
+                                                     "Soaking on the canary: reading card eight."], b.eval(PANEL_TEXT))
         check("...and says it is live, on that card — not 'waiting for its session'",
               b.eval(PANEL_SUB) == "working on #8 — live", b.eval(PANEL_SUB))
         check("no uncaught exception", b.errors == [], b.errors)
@@ -832,9 +878,9 @@ try:
 
     print("9. this suite fails on the page #70 shipped (card #71): a script that does not parse")
     good = floor.INDEX_HTML
-    marker = 'pre.textContent ? "\\n" : ""'
+    marker = 'newest + "\\n" + pre.textContent'
     check("the line #70 broke is still where this case expects it", good.count(marker) == 1)
-    floor.INDEX_HTML = good.replace(marker, 'pre.textContent ? "\n" : ""')
+    floor.INDEX_HTML = good.replace(marker, 'newest + "\n" + pre.textContent')
     try:
         with browse.Browser() as b:
             b.goto(URL)
@@ -1136,9 +1182,10 @@ try:
 
         print("14. tap a character for a speech bubble; tap the bubble for the full Peek")
         b.click(".character[data-lane='alpha']")
-        check("the bubble opens with the same last line Peek shows (section 5 appended it live)",
+        check("the bubble opens with the same last (newest) line Peek shows — section 6a's "
+              "open call is the newest one on file now",
               b.wait_for("document.querySelector('.bubble')?.textContent.includes("
-                        "'Opening the pull request now.')"))
+                        "\"Rerunning the replay suite's own canary case\")"))
         b.click(".bubble")
         check("tapping it opens the full Peek panel",
               b.wait_for(PANEL_OPEN)
