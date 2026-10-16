@@ -2,6 +2,9 @@
 
 A headless Claude Code loop that turns a GitHub Projects board into merged pull requests.
 One throwaway box, one systemd unit per project, no permission prompts.
+**New here?** `docs/getting-started.md` is fork to first merged card, in an afternoon;
+`docs/threat-model.md` is what the box can touch before you give it write access to
+anything.
 
 **How it works.** `bin/spawn.sh` polls the board's **In progress** column once a minute, and
 falls back to the **Waiting** stage and then — where `READY_PULL=1` — the **Ready** column,
@@ -50,6 +53,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
     CLAUDE.md             rules for editing this repo
     projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, PROJECT_REPO,
                           WORKTREE_COPY_DIRS, and LANE_AGENTS for a lane
+    deploy/bootstrap.sh   idempotent apt/npm setup for a fresh box, run once before install.sh
     deploy/watcher@.service, deploy/install.sh
     deploy/autodeploy.sh  THE deploy path: ships main by itself when every lane is idle (see below)
     deploy/watcher-deploy.service, .timer   run it every five minutes
@@ -167,9 +171,13 @@ on. Details in `docs/how-it-works.md`, "Watching the product".
 
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 
-    apt install git python3 curl gh chromium       # plus node 22 and whatever the project builds with
-    npm i -g @anthropic-ai/claude-code
+`docs/getting-started.md` is the numbered, step-by-step version — fork, bot account,
+your own Claude subscription token, the box, a first project, a first card. Short form:
+
+    apt install git
     git clone <your fork's clone URL> /opt/watcher   # or rsync it in
+    /opt/watcher/deploy/bootstrap.sh               # idempotent: git, python3, curl, gh,
+                                                    # chromium, node 22, the claude CLI
     /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, symlinks, `board`
 
 Then by hand, once:
@@ -200,6 +208,9 @@ Then by hand, once:
    address>:8787/`, reached off-site over whatever tunnel already reaches the box.
    `journalctl -u watcher-floor -f` follows it; `systemctl restart watcher-floor` after
    hand-editing `bin/floor.py` outside the normal deploy path.
+
+**What this box can and cannot do** is `docs/threat-model.md` — read it before granting
+the bot account write access to anything.
 
 ## Looking at pages
 

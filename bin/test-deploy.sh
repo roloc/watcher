@@ -727,5 +727,89 @@ DEPLOY_HISTORY_LINES=10x run
 check "history: a cap that is not a number never stops a deploy either" [ "$(head_)" = "$T4" ]
 
 echo
+echo "bootstrap.sh (card #160): idempotent, checks each tool before installing it"
+echo
+# A fully-replaced PATH (not the usual prepend) — bootstrap.sh is a different script with a
+# different command surface, so its own stub directory is isolated rather than sharing the
+# suite's own $BIN. chmod/install/grep/bash are the real binaries (harmless, and the pipe
+# to a real `bash -` is how the script runs the NodeSource setup script); id/apt-get/curl/
+# dpkg/npm are stubs that log to the suite's own $CALLS, same convention as everywhere else
+# in this file. apt-get and npm "install" a tool by dropping an executable stub of that
+# name into the same directory, so a second run finds it with a plain `command -v`.
+BOOTSTRAP="$HERE/../deploy/bootstrap.sh"
+BBIN="$TMP/bootstrap-bin"; mkdir -p "$BBIN"
+for real in chmod install grep bash; do ln -sf "$(command -v "$real")" "$BBIN/$real"; done
+
+cat > "$BBIN/id" <<EOF
+#!/usr/bin/env bash
+echo "id \$*" >> "$CALLS"
+[ "\$1" = -u ] && echo "\${BOOTSTRAP_TEST_UID:-0}"
+EOF
+cat > "$BBIN/apt-get" <<EOF
+#!/usr/bin/env bash
+echo "apt-get \$*" >> "$CALLS"
+if [ "\$1" = install ]; then
+  pkg="\${!#}"
+  case "\$pkg" in
+    nodejs) printf '#!/usr/bin/env bash\necho v22.0.0\n' > "$BBIN/node"; chmod +x "$BBIN/node" ;;
+    *)      : > "$BBIN/\$pkg"; chmod +x "$BBIN/\$pkg" ;;
+  esac
+fi
+EOF
+cat > "$BBIN/curl" <<EOF
+#!/usr/bin/env bash
+echo "curl \$*" >> "$CALLS"
+prev=""
+for a in "\$@"; do [ "\$prev" = -o ] && printf fake > "\$a"; prev="\$a"; done
+exit 0
+EOF
+cat > "$BBIN/dpkg" <<EOF
+#!/usr/bin/env bash
+echo "dpkg \$*" >> "$CALLS"
+[ "\$1" = --print-architecture ] && echo amd64
+EOF
+cat > "$BBIN/npm" <<EOF
+#!/usr/bin/env bash
+echo "npm \$*" >> "$CALLS"
+case "\$1" in i|install) printf '#!/usr/bin/env bash\necho fake-claude\n' > "$BBIN/claude"; chmod +x "$BBIN/claude" ;; esac
+EOF
+chmod +x "$BBIN/id" "$BBIN/apt-get" "$BBIN/curl" "$BBIN/dpkg" "$BBIN/npm"
+
+bootstrap_run() {
+  : > "$CALLS"
+  BOOTSTRAP_TEST_UID="${1:-0}" PATH="$BBIN" APT_KEYRING_DIR="$TMP/apt-keyrings" \
+    APT_SOURCES_DIR="$TMP/apt-sources" bash "$BOOTSTRAP" > "$TMP/bout" 2>&1
+  echo $? > "$TMP/brc"
+}
+bout_has()  { grep -q -- "$1" "$TMP/bout"; }
+brc_is()    { [ "$(cat "$TMP/brc")" = "$1" ]; }
+
+bootstrap_run 1000
+check "bootstrap: a non-root run refuses"                  brc_is 1
+check "bootstrap: ...and says so in plain words"           bout_has "run as root"
+check "bootstrap: ...and never touches apt at all"         not_called "apt-get"
+
+bootstrap_run
+check "bootstrap: a fresh box exits clean"                  brc_is 0
+check "bootstrap: installs every missing apt package"       bash -c '
+  for p in git python3 chromium gh; do grep -q "apt-get install -y -qq $p\$" "'"$CALLS"'" || exit 1; done'
+check "bootstrap: ...and says so, one line per tool"        bash -c '
+  for p in git python3 chromium gh; do grep -q "installed $p\$" "'"$TMP/bout"'" || exit 1; done
+  grep -q "already have curl" "'"$TMP/bout"'"'
+check "bootstrap: installs Node 22 via NodeSource, not Debian 12's own archive" \
+      bash -c 'grep -q "curl.*deb.nodesource.com/setup_22.x" "'"$CALLS"'" && grep -q "apt-get install -y -qq nodejs" "'"$CALLS"'"'
+check "bootstrap: installs the CLI with npm -g"              bash -c 'grep -q "npm i -g @anthropic-ai/claude-code" "'"$CALLS"'"'
+check "bootstrap: the gh keyring and apt source land under the overridden dirs, never /etc" \
+      bash -c '[ -f "'"$TMP"'/apt-keyrings/githubcli-archive-keyring.gpg" ] && [ -f "'"$TMP"'/apt-sources/github-cli.list" ]'
+check "bootstrap: ends by pointing at install.sh"            bout_has "install.sh"
+
+bootstrap_run
+check "bootstrap: a second run on the same box exits clean"  brc_is 0
+check "bootstrap: ...finds every tool already there now"     bash -c '
+  for p in git python3 curl chromium gh; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done'
+check "bootstrap: ...and never calls apt-get or npm a second time" bash -c '
+  not_called() { ! grep -q -- "$1" "'"$CALLS"'"; }; not_called "apt-get" && not_called "npm i"'
+
+echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi
 exit "$fail"
