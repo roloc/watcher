@@ -72,7 +72,12 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   in a scratch clone at that commit, before anything goes live; a commit that fails it
   twice is held and never deployed. The playbook: every future incident that changes one of those
   three files adds its case in the same PR (`bin/eval.sh`'s own header has the how-to, and
-  the caveat about what a case does and does not prove).
+  the caveat about what a case does and does not prove). `bash bin/test-eval-cases.sh` is
+  the cases' own offline suite (CI runs it): it builds a case's real fixture, stands in for
+  the tick (a comment, a status, a PR body, a commit on main) and reads what the case's
+  `case_check()` makes of it — so a check's regex is tried against the shapes it must pass
+  and the ones it exists to catch before a live run ever meets it. Touching a `case_check()`
+  means adding its sample there and running it.
 - `bin/receipt-check.sh` — the `review-receipt` CI check (card #142): a code PR cannot
   merge without a `🤖 reviewer:` comment (`commands/watch.md` §3 posts it) naming the PR's
   exact head commit with a clean verdict, and a screen change needs a matching

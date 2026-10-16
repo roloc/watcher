@@ -63,6 +63,10 @@
 # prose is load-bearing for it. Do not assume a new case is discriminating; check it the same
 # way, and say in the PR whether it is a sensitivity proof or a regression guard.
 #
+# A CASE'S CHECKS HAVE AN OFFLINE SUITE: bin/test-eval-cases.sh sources a case, runs its
+# case_setup(), stands in for the tick, and reads case_check()'s verdicts — the place to try
+# a check's regex against the right and wrong shapes without a live run (CLAUDE.md, Layout).
+#
 # SAFETY: the nested tick runs with --dangerously-skip-permissions, same as a real one, but
 # its `gh` and `board` resolve to evals/stub-bin/ (PATH is overridden, never inherited) and
 # neither one ever shells out to the real `gh` — evals/fakehub.py is a closed simulation that

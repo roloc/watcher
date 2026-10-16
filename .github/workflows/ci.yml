@@ -50,7 +50,7 @@ jobs:
       # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/shim/claude bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/eval.sh bin/receipt-check.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh bin/test-eval-ledger.sh bin/test-receipt.sh bin/test-add-project.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh deploy/bootstrap.sh evals/cases/*.sh; do
+          for f in bin/spawn.sh bin/shim/claude bin/worktree.sh bin/detect.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/eval.sh bin/receipt-check.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-tail.sh bin/test-eval-ledger.sh bin/test-eval-cases.sh bin/test-receipt.sh bin/test-add-project.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh deploy/bootstrap.sh evals/cases/*.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 
@@ -68,6 +68,9 @@ jobs:
 
       - name: The replay suite's ledger
         run: bash bin/test-eval-ledger.sh
+
+      - name: The replay cases' own checks, offline
+        run: bash bin/test-eval-cases.sh
 
       - name: The Discord suite
         run: python3 bin/test-notify.py
