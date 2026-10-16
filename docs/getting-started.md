@@ -133,9 +133,9 @@ in `projects/<name>.env`, which `deploy/add-project.sh` does not set for you).
 
 Open the floor page: `http://<the box's address>:8787/`.
 
-**Check, in the first ten minutes:** the card moves itself to **In progress**; its Stage
-field ticks through Claimed, Building, Reviewing, Merging; the floor page shows the
-project's lane working, not idle; and the card gets a `🤖 **FYI:** plan for this card`
+**Check, in the first ten minutes:** the card's Stage field reaches **Claimed** within a
+minute of the move, then ticks through Building, Reviewing, Merging; the floor page shows
+the project's lane working, not idle; and the card gets a `🤖 **FYI:** plan for this card`
 comment before the Stage leaves Claimed.
 
 ## 8. When a card lands in Stuck

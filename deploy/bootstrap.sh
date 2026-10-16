@@ -33,6 +33,16 @@ apt_update_once() {
   APT_UPDATED=1
 }
 
+# gh's keyring and NodeSource's setup script both need a working `curl … | gpg --dearmor`
+# path, which a minimal Debian image does not ship (unlike git/python3/curl/chromium, it is
+# rarely already there, so this is never folded into the plain-package loop below).
+ensure_transport_deps() {
+  have gpg && have update-ca-certificates && return 0
+  apt_update_once
+  apt-get install -y -qq ca-certificates gnupg
+  say "installed ca-certificates, gnupg"
+}
+
 # --- plain apt packages: binary name == package name for all four ------------------------
 for pkg in git python3 curl chromium; do
   if have "$pkg"; then
@@ -48,6 +58,7 @@ done
 if have gh; then
   say "already have gh"
 else
+  ensure_transport_deps
   install -d -m 0755 "$APT_KEYRING_DIR"
   if [ ! -f "$APT_KEYRING_DIR/githubcli-archive-keyring.gpg" ]; then
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -70,6 +81,7 @@ fi
 if have node && node -v | grep -q '^v22\.'; then
   say "already have node $(node -v)"
 else
+  ensure_transport_deps
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y -qq nodejs
   say "installed node $(node -v)"

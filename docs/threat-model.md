@@ -79,8 +79,11 @@ tick does can satisfy more than one of them:
 2. **The project's own required CI check** — whatever that project names as its one
    required check.
 3. **The review receipt** (`bin/receipt-check.sh`, card #142) — a second, independent
-   required check. A code PR cannot merge without a `🤖 reviewer:` comment on that exact
-   PR naming its *current head commit* with a clean verdict (and a matching
+   required check, on this repo already. `deploy/add-project.sh` only ever sets up the
+   first check above for a *project this watcher works*; a forked project adds its own
+   `review-receipt` job the way `templates/project-CLAUDE.md` says, the first time it
+   gets a build lane. A code PR cannot merge without a `🤖 reviewer:` comment on that
+   exact PR naming its *current head commit* with a clean verdict (and a matching
    `🤖 usability:` one, for any change to a screen). This check reads only the PR's own
    comments and its own current head SHA — never anything the tick says about itself — so
    an amend made after the review, or a review that simply never ran, fails this check
