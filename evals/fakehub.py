@@ -196,7 +196,70 @@ PR_FIELD_MAP = {
     "number": lambda pr: pr["number"], "url": lambda pr: pr["url"],
     "body": lambda pr: pr["body"], "title": lambda pr: pr["title"],
     "state": lambda pr: pr["state"], "headRefName": lambda pr: pr["head"],
+    "baseRefName": lambda pr: pr["base"],
+    "comments": lambda pr: [{"body": c} for c in pr.get("comments", [])],
+    "headRefOid": lambda pr: run(["git", "-C", ORIGIN, "rev-parse", f"refs/heads/{pr['head']}"],
+                                 check=False).stdout.strip(),
 }
+
+
+def _pr_by_ref(d, ref, cwd):
+    """A PR by number ("1", "#1"), by head branch ("card-100"), by its own url, or — no ref
+    at all — the one for the current branch: the lookups gh's own `pr view` and `pr diff`
+    accept."""
+    if ref is None:
+        return _find_pr(d, [], cwd)
+    r = ref.lstrip("#")
+    if r.isdigit():
+        pr = d["prs"].get(r)
+        if not pr:
+            die(f"no pull request #{r}")
+        return pr
+    for p in d["prs"].values():
+        if p["head"] == ref or p["url"] == ref:
+            return p
+    die(f"no pull request found for {ref!r}")
+
+
+def gh_pr_view(argv, cwd):
+    # `gh pr view [<n>|<branch>|<url>] --json <fields> [--jq .<field>]`: what
+    # commands/watch.md §3 and agents/reviewer.md name as the PR body's ground truth
+    # (`--json body`), and what a tick reaches for to learn its own PR's number or url.
+    # Until October 15, 2026 this was unhandled, so every such call died — and `reviewer`,
+    # unable to read the body, blocked "plausibly" on a verify block it could not see: one
+    # more round in a case already at the suite's ceilings (cards #170, #172).
+    pos, flags = parse_flags(argv)
+    pr = _pr_by_ref(load(), pos[0] if pos else None, cwd)
+    if "json" not in flags:
+        print(f"{pr['title']}\n{pr['state']} · {pr['head']} -> {pr['base']}\n\n{pr['body']}")
+        return
+    fields = [f.strip() for f in flags["json"].split(",") if f.strip()]
+    unknown = [f for f in fields if f not in PR_FIELD_MAP]
+    if unknown:
+        die(f"gh pr view --json: fakehub does not simulate field(s) {unknown}")
+    out = {f: PR_FIELD_MAP[f](pr) for f in fields}
+    jq = flags.get("jq", "").strip()
+    if jq:
+        m = re.fullmatch(r"\.(\w+)", jq)
+        if not m or m.group(1) not in out:
+            die(f"gh pr view --jq: fakehub only simulates `.<field>` over the fields asked for, not {jq!r}")
+        v = out[m.group(1)]
+        print(v if isinstance(v, str) else json.dumps(v))
+        return
+    print(json.dumps(out))
+
+
+def gh_pr_diff(argv, cwd):
+    # `gh pr diff [<n>|<branch>] [--name-only]`: the PR's diff against its base, from the
+    # bare origin — both refs are there once the branch is pushed, which is what makes it a
+    # PR at all. What `reviewer` reads when it wants the change and not the author's account.
+    pos, flags = parse_flags(argv, known_bool=("name-only",))
+    pr = _pr_by_ref(load(), pos[0] if pos else None, cwd)
+    cmd = ["git", "-C", ORIGIN, "diff"]
+    if "name-only" in flags:
+        cmd.append("--name-only")
+    cmd.append(f"{pr['base']}...{pr['head']}")
+    print(run(cmd).stdout, end="")
 
 
 def gh_pr_list(argv, cwd):
@@ -339,6 +402,29 @@ def gh_run_rerun(argv, cwd):
     print("rerun requested (simulated — review-receipt recomputes on the next check)")
 
 
+def gh_run_view(argv, cwd):
+    # `gh run view <id> --log | grep receipt-check`: what commands/watch.md §3 names for the
+    # exact line bin/receipt-check.sh printed when `review-receipt` stays red. The one run
+    # here is the current branch's PR; say in receipt-check's own words why its bucket is
+    # what it is, so a tick that paraphrased a receipt learns what the check wanted. The
+    # run id is ignored: a case has one PR, and its one run is that PR's.
+    d = load()
+    pr = _find_pr(d, [], cwd)
+    sha = run(["git", "rev-parse", "HEAD"], cwd=cwd).stdout.strip()
+    bucket = review_receipt_bucket(pr, sha, cwd)
+    comments = pr.get("comments", [])
+    reviewer = [c for c in comments if c.startswith("🤖 reviewer:")]
+    usability = [c for c in comments if c.startswith("🤖 usability:")]
+    print(f"review-receipt\treceipt-check\thead is {sha}")
+    print(f"review-receipt\treceipt-check\tnewest reviewer comment: {reviewer[-1] if reviewer else '(none)'}")
+    print(f"review-receipt\treceipt-check\tnewest usability comment: {usability[-1] if usability else '(none)'}")
+    if bucket == "pass":
+        print("review-receipt\treceipt-check\tok: a clean verdict names this exact head commit")
+    else:
+        print(f"review-receipt\treceipt-check\tFAIL: no `🤖 reviewer:` comment reads exactly "
+              f"`Reviewed {sha}: no blocking findings` (the agent's own first line, verbatim)")
+
+
 CLOSES_RE = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*(?:\[#(\d+)\]\([^)]*\)|#(\d+))", re.I
 )
@@ -394,8 +480,28 @@ def gh_pr_merge(argv, cwd):
 # --- gh api (the dependency-recording net, kept minimal) ------------------------------------
 
 def gh_api(argv):
-    pos, flags = parse_flags(argv)  # -X takes a value (POST); it is not a boolean flag
+    # -X takes a value (POST); it is not a boolean flag. --paginate is one (bin/receipt-check.sh's
+    # own shape, `gh api --paginate repos/…/issues/<n>/comments`), or it would eat the path.
+    pos, flags = parse_flags(argv, known_bool=("paginate",))
     path = pos[0] if pos else ""
+    m = re.match(r"repos/[^/]+/[^/]+/issues/(\d+)/comments$", path)
+    if m:
+        # The comments on an issue — or on a PR, which GitHub's REST API files under
+        # /issues/ too, and which is how a tick (or bin/receipt-check.sh) reads receipts back.
+        d = load()
+        n = m.group(1)
+        holder = d["issues"].get(n) or d["prs"].get(n)
+        if holder is None:
+            die(f"no such issue or pull request #{n}")
+        comments = holder.get("comments", [])
+        jq = flags.get("jq", "")
+        if jq == ".[].body":
+            print("\n".join(comments))
+        elif jq:
+            die(f"gh api …/comments --jq: fakehub only simulates `.[].body`, not {jq!r}")
+        else:
+            print(json.dumps([{"body": c} for c in comments]))
+        return
     m = re.match(r"repos/[^/]+/[^/]+/issues/(\d+)/dependencies/blocked_by", path)
     if m and flags.get("X") == "POST":
         print("[]")  # recorded; nothing reads this back within a case
@@ -431,6 +537,8 @@ GH_DISPATCH = {
     ("issue", "list"): lambda argv, cwd: gh_issue_list(argv),
     ("pr", "create"): lambda argv, cwd: gh_pr_create(argv, cwd),
     ("pr", "list"): lambda argv, cwd: gh_pr_list(argv, cwd),
+    ("pr", "view"): lambda argv, cwd: gh_pr_view(argv, cwd),
+    ("pr", "diff"): lambda argv, cwd: gh_pr_diff(argv, cwd),
     ("pr", "comment"): lambda argv, cwd: gh_pr_comment(argv, cwd),
     ("pr", "edit"): lambda argv, cwd: gh_pr_edit(argv, cwd),
     ("pr", "checks"): lambda argv, cwd: gh_pr_checks(argv, cwd),
@@ -439,6 +547,7 @@ GH_DISPATCH = {
     ("api", None): lambda argv, cwd: gh_api(argv),
     ("run", "list"): lambda argv, cwd: gh_run_list(argv, cwd),
     ("run", "rerun"): lambda argv, cwd: gh_run_rerun(argv, cwd),
+    ("run", "view"): lambda argv, cwd: gh_run_view(argv, cwd),
 }
 
 

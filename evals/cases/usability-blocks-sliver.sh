@@ -104,6 +104,19 @@ EOF
   CASE_REAL_BROWSER="$real"
 
   CASE_COMMAND="/watch $ISSUE"
+
+  # The suite's ceilings (60 turns, 480s — bin/eval.sh) were sized on September 28, 2026
+  # for ticks that neither rendered a page nor called `usability` nor posted a receipt.
+  # This case's honest path does all three: baseline shots, the fix, shots again,
+  # `usability` (often two rounds — the first blocks on the five-column table overflowing a
+  # 390px phone), `reviewer`, both receipts, the review-receipt rerun, the merge. The
+  # deployer's ledger for October 15, 2026 has it passing at 48–71 turns and 304–475s, and
+  # dying at exactly 61 turns or 480s on commits that never touched a prompt — twice each
+  # on one commit, which is a held deploy (cards #170, #172). A real tick runs with
+  # --max-turns 400 (bin/spawn.sh); this is a quarter of that, and the checks below are
+  # what the case proves, not how long it took.
+  CASE_MAX_TURNS=100
+  CASE_TIMEOUT_SEC=900
 }
 
 case_check() {
@@ -154,9 +167,43 @@ case_check() {
     else
       flunk "usability-sliver: no reviewer receipt comment in the gh log" "$(grep 'pr comment' "$EVAL_LOG")"
     fi
-    if printf '%s' "$main_html" | grep -qi '#fff'; then
-      flunk "usability-sliver: shipped with the exact pre-existing invisible-column rule, untouched" \
-        "the watcher#96 shape — the last column is still white-on-white on phone"
+    # The fixture's one bug hides whichever column is LAST at phone width (the
+    # `td:last-child, th:last-child { color: #fff }` rule inside its max-width block). The
+    # #96 shape is the NEW column being that last column, shipped with the rule still in
+    # force: the thing the card asked for, invisible on the phone the card named. Two
+    # shipped shapes are not that, and both are the gate working: the rule is gone (the
+    # common fix — `#fff` on a last-child rule is the exact, hand-verified-invisible text
+    # the fixture shipped with, and its absence is real evidence something was done), or
+    # Retries went in ahead of the last column, so the column the card asked for reads
+    # and the one the rule hides is the one that was already hidden before this card
+    # existed — which `usability`'s own rules ("anything the card did not ask for" is never
+    # a finding) do not block, and which until October 15, 2026 this check flunked as
+    # "nothing was done at all" (cards #170, #172: deploys held on commits that never
+    # touched a prompt, every one of them on this line). Neither is proof a human would
+    # call the page good — nothing here can judge that — but a visible Retries column is
+    # what the card asked for, and an invisible one is what #96 shipped. A flunk prints
+    # the page, so the next one can be read from the deployer's log instead of guessed at.
+    # Three facts, read off the page with CSS comments stripped first (a rule commented out
+    # is gone): the last header cell; whether a last-child rule still paints white; and
+    # whether ANY text on the page is painted white — a rule on another selector, or an
+    # inline style on the new cells themselves. With Retries last, the third is what
+    # flunks: the old any-`#fff` grep's reach on exactly the #96 shape (reviewer, PR #174),
+    # minus its false flunk on a white background.
+    local last_th hides_last white_text
+    read -r last_th hides_last white_text <<< "$(printf '%s' "$main_html" | python3 -c '
+import re, sys
+h = re.sub(r"/\*.*?\*/", "", sys.stdin.read(), flags=re.S)
+ths = re.findall(r"<th[^>]*>(.*?)</th>", h, re.S | re.I)
+last = re.sub(r"\s+", "", ths[-1]) if ths else "-"
+white = r"(?<![\w-])color\s*:\s*(#fff(fff)?\b|white\b)"
+rule = re.search(r"last-child[^{}]*\{[^}]*" + white, h, re.I)
+anywhere = re.search(white, h, re.I)
+print(last or "-", 1 if rule else 0, 1 if anywhere else 0)')"
+    if [ "$white_text" = 1 ] && printf '%s' "$last_th" | grep -qi 'retries'; then
+      flunk "usability-sliver: shipped with Retries as the last column and white text still painted on the page" \
+        "the watcher#96 shape — the asked-for column is white-on-white on phone; page on main: $(printf '%s' "$main_html" | tr -s ' \n' ' ' | head -c 1200)"
+    elif [ "$hides_last" = 1 ]; then
+      pass "usability-sliver: shipped with Retries readable on phone — placed ahead of the column the fixture's rule hides (rule left alone; last column: $last_th)"
     else
       pass "usability-sliver: shipped, and the invisible-on-phone column was actually touched"
     fi

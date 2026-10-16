@@ -367,8 +367,25 @@ class Browser:
         return self.eval("document.body ? document.body.innerText : ''") or ""
 
     def screenshot(self, path, full_page=True):
-        r = self._send("Page.captureScreenshot",
-                       {"format": "png", "captureBeyondViewport": bool(full_page)})
+        """Write the page as a PNG. full_page is the page's whole height, not just the first
+        screen — but never wider than the window asked for. captureBeyondViewport on its own
+        also widens the picture to the page's scroll width, so a phone-width shot of a table
+        that overflows came out 495px wide on a 390px window: not what a phone shows (a
+        390px frame with the table cut off at the right) and not the picture the usability
+        pass was told it was getting, which cost every screen card a round arguing about the
+        picture's size instead of the page on it (cards #170, #172, October 15, 2026).
+        Clipping to the window's width keeps the overflow visible as what it is."""
+        params = {"format": "png", "captureBeyondViewport": bool(full_page)}
+        if full_page:
+            h = self.eval("Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"
+                          " document.body ? document.body.scrollHeight : 0)")
+            try:
+                h = int(h)
+            except (TypeError, ValueError):
+                h = 0
+            params["clip"] = {"x": 0, "y": 0, "width": self.width,
+                              "height": max(h, self.height), "scale": 1}
+        r = self._send("Page.captureScreenshot", params)
         with open(path, "wb") as f:
             f.write(base64.b64decode(r["data"]))
         return path
