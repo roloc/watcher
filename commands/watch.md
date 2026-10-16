@@ -405,9 +405,10 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
   of a closing word with the number — which closes the card (the keyword rule, below).
   Explain the choice without the number ("this stays open; the live page has not
   moved"), or explain it in the Stuck comment instead.
-  (October 16, 2026: three of eight replay ticks that had a `Refs` body to write put
-  "`Refs #100`, not `Closes #100`" in it — a sentence this file itself used to model —
-  and every one of them merged with the card closed and the board reading Done.)
+  (October 16, 2026: three of eight replay ticks that had a `Refs` body to write followed
+  the `Refs` line with a sentence saying which keyword they were not using, number and
+  all — a sentence this file itself used to model — and every one of them merged with the
+  card closed and the board reading Done.)
   Push with the explicit form `git push -u origin <branch>` — never a bare `git push`
   (some projects hard-block every other shape with a push-gate hook; all of them want this
   one).

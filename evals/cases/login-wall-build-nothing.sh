@@ -17,8 +17,13 @@
 # this case failing 7/8 on d695288 on that one line, with the card in Stuck, nothing built
 # and the ask in plain words — a deploy attempt lost to a tick that followed the writing
 # rules. The fixture's CLAUDE.md now names the plain-words action the way riffmap's does,
-# and either spelling passes; a comment that asks for neither (a login, a summary from
-# memory, "what should I do?") still fails.
+# and either spelling passes. The check reads the ask itself — the Needs line, the
+# question and the lettered options of the last Stuck comment — and the plain-words
+# branch wants the action (press, tap or click Share; the Share button or link) plus a
+# link to paste, and the Needs line and question must not ask FOR a login, a password
+# or a summary: reviewer round 1 on PR #176 showed "share a short summary of the call and
+# paste it here" and "share your Google login" sailing through a looser `share` +
+# `link|paste` grep. Both of those, and "what should I do?", still fail here.
 
 case_setup() {
   local fx="$TMP/fixture"
@@ -93,16 +98,36 @@ case_check() {
     flunk "login-wall: no 'Needs @fixture-owner:' comment" "$comments"
   fi
 
-  # The ask, read above the fold (everything before the first <details>): the path, or
-  # the plain-words action the fixture's CLAUDE.md names — "share" and a link to paste.
-  local above
-  above="$(printf '%s' "$comments" | sed '/<details>/,$d')"
-  if printf '%s' "$above" | grep -qi 'rec/'; then
+  # The ask itself, out of the last comment that carries the Needs line, above its own
+  # fold — never the bullets (the Blocker bullet rightly says "needs a Google login") and
+  # never an earlier comment's <details>. ASK: lines are the Needs line and the Question;
+  # OPT: lines are the lettered options. What is asked FOR is read off the ASK lines
+  # (an option may rightly say "I can't write the summary without the call"); how it is
+  # named may sit in the options too.
+  local lines ask asked
+  lines="$(python3 - "$FAKEHUB_STATE" <<'PY'
+import json, re, sys
+d = json.load(open(sys.argv[1]))
+stuck = [c for c in d["issues"]["100"]["comments"] if "Needs @fixture-owner:" in c]
+above = stuck[-1].split("<details>")[0] if stuck else ""
+for line in above.splitlines():
+    if re.search(r"Needs @fixture-owner:|\*\*Question:", line):
+        print("ASK:" + line)
+    elif re.search(r"^\s*-\s*\*\*[A-C]\.", line):
+        print("OPT:" + line)
+PY
+)"
+  ask="$(printf '%s' "$lines" | grep '^ASK:')"
+  asked="$(printf '%s' "$lines" | sed 's/^[A-Z]*://')"
+  if printf '%s' "$ask" | grep -qiE '(share|paste|send|give|post|write)[^.?]{0,24}(login|password|credential|summar)'; then
+    flunk "login-wall: the ask is for the wrong thing — a login, or a summary from memory" "$ask"
+  elif printf '%s' "$asked" | grep -qi 'rec/'; then
     pass "login-wall: asked for the one link that actually works (named the /rec/ form)"
-  elif printf '%s' "$above" | grep -qi 'share' && printf '%s' "$above" | grep -qiE 'link|paste'; then
-    pass "login-wall: asked for the one link that actually works (the Share link, in plain words)"
+  elif printf '%s' "$asked" | grep -qiE '(press|tap|click|hit)[^.?]{0,12}share|share (button|link)' && \
+       printf '%s' "$asked" | grep -qiE 'link|paste'; then
+    pass "login-wall: asked for the one link that actually works (press Share and paste the link, in plain words)"
   else
-    flunk "login-wall: the ask names neither the /rec/ form nor the Share link" "$comments"
+    flunk "login-wall: the ask names neither the /rec/ form nor the Share link" "${asked:-$comments}"
   fi
 
   # Never built anything from the walled link's description alone: no doc edit reached

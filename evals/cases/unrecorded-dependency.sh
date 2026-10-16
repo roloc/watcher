@@ -146,7 +146,7 @@ case_check() {
     flunk "unrecorded-dep: no id lookup for #101" "$(grep 'api' "$EVAL_LOG")"
   fi
 
-  if grep -qE 'api -X POST .*issues/200/dependencies/blocked_by.*issue_id=issue-node-101' "$EVAL_LOG"; then
+  if grep -E 'api -X POST .*issues/200/dependencies/blocked_by' "$EVAL_LOG" | grep -qE -- '-F issue_id=issue-node-101'; then
     pass "unrecorded-dep: recorded #200 as blocked_by #101 (real relationship, not just prose)"
   else
     flunk "unrecorded-dep: no blocked_by POST naming #101's id for #200" "$(grep 'api' "$EVAL_LOG")"
