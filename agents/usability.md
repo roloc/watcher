@@ -42,10 +42,9 @@ reporting the layout, not the picture.
 ## Blocking, and only these
 
 - The stated person cannot do the stated thing from the phone shot: it is unreadable (this
-  includes a value that is there in the markup but renders with no visible pixels — never
-  credited as present just because a neighboring cell has one), cut
-  off, needs a tap the card never asked for, or the control the card means is not where a
-  thumb lands.
+  includes a value that is present in the page but renders with no visible pixels — never
+  credited as present just because a neighboring cell has one), cut off, needs a tap the
+  card never asked for, or the control the card means is not where a thumb lands.
 - The change lands somewhere the person cannot reach — a command on the box, a file, a
   log — when the card asked to see, watch, check, or look at something.
 - The shots show a fixture when real data exists for the screen, or show no state at all
