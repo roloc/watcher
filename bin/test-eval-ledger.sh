@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Offline tests for bin/eval.sh's ledger (card #140): no live tick, no network. Sourcing
-# bin/eval.sh (its BASH_SOURCE guard keeps the driver — the part that globs evals/cases/ and
-# runs a real `claude -p` — from running) hands us ledger_append, ledger_prev_turns and
-# ledger_regressed directly, so a case here is fake RESULT_JSON-shaped numbers and a scratch
-# ledger file, exactly like every other offline suite's stubbed call log.
+# Offline tests for bin/eval.sh's ledger (card #140) and for run_case's per-case ceilings
+# (cards #170, #172): no live tick, no network. Sourcing bin/eval.sh (its BASH_SOURCE guard
+# keeps the driver — the part that globs evals/cases/ and runs a real `claude -p` — from
+# running) hands us ledger_append, ledger_prev_turns, ledger_regressed and run_case directly,
+# so a case here is fake RESULT_JSON-shaped numbers and a scratch ledger file, or a stub
+# `claude` that only records the ceilings it was launched under — exactly like every other
+# offline suite's stubbed call log.
 #
 #   bash bin/test-eval-ledger.sh      # exit 0 = every case holds
 set -uo pipefail
@@ -89,6 +91,74 @@ wait
 check "20 concurrent appends land as 20 whole lines" [ "$(wc -l < "$P")" -eq 20 ]
 check "...and every one of them still has 7 fields" \
   bash -c "awk -F'\t' '{if (NF != 7) exit 1}' '$P'"
+
+# --- run_case: a case's own ceilings reach the tick, and never the next case --------------
+#
+# Cards #170, #172 (October 15, 2026): usability-blocks-sliver died at the suite-wide 480s
+# timeout and 60-turn cap on commits that never touched it, so a case may now set
+# CASE_TIMEOUT_SEC beside CASE_MAX_TURNS / CASE_MAX_BUDGET_USD. A stub `claude` records the
+# argv it was launched with and prints an empty result; a stub `timeout` records the seconds
+# it was handed and runs the rest. Neither starts a model, and the stubs are first on PATH,
+# so this holds on a Mac with no coreutils `timeout` at all. run_case overwrites $TMP with
+# the case's own scratch dir, so the suite's is saved and put back around every call.
+
+STUB="$TMP/stub-bin"; mkdir -p "$STUB"
+cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$CEILING_LOG.claude"
+echo '{"subtype":"success","num_turns":1,"total_cost_usd":0}'
+EOF
+cat > "$STUB/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1" > "$CEILING_LOG.timeout"
+shift; exec "$@"
+EOF
+chmod +x "$STUB/claude" "$STUB/timeout"
+
+cat > "$TMP/own-ceilings.sh" <<'EOF'
+case_setup() {
+  mkdir -p "$TMP/fx"; echo "fixture" > "$TMP/fx/README.md"
+  seed_repo "$TMP/fx"
+  new_worktree "card-$ISSUE" main
+  CASE_COMMAND="/watch $ISSUE"
+  CASE_MAX_TURNS=7
+  CASE_MAX_BUDGET_USD=0.5
+  CASE_TIMEOUT_SEC=123
+}
+case_check() { pass "own-ceilings: ran"; }
+EOF
+cat > "$TMP/suite-ceilings.sh" <<'EOF'
+case_setup() {
+  mkdir -p "$TMP/fx"; echo "fixture" > "$TMP/fx/README.md"
+  seed_repo "$TMP/fx"
+  new_worktree "card-$ISSUE" main
+  CASE_COMMAND="/watch $ISSUE"
+}
+case_check() { pass "suite-ceilings: ran"; }
+EOF
+
+SUITE_TMP="$TMP"
+export CEILING_LOG="$SUITE_TMP/own"
+( PATH="$STUB:$PATH" run_case "$SUITE_TMP/own-ceilings.sh" ) > "$SUITE_TMP/own.log" 2>&1
+TMP="$SUITE_TMP"
+check "a case's CASE_TIMEOUT_SEC is the seconds handed to timeout" \
+  [ "$(cat "$CEILING_LOG.timeout" 2>/dev/null)" = 123 ]
+check "a case's CASE_MAX_TURNS reaches claude as --max-turns" \
+  grep -q -- '--max-turns 7 ' "$CEILING_LOG.claude"
+check "a case's CASE_MAX_BUDGET_USD reaches claude as --max-budget-usd" \
+  grep -q -- '--max-budget-usd 0.5 ' "$CEILING_LOG.claude"
+check "...and the case itself ran to its own check" grep -q 'own-ceilings: ran *ok' "$SUITE_TMP/own.log"
+
+# The very next case sets nothing: it gets the suite's ceilings, not the last case's.
+export CEILING_LOG="$SUITE_TMP/suite"
+( PATH="$STUB:$PATH" run_case "$SUITE_TMP/suite-ceilings.sh" ) > "$SUITE_TMP/suite.log" 2>&1
+TMP="$SUITE_TMP"
+check "a case that sets nothing is handed the suite's own timeout ($CASE_TIMEOUT)" \
+  [ "$(cat "$CEILING_LOG.timeout" 2>/dev/null)" = "$CASE_TIMEOUT" ]
+check "...and the suite's own --max-turns ($MAX_TURNS), not the previous case's 7" \
+  grep -q -- "--max-turns $MAX_TURNS " "$CEILING_LOG.claude"
+check "...and the suite's own --max-budget-usd ($MAX_BUDGET), not the previous case's 0.5" \
+  grep -q -- "--max-budget-usd $MAX_BUDGET " "$CEILING_LOG.claude"
 
 echo "$n check(s), $([ "$fail" = 0 ] && echo "all passed" || echo "SOME FAILED")"
 exit "$fail"

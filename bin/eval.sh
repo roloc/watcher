@@ -42,8 +42,11 @@
 #
 #   case_setup()   - build the fixture: seed_repo a starting commit, new_worktree off it,
 #                    seed_card the issue text, set CASE_COMMAND ("/watch 100" or similar).
-#                    May also set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD to run that one case
-#                    tighter than the suite default (EVAL_MAX_TURNS / EVAL_MAX_BUDGET_USD).
+#                    May also set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD / CASE_TIMEOUT_SEC to
+#                    run that one case under its own ceilings instead of the suite's
+#                    (EVAL_MAX_TURNS / EVAL_MAX_BUDGET_USD / EVAL_CASE_TIMEOUT_SEC) — tighter
+#                    for a case that must run into one, looser for a case whose honest
+#                    path is longer than the rest of the suite's (see usability-blocks-sliver).
 #   case_check()   - after the tick runs, call pass/flunk against $FAKEHUB_STATE (read it
 #                    with evals/state.py), $EVAL_LOG (the stub gh/board call log, one line
 #                    per call — grep it), $ORIGIN (real git: `git -C "$ORIGIN" log/show`),
@@ -236,6 +239,7 @@ run_case() {
   CASE_COMMAND=""
   CASE_MAX_TURNS=""
   CASE_MAX_BUDGET_USD=""
+  CASE_TIMEOUT_SEC=""
   export FAKEHUB_STATE FAKEHUB_ORIGIN="$ORIGIN" FAKEHUB_LOG="$EVAL_LOG"
 
   # A case may export BROWSE_BROWSER (to hand the tick a browser that logs its own starts).
@@ -277,10 +281,15 @@ run_case() {
   ln -s "$REPO/commands" "$cfg/commands"
   ln -s "$REPO/agents" "$cfg/agents"
 
-  # A case may set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD in case_setup to run tighter than the
-  # suite default (riffmap#378: proving a tick parks in Stuck rather than claiming "In review"
-  # when it runs low needs a cap it can actually run into). Unset means the suite default.
+  # A case may set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD / CASE_TIMEOUT_SEC in case_setup to
+  # run under its own ceilings. Tighter (riffmap#378: proving a tick parks in Stuck rather
+  # than claiming "In review" when it runs low needs a cap it can actually run into), or
+  # looser (watcher#170, #172: a case whose honest path is longer than the suite's — a real
+  # browser, a usability pass, a reviewer pass and a receipt — kept dying at the suite's
+  # ceilings on commits that never touched it). Unset means the suite default; every case
+  # starts from unset, so one case's ceiling never leaks into the next.
   local turns="${CASE_MAX_TURNS:-$MAX_TURNS}" budget="${CASE_MAX_BUDGET_USD:-$MAX_BUDGET}"
+  local secs="${CASE_TIMEOUT_SEC:-$CASE_TIMEOUT}"
 
   local out="$TMP/result.json" err="$TMP/result.stderr" rc=0 t0 t1 elapsed
   t0="$(date +%s)"
@@ -291,7 +300,7 @@ run_case() {
     WATCHER_HOME="$REPO" \
     GH_REPO="$EVAL_GH_REPO" \
     OWNER_LOGIN="$EVAL_OWNER_LOGIN" \
-    timeout "$CASE_TIMEOUT" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
+    timeout "$secs" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
       --dangerously-skip-permissions \
       --max-turns "$turns" --max-budget-usd "$budget" \
       --output-format json \
@@ -301,7 +310,7 @@ run_case() {
   elapsed=$((t1 - t0))
 
   if [ "$rc" = 124 ]; then
-    flunk "$name: tick" "timed out after ${CASE_TIMEOUT}s — see $err"
+    flunk "$name: tick" "timed out after ${secs}s — see $err"
   fi
   RESULT_JSON="$(cat "$out" 2>/dev/null || echo '{}')"
   RESULT_RC="$rc"

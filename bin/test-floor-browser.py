@@ -24,6 +24,7 @@ where it looks. No browser is exit 2 with how to get one — a failure, never a 
 import json
 import os
 import shutil
+import struct
 import sys
 import tempfile
 import threading
@@ -87,6 +88,37 @@ _none = subprocess.run([sys.executable, os.path.join(HERE, "browse.py"), "find"]
                        text=True, env=dict(os.environ, BROWSE_BROWSER="/no/such/browser"))
 check("...and with none it exits 1 and says how to get one, on stderr",
       _none.returncode == 1 and _none.stdout == "" and "apt install chromium" in _none.stderr, _none.stderr)
+
+# --- browse.py shot: the page's whole height, never wider than the window -------------
+#
+# Cards #170, #172 (October 15, 2026): a 390px "phone" shot of a page whose table overflows
+# sideways came out 495px wide — Chrome's captureBeyondViewport widens to the scroll width —
+# so the usability pass was handed a picture that was not a phone and said so, costing the
+# replay suite's screen case a round on every run. A phone clips; so does the shot now.
+
+def _png_size(path):
+    with open(path, "rb") as f:
+        b = f.read(24)
+    return struct.unpack(">II", b[16:24])
+
+
+_wide_dir = tempfile.mkdtemp(prefix="watcher-browse-wide-")
+with open(os.path.join(_wide_dir, "index.html"), "w") as f:
+    f.write("<!doctype html><html><head><meta charset='utf-8'><style>"
+            "td, th { border: 1px solid #333; padding: 10px 18px; white-space: nowrap; }"
+            "</style></head><body><h1>Status</h1><table><tr>"
+            + "".join(f"<th>Column {i}</th>" for i in range(8)) + "</tr><tr>"
+            + "".join(f"<td>value {i}</td>" for i in range(8)) + "</tr></table>"
+            + "<p style='height:2000px'>tall</p></body></html>")
+with browse.Browser(width=390, height=844) as b:
+    b.goto("file://" + os.path.join(_wide_dir, "index.html"))
+    b.pump(0.3)
+    _shot = b.screenshot(os.path.join(_wide_dir, "phone.png"))
+_w, _h = _png_size(_shot)
+check("a 390px-window shot of a page that overflows sideways is 390px wide, not the scroll width",
+      _w == 390, (_w, _h))
+check("...and still the page's whole height, not just the first screen", _h > 844, (_w, _h))
+shutil.rmtree(_wide_dir, ignore_errors=True)
 
 # --- a fixture floor: two boards, four lanes, real files -------------------------------
 
