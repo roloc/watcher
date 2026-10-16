@@ -69,8 +69,9 @@ call belongs in the project's own deploy pipeline, off this box, not in a tick.
 
 ## The gate — what actually stops a bad PR
 
-Three independent things have to agree before any PR lands on `main`, and nothing the
-tick does can satisfy more than one of them:
+Three independent things have to agree before any PR lands on `main` of a project set up
+the way this repo's own template means (both required checks below in place), and nothing
+the tick does can satisfy more than one of them:
 
 1. **Branch protection on `main`**, set by `deploy/add-project.sh` when the project was
    added: the project's own required CI check must pass, and a PR is required (no direct
