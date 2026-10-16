@@ -405,3 +405,7 @@ To split it into lanes, add
 `projects/<name>-<lane>.env` that sources `<name>.env` and sets `PROJECT_NAME=<name>-<lane>`
 and `LANE_AGENTS`, give `<name>.env` the complementary `!` list, and enable
 `watcher@<name>-<lane>` too; the deployer starts a lane file the moment a commit adds it.
+
+## License
+
+MIT. See `LICENSE.md`.
