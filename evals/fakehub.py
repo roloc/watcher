@@ -406,7 +406,8 @@ def gh_run_view(argv, cwd):
     # `gh run view <id> --log | grep receipt-check`: what commands/watch.md §3 names for the
     # exact line bin/receipt-check.sh printed when `review-receipt` stays red. The one run
     # here is the current branch's PR; say in receipt-check's own words why its bucket is
-    # what it is, so a tick that paraphrased a receipt learns what the check wanted.
+    # what it is, so a tick that paraphrased a receipt learns what the check wanted. The
+    # run id is ignored: a case has one PR, and its one run is that PR's.
     d = load()
     pr = _find_pr(d, [], cwd)
     sha = run(["git", "rev-parse", "HEAD"], cwd=cwd).stdout.strip()

@@ -183,16 +183,24 @@ case_check() {
     # call the page good — nothing here can judge that — but a visible Retries column is
     # what the card asked for, and an invisible one is what #96 shipped. A flunk prints
     # the page, so the next one can be read from the deployer's log instead of guessed at.
-    local last_th hides_last
-    read -r last_th hides_last <<< "$(printf '%s' "$main_html" | python3 -c '
+    # Three facts, read off the page with CSS comments stripped first (a rule commented out
+    # is gone): the last header cell; whether a last-child rule still paints white; and
+    # whether ANY text on the page is painted white — a rule on another selector, or an
+    # inline style on the new cells themselves. With Retries last, the third is what
+    # flunks: the old any-`#fff` grep's reach on exactly the #96 shape (reviewer, PR #174),
+    # minus its false flunk on a white background.
+    local last_th hides_last white_text
+    read -r last_th hides_last white_text <<< "$(printf '%s' "$main_html" | python3 -c '
 import re, sys
-h = sys.stdin.read()
+h = re.sub(r"/\*.*?\*/", "", sys.stdin.read(), flags=re.S)
 ths = re.findall(r"<th[^>]*>(.*?)</th>", h, re.S | re.I)
 last = re.sub(r"\s+", "", ths[-1]) if ths else "-"
-rule = re.search(r"last-child[^{}]*\{[^}]*color\s*:\s*(#fff(fff)?\b|white\b)", h, re.I)
-print(last or "-", 1 if rule else 0)')"
-    if [ "$hides_last" = 1 ] && printf '%s' "$last_th" | grep -qi 'retries'; then
-      flunk "usability-sliver: shipped with Retries as the last column and the exact pre-existing invisible-column rule untouched" \
+white = r"(?<![\w-])color\s*:\s*(#fff(fff)?\b|white\b)"
+rule = re.search(r"last-child[^{}]*\{[^}]*" + white, h, re.I)
+anywhere = re.search(white, h, re.I)
+print(last or "-", 1 if rule else 0, 1 if anywhere else 0)')"
+    if [ "$white_text" = 1 ] && printf '%s' "$last_th" | grep -qi 'retries'; then
+      flunk "usability-sliver: shipped with Retries as the last column and white text still painted on the page" \
         "the watcher#96 shape — the asked-for column is white-on-white on phone; page on main: $(printf '%s' "$main_html" | tr -s ' \n' ' ' | head -c 1200)"
     elif [ "$hides_last" = 1 ]; then
       pass "usability-sliver: shipped with Retries readable on phone — placed ahead of the column the fixture's rule hides (rule left alone; last column: $last_th)"
