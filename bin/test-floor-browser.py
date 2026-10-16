@@ -1186,6 +1186,7 @@ try:
               b.eval("document.querySelector('.office-room.boss').textContent.includes('OWNER')")
               and not b.eval("document.querySelector('.office-room.boss').textContent.includes('STEVE')"))
         check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "studio-no-owner.png")
         b.eval("refresh().then(() => true)")
         settled(b)
 
