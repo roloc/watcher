@@ -15,7 +15,7 @@ os.environ.pop("DISCORD_MENTION", None)
 # cleared here rather than inherited, same reason as OWNER_LOGIN/BOARD_OWNER below.
 os.environ.pop("SLACK_WEBHOOK_URL", None)
 os.environ.pop("SLACK_MENTION", None)
-# This suite's own default (section 2's "Needs Steve:") assumes neither is set — true for a
+# This suite's own default (section 2's "Needs the owner:") assumes neither is set — true for a
 # real lane's own tick only when its project never sets OWNER_LOGIN/BOARD_OWNER, but NOT
 # true of the shell this suite happens to run in (this box's own watcher lane exports
 # BOARD_OWNER=roloc for itself), so it is cleared here rather than inherited.
@@ -27,7 +27,7 @@ import board   # noqa: E402
 # board.py requires OWNER lazily, only where it is actually used (card #157) — a move to
 # Stuck below calls announce(), which needs one for the board-URL it posts to Discord.
 # Set directly on the module, never through BOARD_OWNER in the environment: this suite
-# tests notify.py's own "Needs Steve:" fallback, which reads OWNER_LOGIN/BOARD_OWNER live
+# tests notify.py's own "Needs the owner:" fallback, which reads OWNER_LOGIN/BOARD_OWNER live
 # at call time, and those stay unset.
 board.OWNER = "test-owner"
 
@@ -70,9 +70,9 @@ for kind in ("stuck", "released", "breach"):
 
 print("2. the Stuck alert")
 sent.clear()
-notify.post("stuck", CARD, detail="Needs Steve: pick where speaker names live.",
+notify.post("stuck", CARD, detail="Needs the owner: pick where speaker names live.",
             board_url="https://github.com/users/o/projects/1")
-check("first line is the ask", last()["content"].startswith("🚨 **Needs Steve:**"))
+check("first line is the ask", last()["content"].startswith("🚨 **Needs the owner:**"))
 check("the ask from the card is quoted", "pick where speaker names live" in embed()["description"])
 check("says how to answer", "reply **A**, **B** or **C**" in embed()["description"])
 check("links the board too", "https://github.com/users/o/projects/1" in embed()["description"])
@@ -108,8 +108,8 @@ check("no OWNER_LOGIN, but BOARD_OWNER set → falls back to it",
 del os.environ["BOARD_OWNER"]
 sent.clear()
 notify.post("stuck", CARD)
-check("neither set → the old form, 'Needs Steve:', still works",
-      last()["content"].startswith("🚨 **Needs Steve:**"))
+check("neither set → 'Needs the owner:', never the bare word 'Steve' (card #179)",
+      last()["content"].startswith("🚨 **Needs the owner:**"))
 
 print("3. the two 'something broke' posts")
 sent.clear()
@@ -174,8 +174,9 @@ for column in ("Backlog", "Ready", "In progress", "In review", "Done"):
           calls == [("Status", column)] and not sent)
     check(f"move → {column}: no PR lookup spent on a post that is not sent", not pr_lookups)
 sent.clear(); board.cmd_move("87", "Stuck - Needs help")
-check("move to Stuck → the alert, quoting the card's Needs Steve comment",
-      len(sent) == 1 and "Needs Steve" in last()["content"] and "speaker names" in embed()["description"])
+check("move to Stuck → the alert leads with 'Needs the owner' (no login configured here) "
+      "and quotes the card's own (old-format) Needs Steve comment in the body",
+      len(sent) == 1 and "Needs the owner" in last()["content"] and "speaker names" in embed()["description"])
 check("the Stuck alert carries the PR link", PR["url"] in embed()["description"])
 sent.clear(); board.cmd_move("87", "Stuck - Needs help", "--why", "This card failed 2 attempts, so I parked it.")
 check("--why overrides the comment lookup (the spawner's park)",
@@ -276,12 +277,12 @@ for kind in ("stuck", "released", "breach"):
           CARD["url"] in block and "Building" in block)
 
 sent.clear()
-notify.post("stuck", CARD, detail="Needs Steve: pick where speaker names live.",
+notify.post("stuck", CARD, detail="Needs the owner: pick where speaker names live.",
             board_url="https://github.com/users/o/projects/1")
 slack = sent[1][1]
 block = slack["blocks"][0]["text"]["text"]
 check("stuck: slack's top line leads with the same ask Discord's content carries",
-      slack["text"].startswith("🚨 *Needs Steve:*"))
+      slack["text"].startswith("🚨 *Needs the owner:*"))
 check("stuck: the ask from the card is quoted in the block", "pick where speaker names live" in block)
 os.environ["SLACK_MENTION"] = "<!here>"
 sent.clear()

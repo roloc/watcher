@@ -92,10 +92,12 @@ def _require_owner():
     return OWNER
 # Card #154: a Stuck/park comment addresses a GitHub login instead of the word "Steve" —
 # `Needs @<login>:` — going forward, but every comment already on a board before this
-# shipped still says the old `Needs Steve:`. Every reader of a Needs-shaped comment
-# (here, and bin/floor.py's board_ask/board_images/board_rounds, which call this module
-# rather than keeping a second copy) matches either form through this one pattern.
-NEEDS_RE = re.compile(r"Needs (?:Steve|@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?):")
+# shipped still says the old `Needs Steve:`. Card #179: a misconfigured lane with no
+# login at all now falls back to `Needs the owner:` instead. Every reader of a
+# Needs-shaped comment (here, and bin/floor.py's board_ask/board_images/board_rounds,
+# which call this module rather than keeping a second copy) matches any of the three
+# forms through this one pattern.
+NEEDS_RE = re.compile(r"Needs (?:Steve|the owner|@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?):")
 NUMBER = int(os.environ.get("BOARD_NUMBER") or 1)
 STAGE_FIELD = "Stage"
 STATUS_FIELD = "Status"

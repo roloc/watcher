@@ -114,6 +114,23 @@ rounds40 = board.needs_steve_rounds(40)
 check("needs_steve_rounds finds both rounds, old form and new, newest first",
       len(rounds40) == 2, rounds40)
 
+print("1c. card #179: a 'Needs the owner:' comment (no login configured) reads the same way")
+COMMENTS[41] = [
+    "🤖 **Needs @octocat: first ask, OWNER_LOGIN was set then**\n\n**Look:**\n"
+    "- old mockup: https://example.com/old.png\n\n**Question: a?**",
+    "A, go with option A.",
+    "🤖 **Needs the owner: second ask, OWNER_LOGIN unset now**\n\n**Look:**\n"
+    "- new mockup: https://example.com/new.png\n\n**Question: b?**",
+]
+check("needs_steve_ask reads the newest round even in the no-login form",
+      board.needs_steve_ask(41) == "**Needs the owner: second ask, OWNER_LOGIN unset now**",
+      board.needs_steve_ask(41))
+check("needs_steve_images reads the newest round's picture too",
+      board.needs_steve_images(41) == ["https://example.com/new.png"], board.needs_steve_images(41))
+rounds41 = board.needs_steve_rounds(41)
+check("needs_steve_rounds finds both rounds, @login form and the-owner form, newest first",
+      len(rounds41) == 2, rounds41)
+
 print("2. no Needs Steve comment at all: both empty, never a crash")
 COMMENTS[2] = ["just a regular comment", "🤖 FYI: routine update, nothing needed"]
 check("needs_steve_images: []", board.needs_steve_images(2) == [])

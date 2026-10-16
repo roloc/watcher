@@ -161,16 +161,16 @@ WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
 PROJECT_NAME="${PROJECT_NAME:-$(basename "$WATCHER_ROOT")}"
 export BOARD_OWNER="${BOARD_OWNER:-}" BOARD_NUMBER="${BOARD_NUMBER:-}"
 # Card #154: who every Stuck/park/awaiting-rebuild comment addresses, so a fork of this
-# repo pings its own owner from the first tick instead of the word "Steve". Defaults to
-# BOARD_OWNER (the one login every project file already sets) when a project does not set
-# its own; exported to the tick the same way BOARD_OWNER is, and to board.py/notify.py
-# (both read it directly rather than being passed it as an argument). Left empty, never
-# defaulted to the literal word "Steve", so this script's own comments (below) can still
-# fall back to the old unadorned "Needs Steve:" rather than the nonsensical "Needs @Steve:".
+# repo pings its own owner from the first tick instead of a name that is never theirs.
+# Defaults to BOARD_OWNER (the one login every project file already sets) when a project
+# does not set its own; exported to the tick the same way BOARD_OWNER is, and to
+# board.py/notify.py (both read it directly rather than being passed it as an argument).
+# Left empty, never defaulted to a literal login, so this script's own comments (below)
+# can still fall back to the generic "Needs the owner:" rather than a nonsensical "Needs @:".
 export OWNER_LOGIN="${OWNER_LOGIN:-${BOARD_OWNER:-}}"
-# "Needs @<login>" once one is known, else the old "Needs Steve" with no "@" at all.
+# "Needs @<login>" once one is known, else "Needs the owner" with no "@" at all (card #179).
 NEEDS_WHO="${OWNER_LOGIN:+@$OWNER_LOGIN}"
-NEEDS_WHO="${NEEDS_WHO:-Steve}"
+NEEDS_WHO="${NEEDS_WHO:-the owner}"
 # The ledger's caller column (card #114): this lane's own board.py calls (polling, the
 # sweeps) are attributed to the lane by name. The tick itself gets a narrower one, set
 # only on the one command line that launches it (print_claude_cmd) — never here, or every

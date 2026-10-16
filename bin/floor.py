@@ -1681,7 +1681,7 @@ INDEX_HTML = """<!doctype html>
     gap: 4px; max-width: 46%; pointer-events: auto;
   }
   .row-stuck-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
-  /* In the office the same strip is the in-tray on Steve's desk: a paper tray in front of
+  /* In the office the same strip is the in-tray on the owner's desk: a paper tray in front of
      it, chips grouped by board. */
   .row-stuck.in-tray {
     right: auto; max-width: none; box-sizing: border-box; align-items: stretch; padding: 4px 6px;
@@ -1821,7 +1821,7 @@ INDEX_HTML = """<!doctype html>
   }
   #review-newtab:hover { background: rgba(255, 255, 255, .12); }
   /* ---- The studio: an office the lanes walk around in (card #88; rooms since October 9,
-     2026, a floor plan with hallways, a server room and the boards in Steve's office the
+     2026, a floor plan with hallways, a server room and the boards in the owner's office the
      same day). The floor page above is untouched; this is a second view of the same data,
      toggled by one button. It is drawn for a desk's browser: at least 960px wide, and a
      phone pans it. ---- */
@@ -1849,7 +1849,7 @@ INDEX_HTML = """<!doctype html>
     background-size: 24px 24px;
   }
   /* Rooms: walls with a little depth, and a floor each — carpet for a team, planks in the
-     break room, a rug in Steve's office, raised tiles in the server room. */
+     break room, a rug in the owner's office, raised tiles in the server room. */
   .office-room {
     position: absolute; box-sizing: border-box; border: 3px solid var(--wall); border-radius: 4px;
     box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ink) 8%, transparent), 0 2px 6px rgba(0, 0, 0, .25);
@@ -1919,7 +1919,7 @@ INDEX_HTML = """<!doctype html>
     text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; opacity: .8;
   }
   #beacon {
-    /* The light over Steve's door, inside #room's own box (which clips: `overflow:
+    /* The light over the owner's door, inside #room's own box (which clips: `overflow:
        hidden`) — a light placed outside that box is a light nobody sees. */
     position: absolute; transform: translate(-50%, -50%); z-index: 4;
     width: 12px; height: 12px; border-radius: 50%;
@@ -2123,11 +2123,11 @@ window.addEventListener("unhandledrejection", function () {
   <a id="review-newtab" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
 </div>
 <script id="main">
-const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs Steve",
+const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs the owner",
                      paused: "Paused", sleeping: "Sleeping"};
 // Card #154: a needs_steve pill addresses the GitHub login the owning project's own
-// `OWNER_LOGIN` names, not the fixed word "Steve" — a fork of this repo reads its own
-// owner's name here. Falls back to PILL_LABEL's own "Needs Steve" for a lane the backend
+// `OWNER_LOGIN` names, not a fixed word — a fork of this repo reads its own
+// owner's name here. Falls back to PILL_LABEL's own "Needs the owner" for a lane the backend
 // never gave an owner_login (an older demo fixture), never "Needs @" with nothing after it.
 function needsLabel(ownerLogin) {
   return ownerLogin ? `Needs @${esc(ownerLogin)}` : PILL_LABEL.needs_steve;
@@ -2489,7 +2489,7 @@ function render(state) {
   document.getElementById("box").textContent =
     "The floor — " + state.header.box +
     (state.header.needs_steve_total > 0
-      ? ` — ${state.header.needs_steve_total} need ${state.header.owner_login ? "@" + esc(state.header.owner_login) : "Steve"}`
+      ? ` — ${state.header.needs_steve_total} need ${state.header.owner_login ? "@" + esc(state.header.owner_login) : "the owner"}`
       : "");
   document.getElementById("clock").textContent = new Date(state.header.time).toLocaleString();
 
@@ -2878,14 +2878,14 @@ reviewImgEl.addEventListener("touchend", (e) => {
 // above is untouched, `refresh()` just hands it the same state it was already given.
 //
 // A floor plan (October 9, 2026: "make this look like a real office"). Top row: the break
-// room and Steve's office, a hallway between them. Across the middle, the main hallway.
+// room and the owner's office, a hallway between them. Across the middle, the main hallway.
 // Bottom row: a room per board, hallways between them, and the server room at the end.
 // A lane that is working or paused is at its desk, and an empty desk is tagged with
 // whose it is. An idle lane walks out of its room, down the hallway and into the break
 // room, where it mills about — every so often one gets up and walks to another spot. A
-// lane asleep after a failure naps on the couch there. A lane that needs Steve walks to
-// his office and waves in front of his desk with its picture held up; the light over his
-// door turns red. His in-tray holds every Stuck card. On his wall, two boards to click:
+// lane asleep after a failure naps on the couch there. A lane that needs the owner walks to
+// their office and waves in front of their desk with its picture held up; the light over their
+// door turns red. Their in-tray holds every Stuck card. On their wall, two boards to click:
 // the bulletin board (every card being worked and recently worked, with a Peek into the
 // card itself) and the wins board (what shipped this week). Hover the server room for the
 // box's load, the tokens the lanes moved, and the lab's other boxes.
@@ -2997,13 +2997,6 @@ const PROPS = {
     <rect x="12" y="10" width="20" height="9" rx="1" fill="#e8c27a" stroke="#b5651d" stroke-width="1"/>
     <circle cx="18" cy="14" r="1.6" fill="#ff7b72"/><circle cx="24" cy="13" r="1.6" fill="#ff7b72"/><circle cx="27" cy="16" r="1.4" fill="#ff7b72"/>
     <rect x="6" y="24" width="10" height="7" rx="2" fill="var(--dim)"/><rect x="28" y="24" width="10" height="7" rx="2" fill="var(--dim)"/></svg>`,
-  // Steve's desk: the chair behind it, a monitor, a mug, and the nameplate.
-  bossdesk: `<svg width="120" height="40" viewBox="0 0 120 40"><rect x="44" y="0" width="32" height="14" rx="5" fill="var(--dim)"/>
-    <rect x="0" y="12" width="120" height="24" rx="3" fill="#8a5a2b"/><rect x="0" y="12" width="120" height="5" rx="2" fill="#a86f3a"/>
-    <rect x="10" y="18" width="16" height="11" rx="1" fill="var(--line)"/><rect x="12" y="20" width="12" height="7" fill="#58a6ff" opacity=".55"/>
-    <rect x="34" y="24" width="7" height="6" rx="1" fill="#f3f4f6"/>
-    <rect x="80" y="21" width="32" height="10" rx="1" fill="#f3f4f6"/>
-    <text x="96" y="28.5" text-anchor="middle" font-size="7" font-weight="700" fill="#1b1f24" font-family="sans-serif">STEVE</text></svg>`,
   // The server room: a rack of blinking machines.
   rack: `<svg width="34" height="84" viewBox="0 0 34 84"><rect x="1" y="1" width="32" height="82" rx="2" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
     ${[0, 1, 2, 3, 4, 5].map(i => `<rect x="4" y="${5 + i * 13}" width="26" height="10" rx="1" fill="#21262d"/>
@@ -3023,6 +3016,19 @@ function clockSVG(iso) {
   return `<svg width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="12" fill="#f3f4f6" stroke="var(--dim)" stroke-width="2"/>
     <path d="M13 13 v-6" stroke="#1b1f24" stroke-width="2" transform="rotate(${h} 13 13)"/>
     <path d="M13 13 v-9" stroke="#1b1f24" stroke-width="1.2" transform="rotate(${m} 13 13)"/><circle cx="13" cy="13" r="1.2" fill="#1b1f24"/></svg>`;
+}
+// The owner's desk: the chair behind it, a monitor, a mug, and the nameplate — named by
+// login (card #179: a forker's own, uppercased and fit to the plate; never the word
+// "Steve"), or "OWNER" when no login is known.
+function bossdeskSVG(login) {
+  const text = esc((login || "owner").toUpperCase().slice(0, 10));
+  const size = text.length > 6 ? 5.5 : 7;
+  return `<svg width="120" height="40" viewBox="0 0 120 40"><rect x="44" y="0" width="32" height="14" rx="5" fill="var(--dim)"/>
+    <rect x="0" y="12" width="120" height="24" rx="3" fill="#8a5a2b"/><rect x="0" y="12" width="120" height="5" rx="2" fill="#a86f3a"/>
+    <rect x="10" y="18" width="16" height="11" rx="1" fill="var(--line)"/><rect x="12" y="20" width="12" height="7" fill="#58a6ff" opacity=".55"/>
+    <rect x="34" y="24" width="7" height="6" rx="1" fill="#f3f4f6"/>
+    <rect x="80" y="21" width="32" height="10" rx="1" fill="#f3f4f6"/>
+    <text x="96" y="28.5" text-anchor="middle" font-size="${size}" font-weight="700" fill="#1b1f24" font-family="sans-serif">${text}</text></svg>`;
 }
 // A desk: top, legs, monitor (scanning while lit), keyboard, mug, and the chair in front.
 function deskSVG(lit) {
@@ -3083,7 +3089,7 @@ function counterSVG() {
     <path d="M44 24 a5 5 0 0 1 10 0 z" fill="#ffd33d"/><rect x="42" y="24" width="14" height="2" fill="#d29922"/>
     <rect x="20" y="42" width="20" height="10" rx="4" fill="var(--dim)"/></svg>`;
 }
-// The two boards on Steve's wall, each clickable: the bulletin board with its pinned
+// The two boards on the owner's wall, each clickable: the bulletin board with its pinned
 // notes, and the wins board with this week's count on it.
 function bulletinSVG(n) {
   const pins = [[8, 8], [26, 6], [44, 10], [12, 24], [32, 22], [48, 26]].slice(0, Math.max(1, Math.min(6, n || 1)));
@@ -3105,12 +3111,12 @@ function winsSVG(n) {
 const CHAR_W = 72;                 // one standing spot: a figure and its plate never exceed it (.character max-width)
 const EDGE = 12, ROOM_PAD = 6;
 const CORR_H = 60;                 // the main hallway, and the one between team rows
-const VHALL = 48;                  // between the break room and Steve's office
+const VHALL = 48;                  // between the break room and the owner's office
 const THALL = 28;                  // between team rooms, and before the server room
 const SERVER_W = 220;
 const WALK_SPEED = 180;            // px per second
 // padTop is the first row's feet, measured from the room's top: room name, props on the
-// back wall and the figure's own height (34px; plus a held-up mockup in Steve's office;
+// back wall and the figure's own height (34px; plus a held-up mockup in the owner's office;
 // plus a desk and monitor in a team room) all fit above it. rowH is feet to feet.
 // padBottom is the plate under the last row's feet.
 const BREAK = {padTop: 104, rowH: 68, padBottom: 30};
@@ -3283,7 +3289,7 @@ function computeStudio(state) {
   const idleShipCount = projects.filter(p => shipState(p.ship).pill === "ok").length;
   const rooms = [];
 
-  // The top row: the break room and Steve's office, a hallway between, as tall as the fuller.
+  // The top row: the break room and the owner's office, a hallway between, as tall as the fuller.
   const breakW = Math.round((inner - VHALL) * 0.52), bossW = inner - VHALL - breakW;
   const nBreak = breakers.length + sleepers.length + idleShipCount + BREAK_EXTRA;
   const crowd = partyOn() ? cookieSpots({x: EDGE, w: breakW}, breakers.length + sleepers.length + idleShipCount) : null;
@@ -3300,7 +3306,9 @@ function computeStudio(state) {
   const topH = Math.max(breakH, bossH, 170);
   const corrY = EDGE + topH + CORR_H / 2;    // the main hallway's center line
   const breakRoom = {kind: "break", name: "Break room", x: EDGE, y: EDGE, w: breakW, h: topH, side: "bottom", corrY};
-  const boss = {kind: "boss", name: "Steve's office", x: EDGE + breakW + VHALL, y: EDGE, w: bossW, h: topH,
+  const ownerLogin = state.header.owner_login;
+  const bossName = ownerLogin ? `${ownerLogin}'s office` : "The owner's office";
+  const boss = {kind: "boss", name: bossName, x: EDGE + breakW + VHALL, y: EDGE, w: bossW, h: topH,
                 side: "bottom", corrY, spec: bossSpec,
                 tray: trayH ? {x: ROOM_PAD + 2, y: BOSS_EMPTY_H - 12, w: bossW - 2 * ROOM_PAD - 4, h: trayH} : null};
   rooms.push(breakRoom, boss);
@@ -3414,7 +3422,8 @@ function roomHTML(r, state) {
     props = `<div class="rug"></div>` + prop("window", 14, 18) + prop("window", 68, 18)
       + `<div class="prop clickable" data-board="bulletin" title="The bulletin board: every card being worked, and recently worked" style="left:${r.w - 150}px;top:16px">${bulletinSVG(nRecent)}</div>`
       + `<div class="prop clickable" data-board="wins" title="The wins board: what shipped this week" style="left:${r.w - 80}px;top:16px">${winsSVG(nWins)}</div>`
-      + prop("bossdesk", Math.round(r.w / 2 - 60), 68) + prop("tallplant", 10, r.h - 56) + prop("plant", r.w - 30, r.h - 44);
+      + `<div class="prop" style="left:${Math.round(r.w / 2 - 60)}px;top:68px">${bossdeskSVG(state.header && state.header.owner_login)}</div>`
+      + prop("tallplant", 10, r.h - 56) + prop("plant", r.w - 30, r.h - 44);
   } else if (r.kind === "server") {
     const racks = Math.max(1, Math.min(4, Math.floor((r.w - 60) / 44)));
     props = Array.from({length: racks}, (_, i) => prop("rack", 18 + i * 44, 34)).join("")
@@ -3458,7 +3467,7 @@ function renderRoomDesks(lanes, ships) {
 }
 
 // The plate under a character: what it is (Build, Design, Triage), and — only when it has
-// left its room for the break room or Steve's office — whose it is.
+// left its room for the break room or the owner's office — whose it is.
 function plateHTML(kind, project, away) {
   return `<div class="plate">${esc(kind)}${away ? `<br><span class="where">${esc(project)}</span>` : ""}</div>`;
 }
@@ -3529,7 +3538,7 @@ function newCharacter(container, cls) {
   return el;
 }
 // The mockup held up over a waving character's head — the carousel's own current slide
-// when this card has one (card #96: so flipping it in Steve's in-tray flips it here too),
+// when this card has one (card #96: so flipping it in the owner's in-tray flips it here too),
 // the old single thumbnail otherwise (a demo fixture with no `rounds` of its own). Either
 // way it is tappable: the same overlay as the Review button, never a click through to the
 // card (card #100's own Detail note: "the podium figure keeps holding the first picture
@@ -3593,8 +3602,8 @@ function renderShipDock(ships) {
   for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }
 }
 
-// The in-tray on Steve's desk (card #96: "in each board's row, on the floor page and in
-// the studio" — in the office, the cards waiting on him are on his desk): every Stuck
+// The in-tray on the owner's desk (card #96: "in each board's row, on the floor page and in
+// the studio" — in the office, the cards waiting on them are on their desk): every Stuck
 // card's chip, always, grouped by board, each with its own Review button (#100) when it
 // has a picture behind it — a direction linked only as a `.html` mockup has none yet, and
 // still gets its chip with no button beside it.
@@ -3611,8 +3620,8 @@ function renderRoomStuck(projects, boss) {
   </div>`;
 }
 
-// The light over Steve's door: red while anyone is waiting in his office or a card sits in
-// his in-tray, amber when a lane is paused or asleep or a build is blocked, green otherwise.
+// The light over the owner's door: red while anyone is waiting in their office or a card sits in
+// their in-tray, amber when a lane is paused or asleep or a build is blocked, green otherwise.
 function renderBeacon(state) {
   let color = "green";
   if ((state.header.needs_steve_total || 0) > 0) {
@@ -3721,7 +3730,7 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => { if (lastState && document.getElementById("studio").classList.contains("open")) renderStudio(lastState); }, 150);
 });
 
-// ---- The boards on Steve's wall --------------------------------------------------------
+// ---- The boards on the owner's wall -----------------------------------------------------
 // Click the bulletin board for every card being worked right now and every card recently
 // worked, each with a Peek that reads the card itself off GitHub (title, body, labels,
 // its last comments). Click the wins board for what shipped this week, by board.

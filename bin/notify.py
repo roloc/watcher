@@ -14,7 +14,7 @@ transport — set either webhook, both, or neither:
     SLACK_MENTION         optional; plays DISCORD_MENTION's part for Slack — `<@U…>` (a
                           user) or `<!here>`.
     OWNER_LOGIN           optional; the GitHub login the Stuck alert's content line names
-                          (card #154) — defaults to BOARD_OWNER, then to the word "Steve",
+                          (card #154) — defaults to BOARD_OWNER, then to "the owner",
                           so a fork of this repo pings its own owner with no config at all.
 
 What gets posted (and by whom):
@@ -70,10 +70,10 @@ def enabled():
 
 def needs_label():
     """`Needs @<login>` once a project names one (OWNER_LOGIN, falling back to
-    BOARD_OWNER), or the old `Needs Steve` with no `@` at all when neither is set — never
-    the literal `@Steve`, which is nobody's GitHub login."""
+    BOARD_OWNER), or `Needs the owner` with no `@` at all when neither is set — never
+    a literal `@Steve` or similar, which is nobody's GitHub login."""
     login = (os.environ.get("OWNER_LOGIN") or os.environ.get("BOARD_OWNER") or "").strip()
-    return f"Needs @{login}" if login else "Needs Steve"
+    return f"Needs @{login}" if login else "Needs the owner"
 
 
 def card_label(card):
@@ -87,7 +87,7 @@ def _message(kind, card, detail="", pr=None, board_url=""):
     this the same way, so the two transports can never drift on what a post actually says.
 
     `card` is {"number", "title", "url"}; `detail` is the one line that varies (the
-    Needs Steve ask, the spawner's reason, the detector's reading); `pr` is
+    Needs-the-owner ask, the spawner's reason, the detector's reading); `pr` is
     {"url", "state"} when a pull request for the card is known.
     """
     label = card_label(card)

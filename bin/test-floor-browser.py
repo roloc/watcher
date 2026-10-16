@@ -946,10 +946,10 @@ try:
         settled(b)
         shot(b, "studio-desktop.png")
 
-        print("12. an office: a break room, Steve's office, a room per board, the server room")
+        print("12. an office: a break room, the owner's office (named roloc, card #179), a room per board, the server room")
         rooms = b.eval(ROOM_NAMES)
-        check("the break room and Steve's office, one room per board in the board's order, the server room last",
-              rooms == ["Break room", "Steve's office", "alpha", "beta", "Server room"], rooms)
+        check("the break room and roloc's office, one room per board in the board's order, the server room last",
+              rooms == ["Break room", "roloc's office", "alpha", "beta", "Server room"], rooms)
         check("a board's room has its name on the door, a link to the board in a new tab",
               b.eval("[...document.querySelectorAll('.office-room.team .room-name')]"
                      ".every(a => a.href && a.target === '_blank')"))
@@ -988,16 +988,17 @@ try:
         check("every room has a window and a plant (October 9, 2026: 'lean into that')",
               b.eval("""[...document.querySelectorAll('.office-room:not(.server)')].every(r =>
                       [...r.querySelectorAll('.prop svg')].length >= 2)"""))
-        check("Steve's desk has his name on it, and his two boards hang on the wall", b.eval(
-              "document.querySelector('.office-room.boss').textContent.includes('STEVE')"
+        check("the owner's desk has their login on it (ROLOC, never STEVE), and their two boards hang on the wall", b.eval(
+              "document.querySelector('.office-room.boss').textContent.includes('ROLOC')"
+              " && !document.querySelector('.office-room.boss').textContent.includes('STEVE')"
               " && !!document.querySelector('.office-room.boss [data-board=\"bulletin\"]')"
               " && !!document.querySelector('.office-room.boss [data-board=\"wins\"]')"))
         check("the server room has racks with lights on them",
               b.eval("document.querySelectorAll('.office-room.server .led').length") >= 6)
         check("nobody stands on anybody", overlaps(b) == [], overlaps(b))
 
-        print("12a. the in-tray on Steve's desk (card #96): #778 is there, named for alpha, "
-              "even though no lane is in his office for it")
+        print("12a. the in-tray on the owner's desk (card #96): #778 is there, named for alpha, "
+              "even though no lane is in their office for it")
         check("#778's chip is in the in-tray, after its board's name",
               b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778"
               and b.eval("document.querySelector('.tray-board')?.textContent") == "alpha")
@@ -1010,10 +1011,10 @@ try:
               b.wait_for("document.getElementById('review-overlay').classList.contains('open')")
               and b.eval("document.getElementById('review-caption').textContent") == "A ★ — phone")
         b.key("Escape")
-        check("the tray is in Steve's office, in front of his desk, and the office grew to hold it",
+        check("the tray is in the owner's office, in front of their desk, and the office grew to hold it",
               b.eval("""(() => { const t = document.querySelector('.in-tray').getBoundingClientRect();
                       const o = document.querySelector('.office-room.boss').getBoundingClientRect();
-                      const d = [...document.querySelectorAll('.office-room.boss .prop')].find(p => p.textContent.includes('STEVE')).getBoundingClientRect();
+                      const d = [...document.querySelectorAll('.office-room.boss .prop')].find(p => p.textContent.includes('ROLOC')).getBoundingClientRect();
                       return t.left >= o.left && t.right <= o.right && t.top >= d.bottom - 12 && t.bottom <= o.bottom; })()"""))
         check("no uncaught exception", b.errors == [], b.errors)
         shot(b, "studio-needs-strip.png")
@@ -1025,8 +1026,9 @@ try:
         check("no two characters overlap (six idle lanes used to share five fixed spots, so the "
               "sixth stood on the first)", overlaps(b) == [], overlaps(b))
         rooms = b.eval(ROOM_NAMES)
-        check("three team rooms, named for their boards, side by side with hallways between",
-              rooms == ["Break room", "Steve's office", "riffmap", "riffmap-site", "watcher", "Server room"]
+        check("three team rooms, named for their boards, side by side with hallways between "
+              "(LIVE_SHAPED carries no owner_login of its own, so the office falls back to the generic name)",
+              rooms == ["Break room", "The owner's office", "riffmap", "riffmap-site", "watcher", "Server room"]
               and b.eval("""(() => { const rs = [...document.querySelectorAll('.office-room.team')].map(r => r.getBoundingClientRect());
                       return rs[1].left - rs[0].right >= 24 && rs[2].left - rs[1].right >= 24 && Math.abs(rs[0].top - rs[2].top) < 2; })()"""),
               rooms)
@@ -1166,12 +1168,33 @@ try:
               == b.eval("refresh().then(() => document.querySelector(\".character[data-lane='alpha']\")"
                         ".querySelector('svg').outerHTML)"))
 
-        print("13. the light over Steve's door reads the same state the pills do")
+        print("12e. card #179: a lane and a board with no owner_login at all reads 'the owner', never 'Steve'")
+        NO_OWNER_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs_steve_total: 1},
+  projects: [{name: 'gamma', board_url: '#', counts: {ready: 0, in_progress: 1, backlog: 0},
+    lanes: [{lane: 'gamma', kind: 'Build', unit: 'watcher@gamma', pill: 'needs_steve', link: '#',
+             card: {number: 50, url: 'https://example.test/50'}, ask: 'pick one'}],
+    ship: {ci: {state: 'passing', sha: 'abc1234', url: '#'}}}], recent: []}"""
+        b.eval("render(" + NO_OWNER_STATE + "); renderStudio(" + NO_OWNER_STATE + "); true")
+        settled(b)
+        check("the header count reads 'need the owner', not 'need Steve', with no login configured",
+              "need the owner" in b.text())
+        check("the desk's pill reads 'Needs the owner', not 'Needs Steve'",
+              b.eval("document.querySelector('.desk .pill.needs_steve')?.textContent") == "Needs the owner")
+        check("the Studio's office is named 'The owner's office' with no login to go by",
+              "The owner's office" in b.eval(ROOM_NAMES), b.eval(ROOM_NAMES))
+        check("the desk nameplate reads 'OWNER', never 'STEVE', with no login to go by",
+              b.eval("document.querySelector('.office-room.boss').textContent.includes('OWNER')")
+              and not b.eval("document.querySelector('.office-room.boss').textContent.includes('STEVE')"))
+        check("no uncaught exception", b.errors == [], b.errors)
+        b.eval("refresh().then(() => true)")
+        settled(b)
+
+        print("13. the light over the owner's door reads the same state the pills do")
         check("a paused lane, a failing build, AND #778 sitting Stuck on alpha's board: red "
               "— a Stuck card outranks amber even with no lane pointing at it (card #96)",
               b.eval("document.getElementById('beacon').className") == "beacon-red")
         check("the light is actually visible — inside #room's own box, which clips "
-              "(it used to sit mostly above it, clipped to a sliver) — and over his door",
+              "(it used to sit mostly above it, clipped to a sliver) — and over their door",
               b.eval("""(() => {
                 const beacon = document.getElementById("beacon").getBoundingClientRect();
                 const room = document.getElementById("room").getBoundingClientRect();
@@ -1221,7 +1244,7 @@ try:
         b.hover(".office-room.break")
         check("and closes when the pointer leaves", b.wait_for("!" + TIP_OPEN))
 
-        print("16. the bulletin board on Steve's wall: click it for every card being worked and recently worked")
+        print("16. the bulletin board on the owner's wall: click it for every card being worked and recently worked")
         b.click('.office-room.boss [data-board="bulletin"]')
         check("the popup opens", b.wait_for(MODAL_OPEN))
         text = b.eval(MODAL_TEXT)
@@ -1308,7 +1331,7 @@ try:
         for i in range(3):
             b.eval(f"window.__demoGoto({i})")  # synchronous: the redraw is done when this returns
             colors.append(b.eval("document.getElementById('beacon').className"))
-        check("stepping through the fixture's states changes the light over Steve's door (never stuck on one color)",
+        check("stepping through the fixture's states changes the light over the owner's door (never stuck on one color)",
               len(set(colors)) > 1, colors)
         b.eval("window.__demoGoto(1)")  # the demo state with a needs_steve lane
         check("a needs_steve lane waves, not just stands with its hands up",
@@ -1335,9 +1358,10 @@ try:
               and b.eval("document.querySelector('.bubble')") is None)
         b.key("Escape")
         settled(b)
-        check("it walked to Steve's office, and its plate says whose it is",
-              info(b, "alpha") == ["needs_steve", "Steve's office", "Build\nalpha"], info(b, "alpha"))
-        check("the light over his door is red while it waits there",
+        check("card #179: it walked to the owner's office named by this demo's own login "
+              "(octocat), never 'Steve's office', and its plate says whose it is",
+              info(b, "alpha") == ["needs_steve", "octocat's office", "Build\nalpha"], info(b, "alpha"))
+        check("the light over their door is red while it waits there",
               b.eval("document.getElementById('beacon').className") == "beacon-red")
         check("alpha's build is failing in this state, so its dock hand waves a flag; beta's is green, a check on the crates",
               b.eval("!!document.querySelector('.character[data-ship=\"alpha\"] .character-wave')")
@@ -1377,7 +1401,7 @@ try:
         check("the desk line says 'no plan yet'", "no plan yet" in b.text(), b.text())
         check("the Working pill itself carries the late class, not just the detail text",
               b.eval("document.querySelector('.desk .pill.working')?.className") == "pill working plan-late")
-        check("the light over Steve's door goes amber from this alone — nothing else is "
+        check("the light over the owner's door goes amber from this alone — nothing else is "
               "paused, asleep or blocked", b.eval("document.getElementById('beacon').className") == "beacon-amber")
         check("no uncaught exception", b.errors == [], b.errors)
         shot(b, "floor-plan-late.png")

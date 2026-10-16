@@ -473,7 +473,7 @@ run() {
   GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" GH_PR_LIST_FAIL="${GH_PR_LIST_FAIL:-0}" \
   DOCTOR_FAIL="${DOCTOR_FAIL:-0}" DOCTOR_FAIL_REASON="${DOCTOR_FAIL_REASON:-}" \
   WATCHER_ROOT="$FAKE_ROOT" PROJECT_REPO="owner/proj" \
-  BOARD_OWNER="${BOARD_OWNER:-test-owner}" BOARD_NUMBER="${BOARD_NUMBER:-7}" \
+  BOARD_OWNER="${BOARD_OWNER-test-owner}" BOARD_NUMBER="${BOARD_NUMBER:-7}" \
   WATCHER_CLAUDE="${WATCHER_CLAUDE_OVERRIDE:-$BIN/claude}" WATCHER_GH="$BIN/gh" WATCHER_BOARD="$BIN/board.py" \
   WATCHER_WORKTREE="${WATCHER_WORKTREE_OVERRIDE:-$BIN/worktree.sh}" \
   WATCHER_DOCTOR="$BIN/doctor.sh" \
@@ -750,6 +750,24 @@ if grep -q 'gh issue comment 41 --body 🤖 \*\*Needs @octocat:' "$TESTLOG"; the
   pass "OWNER_LOGIN=octocat → the park comment addresses that login, not BOARD_OWNER's test-owner"
 else
   flunk "OWNER_LOGIN park comment" "$(cat "$TESTLOG")"
+fi
+
+echo "4c. card #179: neither OWNER_LOGIN nor BOARD_OWNER set → the park comment falls back to 'Needs the owner:', never the bare word 'Steve'"
+fresh_state
+board_list $'42\tP1\tbuilder\t-\tCard forty-two'
+board_show '{"number":42,"state":"OPEN","status":"In progress","labels":[]}'
+CLAUDE_SUBTYPE=error_max_turns CLAUDE_RC=1 CLAUDE_COST=0.10 CLAUDE_TURNS=400 CLAUDE_DENIALS=0
+OWNER_LOGIN="" BOARD_OWNER="" run --once >/dev/null
+OWNER_LOGIN="" BOARD_OWNER="" run --once >/dev/null
+if grep -q 'gh issue comment 42 --body 🤖 \*\*Needs the owner:' "$TESTLOG"; then
+  pass "no login anywhere → the park comment addresses 'the owner', with no '@' at all"
+else
+  flunk "no-login park comment" "$(cat "$TESTLOG")"
+fi
+if not_grepped 'Needs Steve' && not_grepped 'Needs @:'; then
+  pass "never the old bare 'Needs Steve' and never the nonsensical 'Needs @:'"
+else
+  flunk "unexpected fallback shape" "$(cat "$TESTLOG")"
 fi
 
 # ============================================================================
