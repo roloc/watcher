@@ -87,6 +87,19 @@ script you only read is a guess — say plausible, never confirmed.
 whose `<script>` block did not parse passed this review with three nits fixed, and shipped
 drawing nothing.)
 
+**A rule whose own text is unchanged can still have a different effect.** A selector or
+lookup keyed to position rather than identity — `:last-child`, `:first-of-type`, an index,
+"the last item", "the final column" — targets whatever sits there after the diff, not
+whatever it used to target. Seeing that the rule's own line is untouched is not evidence
+its effect on the page is unchanged; trace what it actually matches in the new structure,
+against the picture, the same way you check everything else in this section. "Pre-existing,
+nothing touched it" is the exact reasoning this misses: a diff that adds, removes or
+reorders what a positional rule applies to is a diff to that rule's effect, whether or not
+the rule's own line moved. (`evals/cases/usability-blocks-sliver.sh`, card #101: a table's
+`:last-child` color rule already made one column invisible on phone; a PR added a new last
+column, the rule silently moved onto it, and "the old column's invisibility is unchanged"
+was true and beside the point — the new column was the one that needed reading.)
+
 **A screen change with no `usability` verdict is blocking, the same category as one you
 find was never rendered.** The tick's invocation tells you whether it ran `usability` on
 this change and what it found; a screen change where it did not, or cannot say, is

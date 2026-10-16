@@ -32,9 +32,18 @@ this picture, without tapping into anything the card did not ask for?** Answer i
 owner's terms — name what you see on the screen ("a table of jobs, cut off after the second
 column"), never the code's name for it.
 
+**A value you expect is not a value you saw.** A header naming a column, or every other row
+having one, is not evidence the cell under it is actually visible — check that specific
+cell's own pixels. A cell can sit in exactly the right place, with the right label above it,
+and still show nothing: text set the same color as its background, zero width, or pushed
+off-canvas. Crediting it as readable because the table around it is correctly shaped is
+reporting the layout, not the picture.
+
 ## Blocking, and only these
 
-- The stated person cannot do the stated thing from the phone shot: it is unreadable, cut
+- The stated person cannot do the stated thing from the phone shot: it is unreadable (this
+  includes a value that is there in the markup but renders with no visible pixels — never
+  credited as present just because a neighboring cell has one), cut
   off, needs a tap the card never asked for, or the control the card means is not where a
   thumb lands.
 - The change lands somewhere the person cannot reach — a command on the box, a file, a
