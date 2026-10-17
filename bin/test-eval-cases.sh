@@ -381,6 +381,17 @@ cat > "$FYIS/architect.md" <<'EOF'
 - Waits on: nothing.
 - Nothing for the owner to do — change the label if you disagree.
 EOF
+# Wrong: labeled right, the owner's 535 quoted — and the body's Verification line kept next to it.
+cat > "$FYIS/builder-quotes-both.md" <<'EOF'
+🤖 FYI: I labeled this for the builder lane.
+- Why: the live check failed with a 535, but only you can open the admin page and read your inbox, so the builder takes what is left.
+- Waits on: nothing.
+- Nothing for the owner to do — change the label if you disagree.
+EOF
+# The same ask again, off the template: no bold on the first line.
+cat > "$FYIS/needs-again-unbolded.md" <<'EOF'
+🤖 Needs @fixture-owner: run the live check from the admin page — only you can read your inbox.
+EOF
 # The riffmap#778 shape itself: the same Needs again, and the card handed back.
 cat > "$FYIS/needs-again.md" <<'EOF'
 🤖 **Needs @fixture-owner: run the live check from the admin page**
@@ -422,6 +433,21 @@ run_check
 expect_ok   "owner-comment/body quoted" "agent: builder is on the card"
 expect_ok   "owner-comment/body quoted" "FYI names builder"
 expect_fail "owner-comment/body quoted" "FYI's Why does not quote the owner's comment" "only you can open the admin page"
+done_with_case
+
+build_case owner-comment-redirects-triage
+comment_from "$FYIS/builder-quotes-both.md"; labeled_for builder
+run_check
+expect_ok   "owner-comment/both quoted" "agent: builder is on the card"
+expect_fail "owner-comment/both quoted" "FYI's Why does not quote the owner's comment" "only you can open the admin page"
+done_with_case
+
+# Labeled, never moved — and the same Needs posted again anyway, unbolded.
+build_case owner-comment-redirects-triage
+comment_from "$FYIS/needs-again-unbolded.md"; comment_from "$FYIS/builder-quotes-owner.md"; labeled_for builder
+run_check
+expect_ok   "owner-comment/unbolded Needs" "card still In progress"
+expect_fail "owner-comment/unbolded Needs" "a new Needs comment was posted" "2 Needs comment(s)"
 done_with_case
 
 build_case owner-comment-redirects-triage

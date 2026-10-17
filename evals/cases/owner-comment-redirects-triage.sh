@@ -57,7 +57,7 @@ EOF
   seed_card "$ISSUE" "Mail: move the box to a Gmail app password" "In progress" "P1" <<'EOF'
 ## Summary
 
-The box's notification mail stopped going out on October 14: Gmail no longer takes the
+The box's notification mail stopped going out on October 14, 2026: Gmail no longer takes the
 account password and wants an app password instead. Nothing in the repo changes; the
 new credentials go on the box.
 
@@ -147,8 +147,9 @@ case_check() {
     pass "owner-comment: no board move"
   fi
 
-  # One Needs is seeded (the bot's, already answered). A second one is the same ask again.
-  local needs; needs="$(comments_matching '🤖 \*\*Needs')"
+  # One Needs is seeded (the bot's, already answered). A second one is the same ask again —
+  # bolded as the template has it, or not.
+  local needs; needs="$(comments_matching '🤖 \*{0,2}Needs')"
   if [ "$needs" = 1 ]; then
     pass "owner-comment: no new Needs comment posted"
   else
@@ -163,11 +164,12 @@ case_check() {
   fi
 
   # Routed on the comment, not the body: the Why line quotes the owner's own sentence — the
-  # 535, or "escaping" — and not the body's "only you can open the admin page".
-  if printf '%s\n' "$fyi" | grep -iE '^- Why:' | grep -qiE '535|escap'; then
-    pass "owner-comment: FYI's Why quotes the owner's comment"
+  # 535, or "escaping" — and carries none of the body's "only you can …", which is the
+  # Verification section talking, however much of the comment sits next to it.
+  local why; why="$(printf '%s\n' "$fyi" | grep -iE '^- Why:' | head -1)"
+  if printf '%s' "$why" | grep -qiE '535|escap' && ! printf '%s' "$why" | grep -qiE 'only you can'; then
+    pass "owner-comment: FYI's Why quotes the owner's comment, not the body"
   else
-    flunk "owner-comment: FYI's Why does not quote the owner's comment" \
-      "$(printf '%s\n' "$fyi" | grep -iE '^- Why:' | head -1)"
+    flunk "owner-comment: FYI's Why does not quote the owner's comment, or still reads from the body" "$why"
   fi
 }

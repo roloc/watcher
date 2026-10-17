@@ -58,7 +58,7 @@ carries the short table. Read those, then pick the ONE agent whose remit the car
   invented a "no lane fits, parking it" outcome and handed the card back to him. The sixth
   tick read the comment, and that was the first one that moved the card.)
 - **A repeated instruction means the reading was wrong, not the wording.** If the thread
-  already holds the same `🤖 Needs` or `🤖 FYI` you are about to post, and an owner reply
+  already holds the same `🤖 **Needs` or `🤖 FYI` you are about to post, and an owner reply
   after it pushing back, do not post it again — not reworded, not shortened. Their reply
   is the ask; route on it.
 - **Design-shaped first.** A card that asks for options, examples, mockups, a brief, or a
