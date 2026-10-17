@@ -692,14 +692,44 @@ board stage <n> Parked
 gh issue edit <n> --remove-label in-flight
 ```
 
-Go to Stuck when: the card needs a product decision; it is `steve-decision`; its `agent:`
-label is `reviewer`, whose deliverable is a verdict on somebody else's change rather than
+Go to Stuck when: the card needs a product decision; it is `steve-decision` and the
+owner's own comment has not yet said their part is done or asked for work (below); its
+`agent:` label is `reviewer`, whose deliverable is a verdict on somebody else's change rather than
 an artifact of its own — route those by hand; the card carries `blocked`; **`reviewer` or
 `usability` finds something blocking that you disagree with** — you do not get to overrule
 either of the only reviews there are; the work would touch a documented contract the project's `CLAUDE.md`
 says is not a builder's call; the required CI check fails twice for a reason you cannot
 explain; **the change is built and merged and the card's symptom survives** (§3); or you
 have tried the same failing thing twice.
+
+**`steve-decision` means Stuck until the owner's own comment says their part is done or
+asks for work.** From that comment on, the card is ordinary work for the labeled lane,
+and the step the body gave the owner is finished whatever the body still says: their
+newest comment is the ask, and the body's Verification, Owner or Progress sections are
+what the card used to be. Take the label off and say so in one FYI line, which sentence of
+theirs you read it from — or say in one line why it stays:
+
+```
+gh issue edit <n> --remove-label steve-decision
+gh issue comment <n> --body "🤖 FYI: your part is done — you said '<their sentence>' — so this is the <lane> lane's now; the steve-decision label is off."
+```
+
+Parking the card on them again for the step their comment says is done is the loop
+fighting the owner. (riffmap [#778](https://github.com/roloc/riffmap/issues/778),
+October 17, 2026: the owner minted the password and pushed the config, the live send
+failed, and he wrote "please just send a test mail with the credentials" four times in
+three hours; five ticks each read the body's Verification section — "only you can open
+the admin page and read your inbox" — and handed it straight back to him.)
+
+**"No tick can do this" is an access fact, never a guess about what only the owner can
+see.** It is the exact command you tried and the exact denial it gave, said in the FIRST
+Stuck comment — plain words above the fold, the command and its output under `Details` —
+never "only you can open that page" or "only you can read your inbox" about a page or an
+inbox you never tried to reach. When the real wall is a secret the box holds that no tick
+may read (a password in the box's env file), say that, with the path and the denial,
+rather than the step the body happened to give the owner. (riffmap#778 again: the sixth
+tick's park said what no tick could reach — the password in the box's env file — and that
+was the first comment that moved the card.)
 
 **The "built, but the symptom survives" ask has the same shape as every other.** The first
 line is still `Needs @<login>:` (the real GitHub login, never the literal text

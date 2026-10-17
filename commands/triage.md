@@ -22,12 +22,15 @@ owner reads.
 
 ```
 board show <n>
-gh issue view <n> --json title,body,labels,state
+gh issue view <n> --json title,body,labels,state,comments
 ```
 
 - If the card already carries an `agent:` label, say so in one line and stop
   (`Outcome: already labeled`). It is not yours; the lane that label names takes it.
 - If it is closed, or no longer In progress, stop the same way.
+- The comments are part of the card, and the owner's are the part that decides it: read
+  every one, with its author's login, before you read the body for what to route on (§2,
+  "The owner's newest comment is the ask").
 
 ## 2. Pick the agent
 
@@ -36,6 +39,28 @@ The project's agents are its `agent: <name>` labels (`gh label list --json name 
 the project's `.claude/agents/<name>.md`, and a `docs/board.md`, if the project has one,
 carries the short table. Read those, then pick the ONE agent whose remit the card falls in:
 
+- **The owner's newest comment is the ask.** When the owner — the login this
+  environment's `OWNER_LOGIN` variable names, the real value — has commented since the
+  body was written, their newest comment is what the card asks for now, and the body's
+  Verification, Owner and Progress sections are what the card used to be. Route on the
+  comment, and quote the sentence you routed on in the FYI's `Why` line. Triage has
+  exactly three outcomes — labeled, already labeled, could not decide — and "this step is
+  the owner's" is not one of them: a tick that believes that still labels the lane whose
+  words it would take (the general builder when nothing fits better) and lets that lane's
+  `/watch` say so properly in Stuck, with a real access fact — the exact command it tried
+  and the exact denial (`watch.md` §4). A `steve-decision` label does not change the
+  route: once the owner's own comment says their part is done or asks for work, the card
+  is ordinary work for the lane you label (`watch.md` §4 is where the label comes off).
+  (riffmap [#778](https://github.com/roloc/riffmap/issues/778), October 17, 2026: the
+  owner had done his part, the live send had failed, and he wrote "please just send a test
+  mail with the credentials" four times in three hours; five triage ticks each answered the
+  body's Verification section — "only you can open the admin page and read your inbox" —
+  invented a "no lane fits, parking it" outcome and handed the card back to him. The sixth
+  tick read the comment, and that was the first one that moved the card.)
+- **A repeated instruction means the reading was wrong, not the wording.** If the thread
+  already holds the same `🤖 Needs` or `🤖 FYI` you are about to post, and an owner reply
+  after it pushing back, do not post it again — not reworded, not shortened. Their reply
+  is the ask; route on it.
 - **Design-shaped first.** A card that asks for options, examples, mockups, a brief, or a
   better way to show something ("show me some ways", "think of a better way to show")
   goes to the agent that designs how things look or read (`designer` in most projects).

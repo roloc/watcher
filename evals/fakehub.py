@@ -132,9 +132,20 @@ def gh_issue_edit(argv):
     save(d)
 
 
+def author_of(body):
+    # Stored comments are bare bodies. Every comment a bot leaves starts with the robot
+    # (`🤖 FYI:`, `🤖 **Needs`, `🤖 reviewer:`); anything else on a card is the owner's, under
+    # the login a case's tick sees in $OWNER_LOGIN (bin/eval.sh exports it). So a contract
+    # that routes on "the owner's newest comment" (commands/triage.md §2, riffmap#778) reads
+    # the same `author.login` field the real `gh issue view --json comments` gives it.
+    if body.startswith("🤖"):
+        return "fixture-bot"
+    return os.environ.get("OWNER_LOGIN", "fixture-owner")
+
+
 FIELD_MAP = {
     "labels": lambda it: [{"name": l} for l in it["labels"]],
-    "comments": lambda it: [{"body": c} for c in it["comments"]],
+    "comments": lambda it: [{"body": c, "author": {"login": author_of(c)}} for c in it["comments"]],
     "body": lambda it: it["body"],
     "title": lambda it: it["title"],
     "state": lambda it: it["state"],
@@ -523,9 +534,11 @@ def gh_api(argv):
 
 
 def gh_label_list(argv):
-    # No `agent: *` label in this fixture's set — no design lane to route to (watch.md §2,
-    # "never route in a project with no design agent to route to").
-    for name in ("bug", "enhancement", "in-flight"):
+    # The store's own `labels` list when a case seeds one (a /triage case needs the
+    # `agent: *` labels its fixture project routes to); otherwise the default set has no
+    # `agent: *` label at all — no design lane to route to (watch.md §2, "never route in a
+    # project with no design agent to route to").
+    for name in load().get("labels") or ("bug", "enhancement", "in-flight"):
         print(name)
 
 

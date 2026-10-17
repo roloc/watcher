@@ -50,7 +50,12 @@ Labels and fields the bots read:
   needs a live, paid model run is the one that still goes to Stuck. `reviewer` produces a
   verdict on somebody else's change rather than an artifact of its own, so the tick routes
   that one to Stuck for a human.
-- **`steve-decision`** — a product decision. The tick never does these; straight to Stuck.
+- **`steve-decision`** — a product decision, or a step only the owner can take. The tick
+  never does these; straight to Stuck — until the owner's own comment says their part is
+  done or asks for work. From then on it is ordinary work for the labeled lane: the tick
+  removes the label and says so in one FYI line (`commands/watch.md` §4). Their newest
+  comment is the ask, whatever the body's Verification or Owner sections still say
+  (riffmap [#778](https://github.com/roloc/riffmap/issues/778), October 17, 2026).
 - **`blocked`** — straight to Stuck.
 - **`awaiting-rebuild`** (card #85) — the tick merged this card's fix and found the artifact
   gated on a known downstream rebuild (`commands/watch.md` §3): it left this label on and
