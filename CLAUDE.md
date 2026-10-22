@@ -87,7 +87,10 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   in `.github/workflows/ci.yml`'s `review-receipt` job. `bash bin/test-receipt.sh` is its
   offline suite (CI runs it); run it after touching the file.
 - `docs/` — for agents (`how-it-works.md`, `talking-to-the-owner.md`) and for the owner
-  (`owner-cheat-sheet.md`).
+  (`owner-cheat-sheet.md`). **`docs/board.md` is how a card is filed, read and moved on this
+  board** — the commands, the labels, the body shape the owner's own cards use. Told to
+  "file a card" or to "take a look at #n", run what it says; do not go and inspect other
+  cards to work it out.
 - `deploy/autodeploy.sh` — **the deploy path.** A timer on the box (`watcher-deploy.timer`)
   ships `main` by itself: `verify` green on the commit, the replay suite green in a scratch
   clone, then a fresh release folder cloned, installed, and the `/opt/watcher` pointer
