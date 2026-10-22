@@ -138,6 +138,11 @@ exact words and warns when it can't find them.
 **Check:** re-run step 5's `install.sh <name>`; `bin/doctor.sh`'s output carries no
 warning about the required check.
 
+While you are in the project: give it a `docs/board.md` from `templates/board.md` (step
+5's `add-project.sh` printed the `sed` line that fills in the repo, the board's owner and
+its number). It is the page a session opens when you say "file a card" or "take a look at
+#n" — the commands, the labels, the body shape — so nobody rediscovers them per session.
+
 ## 7. First card
 
 **By hand:** file an issue on the project's repo (through the board, or

@@ -86,6 +86,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   review that never ran, fails it instead of merging silently. Required alongside `verify`
   in `.github/workflows/ci.yml`'s `review-receipt` job. `bash bin/test-receipt.sh` is its
   offline suite (CI runs it); run it after touching the file.
+- `templates/` — what a project copies in: `project-CLAUDE.md` (the section its `CLAUDE.md`
+  needs for `/watch`) and `board.md` (its `docs/board.md`, blanks for the repo, board
+  owner, number and login; `deploy/add-project.sh` prints the `sed` that fills them, and
+  `bin/test-add-project.sh` keeps the two in step). This repo's own `docs/board.md` is
+  `board.md` filled in.
 - `docs/` — for agents (`how-it-works.md`, `talking-to-the-owner.md`) and for the owner
   (`owner-cheat-sheet.md`). **`docs/board.md` is how a card is filed, read and moved on this
   board** — the commands, the labels, the body shape the owner's own cards use. Told to

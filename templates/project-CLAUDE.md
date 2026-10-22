@@ -28,6 +28,10 @@ though a human reading the file would say it obviously does.
   the contract: the tick never edits it to make it pass. Nothing to fill in here; this
   mechanism is the same for every project.
 
+- **Work items live on the board** (GitHub Projects; cards are repo issues).
+  `docs/board.md` is the how-to — filing a card, reading one, moving one, the body shape
+  — from the watcher's `templates/board.md`. Read it before filing a card; never work the
+  mechanics out from other cards.
 - **Reading the project's own data.** <How is a tick allowed to look at what the card is
   about — a live page, a meeting, a record, a screenshot? Name the exact mechanism (a
   read-only share-link form, an API a bot token can call, a fixtures directory) and, if

@@ -36,6 +36,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
                           idempotent script — run from the owner's Mac, never by a tick (see below)
     templates/project-CLAUDE.md  the section a project's own CLAUDE.md needs for /watch to run
                           against it, built from what watch.md/triage.md/reviewer.md actually read
+    templates/board.md    the project's docs/board.md: how a card is filed, read and moved, and
+                          the body shape — add-project.sh prints the line that fills it in
     bin/detect.sh         the product detector: a metric, a rolling baseline, fixed bands (see below)
     bin/floor.py          the floor page: what every lane on the box is doing, live and read-only (see below); bin/test-floor.py checks it offline
     bin/browse.py         a real browser for every tick on every project: check / text / shot a page (see "Looking at pages")
@@ -381,7 +383,11 @@ found by failing, card #39, September 28, 2026).
 Then commit and push `projects/<name>.env` (the script writes it but does not push it), and
 paste `templates/project-CLAUDE.md`'s section into the project's own `CLAUDE.md` — it is
 built from what `/watch`, `/triage` and the reviewer actually read out of a project's
-`CLAUDE.md`, with a blank for each one. Finally: `deploy/install.sh <name>` (clones the repo,
+`CLAUDE.md`, with a blank for each one. Give the project a `docs/board.md` from
+`templates/board.md` — the script's closing lines print the `sed` that fills in the repo,
+the board's owner and its number — so a session told "file a card" or "take a look at #n"
+has the commands and the body shape in front of it instead of working them out from other
+cards. Finally: `deploy/install.sh <name>` (clones the repo,
 runs `bin/doctor.sh` — the same read-only check, confirming the board reads, Status/Stage/
 Priority are there, the labels exist, Auto-add is on, and the project's `CLAUDE.md` names a
 required check that `main` actually requires — and tells you if something above is still

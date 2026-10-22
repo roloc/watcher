@@ -157,6 +157,19 @@ check "missing one option: keeps every existing stage, by id" called '{id: "a", 
 check "missing one option: and appends the missing one, with no id of its own" called '{name: "Parked", color: RED, description: ""}'
 check "missing one option: Priority gets no graphql call for its own sake" [ "$(grep -c graphql "$CALLS")" = 1 ]
 
+# 5b. The closing Next list hands over templates/board.md, filled with the values this
+#     run resolved — and the placeholders that sed fills are the ones the template carries,
+#     so an edit to either side alone fails here, not on a forker's first project.
+check "next steps: name the project's docs/board.md"       out_has "docs/board.md"
+check "next steps: the sed fills the repo, owner and number" out_has "s|<owner/repo>|roloc/testproj|g' -e 's|<board owner>|roloc|g' -e 's|<board number>|42|g' templates/board.md"
+for ph in '<owner/repo>' '<board owner>' '<board number>' '<owner login>'; do
+  check "templates/board.md carries the placeholder $ph" grep -qF -- "$ph" "$HERE/../templates/board.md"
+done
+# A forker fills in their own board; the only roloc the template may name is the upstream
+# watcher repo itself (a card link), never a board or a login as the filled-in default.
+no_owner_default() { ! grep -E 'roloc|Needs @[a-z]' "$HERE/../templates/board.md" | grep -vqE 'roloc/watcher'; }
+check "templates/board.md names nobody's board or login as a default" no_owner_default
+
 # 6. BOT_LOGIN unset (card #157): a forker who has not made a bot account yet gets one
 #    clear line, never a query against riffmap-bot (an account that is not theirs).
 project_list '{"projects":[{"title":"testproj","number":42}]}'

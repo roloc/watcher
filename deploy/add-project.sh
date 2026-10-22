@@ -320,4 +320,9 @@ Next:
   - In the project's own CLAUDE.md: paste templates/project-CLAUDE.md and fill it in. A
     project with a screen only has to say where its pages are and how to serve a branch;
     the browser itself (bin/browse.py) comes with the box.
+  - The project's docs/board.md — how a card is filed, read and moved, so a session told
+    "file a card" never has to work it out from other cards. templates/board.md filled in:
+      sed -e 's|<owner/repo>|$REPO|g' -e 's|<board owner>|$BOARD_OWNER|g' -e 's|<board number>|$BOARD_NUMBER|g' templates/board.md > <project checkout>/docs/board.md
+    then replace <owner login> with the GitHub login that answers Stuck cards, and read
+    the rest for anything untrue of this project.
 EOF

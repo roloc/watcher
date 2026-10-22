@@ -2,7 +2,8 @@
 
 The board is GitHub Projects <https://github.com/users/roloc/projects/2> (board number 2,
 owner `roloc`); every card is an issue in `roloc/watcher`. This is the one page for the
-mechanics, in the shape of riffmap's and azeroth-rewind's `docs/board.md`, so a session
+mechanics — `templates/board.md` filled in for this board, the same page every project
+on the watcher gets — so a session
 told "file a card" or "take a look at #n" knows what to run without going to look. The
 owner watches the board, Discord and the floor page, not chat, so anything that needs them
 is a card here.
