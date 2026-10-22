@@ -167,7 +167,7 @@ for ph in '<owner/repo>' '<board owner>' '<board number>' '<owner login>'; do
 done
 # A forker fills in their own board; the only roloc the template may name is the upstream
 # watcher repo itself (a card link), never a board or a login as the filled-in default.
-no_owner_default() { ! grep -E 'roloc|Needs @[a-z]' "$HERE/../templates/board.md" | grep -vqE 'roloc/watcher'; }
+no_owner_default() { ! grep -oE 'roloc/[A-Za-z0-9_.-]+|Needs @[a-z]' "$HERE/../templates/board.md" | grep -vqE '^roloc/watcher$'; }
 check "templates/board.md names nobody's board or login as a default" no_owner_default
 
 # 6. BOT_LOGIN unset (card #157): a forker who has not made a bot account yet gets one

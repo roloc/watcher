@@ -5,7 +5,7 @@ body shape its cards use. Copy it to the project's docs/board.md and fill in eve
 (<owner/repo>, <board owner>, <board number>); <owner login> is the GitHub login of the
 person who answers a Stuck card. Delete a sentence only when it is untrue for the project
 (most are not). This repo's own docs/board.md is this file filled in for the watcher's own
-board; riffmap's and azeroth-rewind's docs/board.md are the longer originals it came from.
+board — the worked example to read beside it.
 
 Why this page exists: a session told "file a card" or "take a look at #n" with no page to
 open goes and inspects other cards to work out the mechanics, every time. The page is the
