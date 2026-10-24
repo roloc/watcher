@@ -278,7 +278,7 @@ nobody moving it by hand. That move needs the repo secret `BOARD_TOKEN`, a class
 of the owner's with the `project` and `repo` scopes (the shape the move was tested with; a
 fine-grained token may not reach a user-owned board), set with `gh secret set BOARD_TOKEN
 -R roloc/watcher`; without it the card still arrives, in **Backlog** through Auto-add,
-and the run log carries a warning saying so. With a token that no longer works the run
+and the run goes red. The sweep also checks the token itself, so a missing or dead `BOARD_TOKEN` is a finding in the report — the one finding the card cannot deliver to Ready. With a token that no longer works the run
 goes red after filing the card, and that card needs moving by hand once: the red run is
 the signal to mint a new token. While a hygiene card is
 open the next sweep comments the fresh list on it instead of filing a second one. The

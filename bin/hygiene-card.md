@@ -13,6 +13,11 @@ a TODO with a card behind it names that card (`#n`) on its line. Then the sweep 
 listing it, and the link is the answer. Do not refactor anything the sweep did not name —
 the reviewer blocks a diff that reaches past the list.
 
+**A `Board token` section is Steve's, not yours.** It means the `BOARD_TOKEN` secret the
+workflow moves this card with is missing or dead, and re-setting a repo secret is his.
+Clear every other section, say in your Done comment that the token section remains, and
+when it is the only one left park the card in **Stuck - Needs help** with that ask on it.
+
 Branch deletions are not part of a PR and the reviewer cannot see them in one: delete with
 `gh api -X DELETE repos/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/git/refs/heads/<branch>`
 and list every branch you deleted in one comment on this card.
