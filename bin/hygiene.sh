@@ -221,10 +221,10 @@ if [ "$REMOTE" = 1 ] && [ -n "${BOARD_NUMBER:-}" ]; then
   token_why="Not a gate: the sweep still files its card, it just cannot move it. Re-set the secret — \`gh secret set BOARD_TOKEN -R ${REPO:-roloc/watcher}\` (README, \"The weekly hygiene card\")."
   if [ -z "${BOARD_TOKEN:-}" ]; then
     section "Board token" "$token_why" \
-      "\`BOARD_TOKEN\` is not set — this card landed in Backlog, not Ready"
+      "\`BOARD_TOKEN\` is not set — the card this sweep files cannot be moved to Ready"
   elif ! GH_TOKEN="$BOARD_TOKEN" gh project view "$BOARD_NUMBER" --owner "${BOARD_OWNER:-roloc}" --format json >/dev/null 2>&1; then
     section "Board token" "$token_why" \
-      "\`BOARD_TOKEN\` cannot read board #$BOARD_NUMBER (expired, revoked, or missing the \`project\` scope) — this card landed in Backlog, not Ready"
+      "\`BOARD_TOKEN\` cannot read board $BOARD_NUMBER (expired, revoked, or missing the \`project\` scope) — the card this sweep files cannot be moved to Ready"
   fi
 fi
 

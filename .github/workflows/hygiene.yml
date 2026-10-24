@@ -7,7 +7,7 @@ name: Hygiene sweep
 # queue (`READY_PULL=1` in `projects/watcher.env`) — so the next idle tick clears it like
 # any other card, with nobody moving it. That move needs the `BOARD_TOKEN` secret (below);
 # without it, or with a dead one, the card still arrives — in Backlog — and the
-# sweep itself reports the token as a finding on that card.
+# sweep itself reports the token as a finding on that card; the run goes red either way.
 # Mechanical checks only, on purpose: a judgment finding is a card somebody
 # files with evidence, not a weekly pass. README, "The weekly hygiene card", is the
 # contract. Same shape as riffmap's (https://github.com/roloc/riffmap/pull/711) and
@@ -81,8 +81,8 @@ jobs:
           echo "Filed $url"
 
           if [ -z "$BOARD_TOKEN" ]; then
-            echo "::warning::BOARD_TOKEN is not set — $url waits in Backlog until someone moves it to Ready"
-            exit 0
+            echo "::error::BOARD_TOKEN is not set — $url waits in Backlog until someone moves it to Ready; its Board token section says how to fix this"
+            exit 1
           fi
           export GH_TOKEN="$BOARD_TOKEN"
           # item-add returns the existing item when the board's Auto-add got there first.
