@@ -3,9 +3,11 @@ name: Hygiene sweep
 # The weekly debt sweep. `bin/hygiene.sh` looks for what accumulates *between* PRs —
 # abandoned branches, skipped cases, old TODOs, orphan scripts, dead doc links, stale
 # paths in the tick-loaded docs — and this files one card with the report when it finds
-# any, or files nothing when the repo is clean. The card lands in Backlog through the
-# board's Auto-add; Steve moves it to Ready and the watcher's own lane clears it like any
-# other card. Mechanical checks only, on purpose: a judgment finding is a card somebody
+# any, or files nothing when the repo is clean. The card lands in **Ready** — the lane's
+# queue (`READY_PULL=1` in `projects/watcher.env`) — so the next idle tick clears it like
+# any other card, with nobody moving it. That move needs the `BOARD_TOKEN` secret (below);
+# without it the card still arrives, in Backlog, and the run log says so.
+# Mechanical checks only, on purpose: a judgment finding is a card somebody
 # files with evidence, not a weekly pass. README, "The weekly hygiene card", is the
 # contract. Same shape as riffmap's (https://github.com/roloc/riffmap/pull/711) and
 # riffmap-site's (https://github.com/roloc/riffmap-site/pull/54).
@@ -49,10 +51,17 @@ jobs:
           cat report.md
           if [ "$status" -eq 2 ]; then echo "::error::hygiene.sh could not run"; exit 2; fi
 
-      - name: File the card, or refresh the open one
+      - name: File the card in Ready, or refresh the open one
         if: steps.sweep.outputs.status == '1'
         env:
           GH_TOKEN: ${{ github.token }}
+          # The job's own token cannot write to a user-owned project. BOARD_TOKEN is a
+          # classic PAT of the owner's with the `project` and `repo` scopes (the shape the
+          # move was tested with; a fine-grained token may not reach a user's board).
+          # `gh secret set BOARD_TOKEN -R roloc/watcher` — README, "The weekly hygiene card".
+          BOARD_TOKEN: ${{ secrets.BOARD_TOKEN }}
+          BOARD_OWNER: roloc
+          BOARD_NUMBER: '2'
         run: |
           set -euo pipefail
           repo="${{ github.repository }}"
@@ -66,4 +75,29 @@ jobs:
           fi
           cat bin/hygiene-card.md report.md > body.md
           url="$(gh issue create --repo "$repo" --title "Weekly hygiene sweep — $today" --body-file body.md)"
-          echo "Filed $url — the board's Auto-add puts it in Backlog"
+          echo "Filed $url"
+
+          if [ -z "$BOARD_TOKEN" ]; then
+            echo "::warning::BOARD_TOKEN is not set — $url waits in Backlog until someone moves it to Ready"
+            exit 0
+          fi
+          export GH_TOKEN="$BOARD_TOKEN"
+          # item-add returns the existing item when the board's Auto-add got there first.
+          item="$(gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" --format json --jq .id)"
+          project="$(gh project view "$BOARD_NUMBER" --owner "$BOARD_OWNER" --format json --jq .id)"
+          read -r field option < <(gh project field-list "$BOARD_NUMBER" --owner "$BOARD_OWNER" --format json \
+            --jq '.fields[] | select(.name == "Status") | "\(.id) \(.options[] | select(.name == "Ready") | .id)"') \
+            || { echo "::error::the board has no Status field with a Ready option"; exit 1; }
+          status_of() {
+            gh api graphql -f id="$item" -f query='query($id: ID!) { node(id: $id) { ... on ProjectV2Item {
+              fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
+              --jq '.data.node.fieldValueByName.name // ""'
+          }
+          # The board's own "item added → Backlog" automation runs asynchronously and can land
+          # after this write, so set Ready, give it a moment, and set it again if it reverted.
+          for _ in 1 2 3; do
+            gh project item-edit --project-id "$project" --id "$item" --field-id "$field" --single-select-option-id "$option" >/dev/null
+            sleep 20
+            if [ "$(status_of)" = "Ready" ]; then echo "$url is in Ready — the lane picks it up when idle"; exit 0; fi
+          done
+          echo "::error::$url did not stay in Ready — it is in '$(status_of)'"; exit 1
