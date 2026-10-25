@@ -50,7 +50,7 @@ Labels and fields the bots read:
   needs a live, paid model run is the one that still goes to Stuck. `reviewer` produces a
   verdict on somebody else's change rather than an artifact of its own, so the tick routes
   that one to Stuck for a human.
-- **`steve-decision`** — a product decision, or a step only the owner can take. The tick
+- **`owner-decision`** — a product decision, or a step only the owner can take. The tick
   never does these; straight to Stuck — until the owner's own comment says their part is
   done or asks for work. From then on it is ordinary work for the labeled lane: the tick
   removes the label and says so in one FYI line (`commands/watch.md` §4). Their newest

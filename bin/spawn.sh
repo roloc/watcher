@@ -637,7 +637,7 @@ ready_pull_allowed() {
 # --- section 1, step 3: the pick ---------------------------------------------------------
 # First row whose flags do not include in-flight, whose attempts/<n> is below 2, and that
 # GitHub does not say is blocked by an open issue. Rows are already P0-first (board.py).
-# blocked/steve-decision are NOT filtered here — the tick's own contract parks those in
+# blocked/owner-decision are NOT filtered here — the tick's own contract parks those in
 # Stuck on its first turn (one source of truth for routing lives in watch.md, not here).
 pick_card() {
   ISSUE=""; PRIORITY=""; AGENT=""; TITLE=""

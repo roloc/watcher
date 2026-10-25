@@ -377,7 +377,7 @@ the caller can read, so it does not have to be a GitHub "template" (that flag is
 organization-only anyway). The script checks each step before doing it, so running it again
 after fixing something is the normal way to finish a partial run — it prints "unchanged"
 for everything already in place. It copies the board, links the repo, creates the `in-
-flight` / `blocked` / `steve-decision` labels, sets `main`'s branch protection (the named
+flight` / `blocked` / `owner-decision` labels, sets `main`'s branch protection (the named
 check required, PR required, 0 approvals, admins not enforced), and writes
 `projects/<name>.env`. Two things it cannot do for you — GitHub gives no API for either —
 it prints as an ask-first checklist and waits for a yes: granting the bot account

@@ -604,7 +604,7 @@ def cmd_list(status="In progress"):
     rows = [i for i in items() if i["status"] == status and i["state"] == "OPEN"]
     rows.sort(key=lambda r: (PRI_ORDER.get(r["priority"], 3), r["number"]))
     for r in rows:
-        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "steve-decision", "awaiting-rebuild"})) or "-"
+        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "owner-decision", "awaiting-rebuild"})) or "-"
         print(f"{r['number']}\t{r['priority'] or '-'}\t{agent_of(r['labels']) or '-'}\t{flags}\t"
               f"{r['stage'] or '-'}\t{r['title']}")
     return 0
@@ -893,7 +893,7 @@ def cmd_queue():
             and i["status"] not in ("In progress", "Done", "Stuck - Needs help")]
     rows.sort(key=lambda r: (PRI_ORDER.get(r["priority"], 3), r["number"]))
     for r in rows:
-        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "steve-decision", "awaiting-rebuild"})) or "-"
+        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "owner-decision", "awaiting-rebuild"})) or "-"
         print(f"{r['number']}\t{r['priority'] or '-'}\t{agent_of(r['labels']) or '-'}\t{flags}\t"
               f"{r['stage'] or '-'}\t{r['title']}")
     return 0

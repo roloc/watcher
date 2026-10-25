@@ -26,7 +26,7 @@ gh issue view <n> -R roloc/watcher --json title,state,labels,body,comments,proje
   board; see "Filing".
 - **A Stuck card's question** is its newest `Needs @roloc:` comment. `python3 bin/board.py
   ask <n>` prints that one line, `images <n>` the pictures under its `Look:` section. The
-  owner answers by replying on the card and moving it back to In progress; a `steve-decision`
+  owner answers by replying on the card and moving it back to In progress; an `owner-decision`
   card ends when the owner's part is done.
 - **What the lane is doing with it** is the floor page (port 8787 on the box), not the
   card: a desk per lane, and Peek for the tick's own session. `in-flight` on the card means
@@ -88,7 +88,7 @@ card. The labels that mean something:
 
 | label | meaning |
 |---|---|
-| `steve-decision` | a product decision for the owner, never a tick's; the card asks, lettered options, and ends when they answer |
+| `owner-decision` | a product decision for the owner, never a tick's; the card asks, lettered options, and ends when they answer |
 | `blocked` | straight to Stuck |
 | `deploy-anyway` | on a "Deploy held" card: ship that version anyway |
 | `in-flight` | a tick holds the card right now — the lane's own, never set by hand |
