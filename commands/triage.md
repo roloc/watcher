@@ -48,7 +48,7 @@ carries the short table. Read those, then pick the ONE agent whose remit the car
   the owner's" is not one of them: a tick that believes that still labels the lane whose
   words it would take (the general builder when nothing fits better) and lets that lane's
   `/watch` say so properly in Stuck, with a real access fact — the exact command it tried
-  and the exact denial (`watch.md` §4). A `steve-decision` label does not change the
+  and the exact denial (`watch.md` §4). An `owner-decision` label does not change the
   route: once the owner's own comment says their part is done or asks for work, the card
   is ordinary work for the lane you label (`watch.md` §4 is where the label comes off).
   (riffmap [#778](https://github.com/roloc/riffmap/issues/778), October 17, 2026: the

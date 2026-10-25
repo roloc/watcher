@@ -106,7 +106,7 @@ fi
 if LABELS_JSON="$($WATCHER_GH label list --repo "$PROJECT_REPO" --json name --limit 200 2>"$ERR")"; then
   if ! python3 - "$LABELS_JSON" "$PROJECT_REPO" <<'PY' >&2
 import json, sys
-required = ["in-flight", "blocked", "steve-decision"]
+required = ["in-flight", "blocked", "owner-decision"]
 have = {l["name"] for l in json.loads(sys.argv[1])}
 missing = [l for l in required if l not in have]
 if missing:

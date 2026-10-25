@@ -692,7 +692,7 @@ board stage <n> Parked
 gh issue edit <n> --remove-label in-flight
 ```
 
-Go to Stuck when: the card needs a product decision; it is `steve-decision` and the
+Go to Stuck when: the card needs a product decision; it is `owner-decision` and the
 owner's own comment has not yet said their part is done or asked for work (below); its
 `agent:` label is `reviewer`, whose deliverable is a verdict on somebody else's change rather than
 an artifact of its own — route those by hand; the card carries `blocked`; **`reviewer` or
@@ -702,7 +702,7 @@ says is not a builder's call; the required CI check fails twice for a reason you
 explain; **the change is built and merged and the card's symptom survives** (§3); or you
 have tried the same failing thing twice.
 
-**`steve-decision` means Stuck until the owner's own comment says their part is done or
+**`owner-decision` means Stuck until the owner's own comment says their part is done or
 asks for work.** From that comment on, the card is ordinary work for the labeled lane,
 and the step the body gave the owner is finished whatever the body still says: their
 newest comment is the ask, and the body's Verification, Owner or Progress sections are
@@ -710,8 +710,8 @@ what the card used to be. Take the label off and say so in one FYI line, which s
 theirs you read it from — or say in one line why it stays:
 
 ```
-gh issue edit <n> --remove-label steve-decision
-gh issue comment <n> --body "🤖 FYI: your part is done — you said '<their sentence>' — so this is the <lane> lane's now; the steve-decision label is off."
+gh issue edit <n> --remove-label owner-decision
+gh issue comment <n> --body "🤖 FYI: your part is done — you said '<their sentence>' — so this is the <lane> lane's now; the owner-decision label is off."
 ```
 
 Parking the card on them again for the step their comment says is done is the loop

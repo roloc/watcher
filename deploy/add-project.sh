@@ -230,8 +230,8 @@ $WATCHER_GH label create in-flight --repo "$REPO" --color fef2c0 \
   --description "A tick is working this card right now" --force >/dev/null
 $WATCHER_GH label create blocked --repo "$REPO" --color 000000 \
   --description "Straight to Stuck" --force >/dev/null
-$WATCHER_GH label create steve-decision --repo "$REPO" --color d4c5f9 \
-  --description "A product decision: Steve's, never a tick's" --force >/dev/null
+$WATCHER_GH label create owner-decision --repo "$REPO" --color d4c5f9 \
+  --description "A product decision: the owner's, never a tick's" --force >/dev/null
 # Not in doctor.sh's required list (card #85): most projects never need it, and a missing
 # optional label must never block every lane from starting. Created here anyway so the
 # first tick that DOES hit watch.md §3's awaiting-rebuild exit (a merged fix gated on a
@@ -239,7 +239,7 @@ $WATCHER_GH label create steve-decision --repo "$REPO" --color d4c5f9 \
 # a label that was never created.
 $WATCHER_GH label create awaiting-rebuild --repo "$REPO" --color c5def5 \
   --description "Fix merged; waiting on a known downstream rebuild (watch.md §3)" --force >/dev/null
-echo "  in-flight, blocked, steve-decision, awaiting-rebuild: ensured on $REPO"
+echo "  in-flight, blocked, owner-decision, awaiting-rebuild: ensured on $REPO"
 
 # --- main's branch protection --------------------------------------------------------------
 say "branch protection on main"

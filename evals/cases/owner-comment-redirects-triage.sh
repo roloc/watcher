@@ -1,4 +1,4 @@
-# riffmap#778 (October 17, 2026): a steve-decision card — the owner mints a mail app
+# riffmap#778 (October 17, 2026): an owner-decision card — the owner mints a mail app
 # password and pushes five env lines to the box — whose body gave him the last step too
 # ("Verification: only you can open the admin page and read your inbox"). He did his part,
 # the live send failed with a 535, and he wrote "please just send a test mail with the
@@ -81,9 +81,9 @@ EOF
 import json, sys
 path = sys.argv[1]
 d = json.load(open(path))
-d["labels"] = ["agent: builder", "steve-decision", "blocked", "in-flight", "bug"]
+d["labels"] = ["agent: builder", "owner-decision", "blocked", "in-flight", "bug"]
 it = d["issues"]["100"]
-it["labels"] = ["steve-decision"]
+it["labels"] = ["owner-decision"]
 it["comments"] = [
     "🤖 **Needs @fixture-owner: run the live check**\n\n"
     "- Card: move the box's mail to a Gmail app password\n"

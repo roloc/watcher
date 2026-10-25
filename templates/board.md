@@ -40,7 +40,7 @@ gh issue view <n> -R <owner/repo> --json title,state,labels,body,comments,projec
 - **A Stuck card's question** is its newest `Needs @<owner login>:` comment.
   `python3 "$WATCHER_HOME/bin/board.py" ask <n>` prints that one line, `images <n>` the
   pictures under its `Look:` section. The owner answers by replying on the card and
-  moving it back to In progress; a `steve-decision` card ends when the owner's part is
+  moving it back to In progress; an `owner-decision` card ends when the owner's part is
   done.
 - **What the lane is doing with it** is the floor page (port 8787 on the watcher box),
   not the card: a desk per lane, and Peek for the tick's own session. `in-flight` on the
@@ -104,7 +104,7 @@ verified. A 422 means it is already recorded. Never remove one somebody else set
 | label | meaning |
 |---|---|
 | `agent: <role>` | <which lane works the card — one label per lane in `projects/<name>-<lane>.env`'s `LANE_AGENTS`; delete this row when the project has one lane that takes every card.> Leaving it off is fine: the triage lane reads an unlabeled card and adds the one its words call for |
-| `steve-decision` | a product decision for the owner, never a tick's; the card asks, lettered options, and ends when they answer |
+| `owner-decision` | a product decision for the owner, never a tick's; the card asks, lettered options, and ends when they answer |
 | `blocked` | straight to Stuck |
 | `awaiting-rebuild` | fix merged, waiting on a known downstream rebuild; set by a tick, never by hand |
 | `in-flight` | a tick holds the card right now — the lane's own, never set by hand |

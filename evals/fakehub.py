@@ -590,7 +590,7 @@ def board_list(argv):
     rows = [i for i in d["issues"].values() if i["status"] == status and i["state"] == "OPEN"]
     rows.sort(key=lambda r: (PRI_ORDER.get(r["priority"], 3), r["number"]))
     for r in rows:
-        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "steve-decision"})) or "-"
+        flags = ",".join(sorted(set(r["labels"]) & {"in-flight", "blocked", "owner-decision"})) or "-"
         agent = next((l.split(": ", 1)[1] for l in r["labels"] if l.startswith("agent: ")), "-")
         print(f"{r['number']}\t{r['priority']}\t{agent}\t{flags}\t{r['stage']}\t{r['title']}")
 
