@@ -780,7 +780,11 @@ holding its claim.
 on a phone between meetings. They need the ask on the first line, bullets, one question, and
 lettered options they can answer with a single letter. Write the comment to a file under
 `$scratch` (§1; a long body, or one with backticks, pipes, braces or a literal `$`, is
-refused on `--body "…"`) in exactly this shape:
+refused on `--body "…"`) in exactly this shape — **except the access-fact ask (§2): that one
+carries no Question and no lettered options, only the single action line §2 already
+describes.** A second, invented option there is the failure mode this exception exists to
+rule out — "paste the summary yourself" is still asking for a summary from memory, however
+it's lettered (watcher eval case `login-wall-build-nothing`).
 
 ```
 🤖 **Needs @<login>: <one sentence saying what you need decided>**
@@ -822,6 +826,7 @@ The rules behind the shape (full version in `talking-to-the-owner.md`):
   "needs input".
 - **At most 8 bullets above the fold**, one fact each, about 15 words each.
 - **Exactly one question**, ending in `?`. Recommended option first, marked `(recommended)`.
+  An access-fact ask (§2) has none of this — no Question, no options, just the one action.
 - **No paths, commands, code, or unexpanded acronyms above the fold.** Say "the build",
   not the check's name. Everything an engineer wants goes under `<details>`.
   **Including the project's own names for what is on a screen** — describe what the owner
