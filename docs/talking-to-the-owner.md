@@ -26,8 +26,15 @@ comment, a log line). Those can be as dense as they need to be.
    for 15 words or fewer per bullet.
 3. **Exactly one question**, written as a question and ending in `?`. Never two questions.
    If you have two, pick the one that unblocks the most and put the other under details.
+   **An access fact isn't a question at all** — "I could not reach X, here is the one way
+   in" is a statement, not a judgment call, so rules 3 and 4 do not apply to it: no Question
+   line, no lettered options, just the one action (`/watch` §2, "Ask for exactly that").
+   A second, invented option there — "or just paste a summary yourself" — is asking for a
+   summary from memory with a letter in front of it, which is still the thing this rule
+   exists to stop.
 4. **Lettered options, one line each.** `A.`, `B.`, `C.`. Put your recommendation **first**
-   and mark it `(recommended)`. Three options is plenty. Two is fine.
+   and mark it `(recommended)`. Three options is plenty. Two is fine. (Not for an access
+   fact — see rule 3.)
 5. **Say how to answer.** Always end with the exact action: *"Reply A, B or C on this card,
    or say which way you lean, then move it back to In progress."*
 6. **Reading a reply.** A letter, or a stated preference in any words ("leaning A", "A and
@@ -71,11 +78,16 @@ comment, a log line). Those can be as dense as they need to be.
 
 A good test: could the owner answer with a single letter, from the first screen, without
 opening the details? If the answer needs them to look at something, is the link to it on
-that first screen? If not, rewrite.
+that first screen? If not, rewrite. (An access fact, rule 3, has no letter to answer with —
+the test there is whether the one action is clear enough to just do.)
 
 ## Templates
 
 ### A Stuck card comment (the tick)
+
+The shape below is for a question — a product decision, a judgment call. An access-fact ask
+(rule 3) is not this template with blanks filled in: it drops the `**Look:**` list down to
+the one action line, with no `**Question:**` block and no lettered options after it.
 
 ```
 🤖 **Needs @<login>: <one sentence saying what you need decided>**
