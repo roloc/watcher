@@ -82,8 +82,35 @@ canary_clone() {
   return 1
 }
 
+# hygiene_opts_in <project-env-file> — true if that project should get a
+# watcher-hygiene@<name>.timer (card #196): HYGIENE=1 in its own env, or shipping a
+# hygiene.sh on its own origin/main (bin/ or scripts/). Probed against origin/main's own
+# tree, never PROJECT_ROOT's checked-out working copy: that checkout can sit on an old
+# commit, or detached off main entirely (a lane mid-build, or simply never fetched since
+# this box was set up), and the working tree is then not evidence of what the repo ships
+# on main. `cat-file -e <rev>:<path>` reads a blob's existence straight out of the object
+# store, no checkout required, and a fetch first makes sure that ref itself is not stale.
+# As the watcher user, like every other git call on a watcher-owned checkout in this file
+# (the pull above, canary_clone): this script runs as root, and root's own git refuses a
+# repo it does not own ("detected dubious ownership") — every PROJECT_ROOT on the box is
+# watcher's. A function, not inline in the loop below, so bin/test-install-hygiene.sh can
+# call it directly with INSTALL_LIB_ONLY=1, the same way bin/test-deploy.sh already does
+# for canary_clone.
+hygiene_opts_in() {
+  local f="$1"
+  unset PROJECT_ROOT HYGIENE
+  # shellcheck disable=SC1090
+  . "$f"
+  [ "${HYGIENE:-0}" = 1 ] && return 0
+  [ -n "${PROJECT_ROOT:-}" ] && [ -e "$PROJECT_ROOT/.git" ] || return 1
+  su - watcher -c "git -C '$PROJECT_ROOT' fetch -q origin main 2>/dev/null; \
+       git -C '$PROJECT_ROOT' cat-file -e origin/main:bin/hygiene.sh 2>/dev/null \
+       || git -C '$PROJECT_ROOT' cat-file -e origin/main:scripts/hygiene.sh 2>/dev/null"
+}
+
 # bin/test-deploy.sh sources this file with INSTALL_LIB_ONLY=1 to call canary_clone directly,
 # with no root, no watcher user and no network — stopping here is what makes that possible.
+# bin/test-install-hygiene.sh does the same to call hygiene_opts_in.
 if [ "${INSTALL_LIB_ONLY:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
 id watcher >/dev/null 2>&1 || useradd -m -s /bin/bash watcher
@@ -205,20 +232,7 @@ for f in "$WATCHER_DIR"/projects/*.env; do
   case "$f" in *.detect.env) continue ;; esac
   p="$(basename "$f" .env)"
   case "$p" in *-design|*-triage) continue ;; esac
-  unset PROJECT_ROOT HYGIENE
-  # shellcheck disable=SC1090
-  . "$f"
-  # Probed against origin/main's own tree, never PROJECT_ROOT's checked-out working
-  # copy: that checkout can sit on an old commit, or detached off main entirely (a lane
-  # mid-build, or simply never fetched since this box was set up), and the working tree
-  # is then not evidence of what the repo ships on main. `cat-file -e <rev>:<path>` reads
-  # a blob's existence straight out of the object store, no checkout required, and a
-  # fetch first makes sure that ref itself is not stale.
-  if [ "${HYGIENE:-0}" = 1 ] \
-     || { [ -n "${PROJECT_ROOT:-}" ] && [ -d "$PROJECT_ROOT/.git" ] \
-          && { git -C "$PROJECT_ROOT" fetch -q origin main 2>/dev/null; true; } \
-          && { git -C "$PROJECT_ROOT" cat-file -e origin/main:bin/hygiene.sh 2>/dev/null \
-               || git -C "$PROJECT_ROOT" cat-file -e origin/main:scripts/hygiene.sh 2>/dev/null; }; }; then
+  if hygiene_opts_in "$f"; then
     systemctl is-enabled --quiet "watcher-hygiene@$p.timer" 2>/dev/null \
       || systemctl enable --now "watcher-hygiene@$p.timer" >/dev/null 2>&1 \
       || echo "warning: could not enable watcher-hygiene@$p.timer" >&2

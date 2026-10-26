@@ -127,8 +127,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   else, delete a branch with `gh api -X DELETE …/git/refs/heads/<branch>` and list it in a
   comment, and "done" is `bin/hygiene.sh` exiting 0 on `main` (by hand, that needs
   `GITHUB_REPOSITORY` exported, or `--no-remote`). `bash bin/test-hygiene-run.sh` is
-  `hygiene-run.sh`'s offline suite (CI runs it); run it after touching that file. README,
-  "The weekly hygiene card".
+  `hygiene-run.sh`'s offline suite and `bash bin/test-install-hygiene.sh` covers
+  `deploy/install.sh`'s own opt-in logic (`hygiene_opts_in`) — CI runs both; run them
+  after touching either file. README, "The weekly hygiene card".
 
 ## Rules for editing this repo
 

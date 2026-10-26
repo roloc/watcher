@@ -48,6 +48,7 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
     bin/test-detect.sh    the detector's cases, offline, every external command stubbed
     bin/test-hygiene-run.sh  bin/hygiene-run.sh's cases, offline, real git, gh/board stubbed
+    bin/test-install-hygiene.sh  deploy/install.sh's hygiene opt-in logic, offline, real git
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
