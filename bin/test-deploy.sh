@@ -773,12 +773,22 @@ cat > "$BBIN/npm" <<EOF
 echo "npm \$*" >> "$CALLS"
 case "\$1" in i|install) printf '#!/usr/bin/env bash\necho fake-claude\n' > "$BBIN/claude"; chmod +x "$BBIN/claude" ;; esac
 EOF
-chmod +x "$BBIN/id" "$BBIN/apt-get" "$BBIN/curl" "$BBIN/dpkg" "$BBIN/npm"
+cat > "$BBIN/unzip" <<EOF
+#!/usr/bin/env bash
+echo "unzip \$*" >> "$CALLS"
+dest=""; prev=""
+for a in "\$@"; do [ "\$prev" = -d ] && dest="\$a"; prev="\$a"; done
+# bootstrap.sh unpacks the pinned Godot and then install(1)s the binary it expects by
+# name — stand one up (the pin lives in bootstrap.sh; bump both together).
+[ -n "\$dest" ] && { printf '#!/usr/bin/env bash\n' > "\$dest/Godot_v4.7.2-stable_linux.x86_64"; chmod +x "\$dest/Godot_v4.7.2-stable_linux.x86_64"; }
+EOF
+chmod +x "$BBIN/id" "$BBIN/apt-get" "$BBIN/curl" "$BBIN/dpkg" "$BBIN/npm" "$BBIN/unzip"
 
 bootstrap_run() {
   : > "$CALLS"
   BOOTSTRAP_TEST_UID="${1:-0}" PATH="$BBIN" APT_KEYRING_DIR="$TMP/apt-keyrings" \
-    APT_SOURCES_DIR="$TMP/apt-sources" bash "$BOOTSTRAP" > "$TMP/bout" 2>&1
+    APT_SOURCES_DIR="$TMP/apt-sources" GODOT_INSTALL_DIR="$TMP/godot-local" \
+    bash "$BOOTSTRAP" > "$TMP/bout" 2>&1
   echo $? > "$TMP/brc"
 }
 bout_has()  { grep -q -- "$1" "$TMP/bout"; }
@@ -802,11 +812,18 @@ check "bootstrap: installs the CLI with npm -g"              bash -c 'grep -q "n
 check "bootstrap: the gh keyring and apt source land under the overridden dirs, never /etc" \
       bash -c '[ -f "'"$TMP"'/apt-keyrings/githubcli-archive-keyring.gpg" ] && [ -f "'"$TMP"'/apt-sources/github-cli.list" ]'
 check "bootstrap: ends by pointing at install.sh"            bout_has "install.sh"
+check "bootstrap: installs xvfb, unzip and Godot's shared libraries in one apt call" \
+      bash -c 'grep -q "apt-get install -y -qq xvfb unzip libfontconfig1" "'"$CALLS"'"'
+check "bootstrap: downloads the pinned Godot from the official release" \
+      bash -c 'grep -q "curl.*godotengine/godot/releases/download/4.7.2-stable" "'"$CALLS"'"'
+check "bootstrap: puts godot4 under the overridden install dir, never /usr/local" \
+      bash -c '[ -x "'"$TMP"'/godot-local/bin/godot4" ]'
 
 bootstrap_run
 check "bootstrap: a second run on the same box exits clean"  brc_is 0
 check "bootstrap: ...finds every tool already there now"     bash -c '
-  for p in git python3 curl chromium gh; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done'
+  for p in git python3 curl chromium gh; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done
+  grep -q "already have godot4" "'"$TMP/bout"'"'
 check "bootstrap: ...and never calls apt-get or npm a second time" bash -c '
   not_called() { ! grep -q -- "$1" "'"$CALLS"'"; }; not_called "apt-get" && not_called "npm i"'
 
