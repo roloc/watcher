@@ -108,18 +108,21 @@ fi
 GODOT_VERSION="${GODOT_VERSION:-4.7.2-stable}"
 GODOT_INSTALL_DIR="${GODOT_INSTALL_DIR:-/usr/local}"
 GODOT_BIN="$GODOT_INSTALL_DIR/bin/godot4"
-if [ -x "$GODOT_BIN" ]; then
+case "$(dpkg --print-architecture)" in
+  arm64) GODOT_ASSET="linux.arm64" ;;
+  *)     GODOT_ASSET="linux.x86_64" ;;
+esac
+GODOT_LIB_DIR="$GODOT_INSTALL_DIR/lib/godot-$GODOT_VERSION"
+# "Already have" is the VERSIONED unpack plus the installed binary — never a bare
+# `godot4` check, which would make a GODOT_VERSION bump a silent no-op (node, above,
+# checks v22 the same way).
+if [ -x "$GODOT_LIB_DIR/Godot_v${GODOT_VERSION}_${GODOT_ASSET}" ] && [ -x "$GODOT_BIN" ]; then
   say "already have godot4"
 else
   apt_update_once
   apt-get install -y -qq xvfb unzip libfontconfig1 libx11-6 libxcursor1 libxinerama1 \
     libxrandr2 libxi6 libgl1 libegl1 libgl1-mesa-dri
   say "installed xvfb, unzip, and Godot's shared libraries"
-  case "$(dpkg --print-architecture)" in
-    arm64) GODOT_ASSET="linux.arm64" ;;
-    *)     GODOT_ASSET="linux.x86_64" ;;
-  esac
-  GODOT_LIB_DIR="$GODOT_INSTALL_DIR/lib/godot-$GODOT_VERSION"
   install -d -m 0755 "$GODOT_LIB_DIR" "$GODOT_INSTALL_DIR/bin"
   # This script's command surface has no mktemp or rm (the offline suite stubs it, same
   # as apt), so the zip lands next to the unpacked binary and stays there — ~60 MB, once
