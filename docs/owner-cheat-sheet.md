@@ -56,7 +56,8 @@ look.
 
 ## The columns
 
-- **Backlog** — yours. The bots never start anything from here. They will **put a card
+- **Backlog** — yours. The bots never start anything from here — bar one card they filed
+  themselves, the weekly hygiene sweep's, which they take once. They will **put a card
   back** here if its own text says not to work it yet (see below).
 - **Ready** — **the bots' queue, since September 19, 2026.** When they have room they take
   the top card here by themselves and start it. Put a card in Ready when you want it done;

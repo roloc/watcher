@@ -94,7 +94,10 @@ when In progress and Waiting are both dry, moving it to In progress before it la
 than per lane, so the loop keeps a fixed number of cards moving and leaves the rest of
 Ready alone. Off by default: starting work nobody handed over is a policy choice, not a
 default. Order is always In progress, then Waiting, then Ready — a card the owner moved by
-hand is never overtaken by one the loop chose. Details in `docs/how-it-works.md`,
+hand is never overtaken by one the loop chose. The one card pulled out of **Backlog** is a
+machine-filed one — the weekly hygiene sweep's, titled `Weekly hygiene sweep — <date>` —
+after Ready, under the same cap, and once: declined back there, it waits for the owner like
+any other card. Details in `docs/how-it-works.md`,
 "Self-pull".
 
 **Stage.** Besides Status, the board carries a single-select `Stage` field (Waiting,
@@ -272,17 +275,12 @@ Debt that lives *between* PRs — an abandoned branch, a skipped case, a TODO no
 script nothing runs, a link to a file that moved — is invisible to CI, which only ever sees
 one PR. `bin/hygiene.sh` sweeps for it; `.github/workflows/hygiene.yml` runs the sweep
 every Monday and files **one** card, `Weekly hygiene sweep — <date>`, with the report as
-its body — or files nothing when the sweep is clean. The workflow then moves the card to
-**Ready** — the lane's queue — so the next idle tick works it like any other card, with
-nobody moving it by hand. That move needs the repo secret `BOARD_TOKEN`, a classic PAT
-of the owner's with the `project` and `repo` scopes (the shape the move was tested with; a
-fine-grained token may not reach a user-owned board), set with `gh secret set BOARD_TOKEN
--R roloc/watcher`; without it the card still arrives, in **Backlog** through Auto-add,
-and the run goes red. The sweep also checks the token itself, so a missing or dead `BOARD_TOKEN` is a finding in the report — the one finding the card cannot deliver to Ready. With a token that no longer works the run
-goes red after filing the card, and that card needs moving by hand once: the red run is
-the signal to mint a new token. While a hygiene card is
-open the next sweep comments the fresh list on it instead of filing a second one. The
-same routine runs on riffmap
+its body — or files nothing when the sweep is clean. Auto-add lands it in **Backlog** and
+the watcher's own lane pulls it from there itself — the one Backlog exception, see
+"Self-pull" above — so the week's debt is paid with nobody moving a card. The job runs
+GitHub-hosted and its token cannot touch the board, which is why the lane does the
+pulling rather than the workflow the moving. While a hygiene card is open the next sweep comments the
+fresh list on it instead of filing a second one. The same routine runs on riffmap
 ([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711)) and riffmap-site
 ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)); the script is
 one script with each repo's paths.

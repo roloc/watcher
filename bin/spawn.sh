@@ -90,6 +90,9 @@
 #   POLL_INTERVAL      daemon poll cadence in SECONDS           (default: 60)
 #   READY_PULL         1 = also pull from the Ready column when nothing
 #                      is claimable in In progress or Waiting   (default: 0, off)
+#                      — and, after Ready, a MACHINE-FILED card out of Backlog, once:
+#                      the weekly hygiene sweep's ("Weekly hygiene sweep — <date>"),
+#                      filed by a GitHub-hosted job whose token cannot move it.
 #   WIP_MAX            with READY_PULL=1, the most cards that may sit In progress
 #                      before this lane stops promoting          (default: 2)
 #   WATCHER_MAX_POLLS  stop the daemon loop after this many polls (tests only)
@@ -354,6 +357,36 @@ check_singleton() {
 # (review, card #65 fold-in) — `2>&1` inside the command substitution used to merge any
 # stray stderr line (a warning, a traceback fragment) straight into the TSV that pick_card
 # parses, silently corrupting a row.
+# Machine-filed cards are the machine's to pull. The weekly hygiene sweep files its card
+# from a GitHub-hosted job (each repo's hygiene.yml) whose token cannot move a project
+# item, so the card lands in Backlog through the board's Auto-add — and Backlog is
+# otherwise never pulled from: it is the owner's, and watch.md §4b parks a self-gated
+# card there on purpose. So the exception is one title prefix, served after Ready under
+# the same WIP cap, and each card is pulled ONCE: a record under MACHINE_PULL_DIR means
+# a card the tick later declined back to Backlog waits there for the owner like any
+# other. The record is BOARD-wide, not per lane — every lane on a board (build, triage,
+# design) shares the directory, and it is written whenever any lane launches such a card
+# from whichever column — so a card a triage lane labeled, or the owner moved by hand,
+# is not pulled out of Backlog by a second lane after a decline. Best-effort like the
+# Ready read — a failed list is "nothing to pull", never a poll failure.
+MACHINE_TITLE_PREFIX="Weekly hygiene sweep"
+MACHINE_PULL_DIR="${WATCHER_STATE_ROOT:-$(dirname "$WATCHER_STATE")}/boards/${BOARD_OWNER:-board}-${BOARD_NUMBER:-0}/pulled-from-backlog"
+is_machine_filed() { # is_machine_filed <title>
+  case "$1" in "$MACHINE_TITLE_PREFIX"*) return 0 ;; esac
+  return 1
+}
+machine_filed_rows() {
+  local rows line n
+  rows="$($WATCHER_BOARD list Backlog 2>/dev/null)" || return 0
+  printf '%s\n' "$rows" | awk -F'\t' -v p="$MACHINE_TITLE_PREFIX" 'index($6, p) == 1' | while IFS= read -r line; do
+    n="${line%%$'\t'*}"
+    [ -n "$n" ] || continue
+    [ -e "$MACHINE_PULL_DIR/$n" ] && continue
+    printf '%s\n' "$line"
+  done
+  return 0
+}
+
 poll_board() {
   local errfile
   errfile="$(mktemp)"
@@ -368,8 +401,10 @@ poll_board() {
     # makes `list` exit 1, which must read as "nothing to pull", never as a poll failure.
     if [ "$READY_PULL" = 1 ]; then
       READY_ROWS="$($WATCHER_BOARD list Ready 2>/dev/null)" || { READY_ROWS=""; log "board.py list Ready failed; not pulling from Ready this poll"; }
+      MACHINE_ROWS="$(machine_filed_rows)"
     else
       READY_ROWS=""
+      MACHINE_ROWS=""
     fi
     return 0
   else
@@ -377,6 +412,7 @@ poll_board() {
     rm -f "$errfile"
     ROWS=""
     READY_ROWS=""
+    MACHINE_ROWS=""
     return 1
   fi
 }
@@ -623,12 +659,12 @@ wip_count() {
 # something to promote: otherwise an empty Ready column plus a full In progress column
 # would log "not pulling from Ready" once a minute, per lane, forever — a line that says
 # the cap is holding work back when nothing is waiting on it.
-ready_pull_allowed() {
+ready_pull_allowed() { # ready_pull_allowed [column] — the column only names the log line
   [ "$READY_PULL" = 1 ] || return 1
-  local wip
+  local wip col="${1:-Ready}"
   wip="$(wip_count)"
   if [ "$wip" -ge "$WIP_MAX" ]; then
-    log "not pulling from Ready: $wip card(s) already In progress, WIP_MAX=$WIP_MAX"
+    log "not pulling from $col: $wip card(s) already In progress, WIP_MAX=$WIP_MAX"
     return 1
   fi
   return 0
@@ -900,6 +936,8 @@ do_dry_run() {
       PROMOTE_FROM="Waiting"
     elif [ -n "${READY_ROWS:-}" ] && ready_pull_allowed && pick_card "$READY_ROWS"; then
       PROMOTE_FROM="Ready"
+    elif [ -n "${MACHINE_ROWS:-}" ] && ready_pull_allowed Backlog && pick_card "$MACHINE_ROWS"; then
+      PROMOTE_FROM="Backlog"
     else
       local where="In progress or Waiting"
       # `if`, not `[ … ] && …`: under `set -e` a bare AND-list whose test fails returns
@@ -1846,6 +1884,8 @@ tick_once() {
       QUEUED=1; PROMOTE_FROM="Waiting"
     elif [ -n "${READY_ROWS:-}" ] && ready_pull_allowed && pick_card "$READY_ROWS"; then
       QUEUED=1; PROMOTE_FROM="Ready"
+    elif [ -n "${MACHINE_ROWS:-}" ] && ready_pull_allowed Backlog && pick_card "$MACHINE_ROWS"; then
+      QUEUED=1; PROMOTE_FROM="Backlog"
     else
       local where="In progress or Waiting"
       # `if`, not `[ … ] && …`: under `set -e` a bare AND-list whose test fails returns
@@ -1870,6 +1910,12 @@ tick_once() {
       log "#$ISSUE: could not move from $PROMOTE_FROM to In progress; not launching"
       return 1
     fi
+  fi
+  # Once: a machine-filed card is recorded on every launch, from whichever column and by
+  # whichever lane, so no lane pulls it out of Backlog again (see MACHINE_PULL_DIR).
+  if is_machine_filed "$TITLE"; then
+    { mkdir -p "$MACHINE_PULL_DIR" && : > "$MACHINE_PULL_DIR/$ISSUE"; } \
+      || log "#$ISSUE: could not record the machine-filed launch under $MACHINE_PULL_DIR"
   fi
 
   if [ "$LANE_WORKDIR" = root ]; then
