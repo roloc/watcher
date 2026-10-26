@@ -1,0 +1,14 @@
+# Monday morning, the same slot the GitHub Actions workflows used to run in (this repo's
+# own hygiene.yml fired at 13:00 UTC). One calendar time for every instance — a weekly
+# debt sweep has no reason to stagger — and no Persistent=true: a box that was off over
+# the weekend just waits for the next Monday, the same choice watcher-detect@.timer and
+# watcher-metrics.timer already make.
+[Unit]
+Description=Weekly hygiene sweep for %i
+
+[Timer]
+OnCalendar=Mon 13:00 UTC
+Persistent=false
+
+[Install]
+WantedBy=timers.target

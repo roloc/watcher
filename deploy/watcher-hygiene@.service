@@ -1,0 +1,21 @@
+# One hygiene-sweep instance per opted-in project (card #196): the weekly debt sweep now
+# runs off the box's own clock instead of GitHub Actions, using the bot's own `gh` login —
+# which already holds `project` scope — to file straight into Ready. No BOARD_TOKEN and no
+# Backlog-pull exception in bin/spawn.sh are needed any more. deploy/install.sh enables
+# `watcher-hygiene@<name>.timer` for every project file that opts in: HYGIENE=1, or simply
+# having its own hygiene.sh already checked out (bin/ or scripts/). Reads
+# projects/%i.env. Type=oneshot, the same shape as watcher-detect@.service — a deploy
+# needs no restart here, the next firing just runs the new code.
+[Unit]
+Description=Weekly hygiene sweep for %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=watcher
+Group=watcher
+WorkingDirectory=/opt/watcher
+EnvironmentFile=/etc/watcher/env
+Environment=HOME=/home/watcher
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/watcher/bin/hygiene-run.sh %i

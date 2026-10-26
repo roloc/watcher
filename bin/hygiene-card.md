@@ -1,5 +1,5 @@
-**Summary.** The weekly hygiene sweep (`bin/hygiene.sh`, run every Monday by
-`.github/workflows/hygiene.yml`) found debt that CI's per-PR gate cannot see: things that
+**Summary.** The weekly hygiene sweep (`bin/hygiene.sh`, run every Monday by the agents
+box's `watcher-hygiene@watcher.timer`) found debt that CI's per-PR gate cannot see: things that
 accumulate *between* PRs rather than inside one — abandoned branches, skipped cases, TODOs
 nobody filed, scripts nothing runs, links to files that moved. This card clears it. Every
 finding below is mechanical and verifiable in seconds; "is this script bad?" is not in

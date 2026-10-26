@@ -31,7 +31,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/doctor.sh         read-only sanity check that a project is wired up; deploy/install.sh and
                           bin/spawn.sh both run it before a lane's first tick (see "Add a project")
     bin/hygiene.sh        the weekly debt sweep: stale branches, old TODOs, orphan scripts, dead doc
-                          links; .github/workflows/hygiene.yml files one card from it on Mondays (see "The weekly hygiene card")
+                          links; bin/hygiene-run.sh runs it on the box every Monday and files one
+                          card from it (see "The weekly hygiene card")
+    bin/hygiene-run.sh    runs a project's own hygiene.sh on the box and files/moves its card;
+                          deploy/watcher-hygiene@.service, .timer, per project, opt-in (see below)
     deploy/add-project.sh the dozen hand steps of putting a new project on the watcher, as one
                           idempotent script — run from the owner's Mac, never by a tick (see below)
     templates/project-CLAUDE.md  the section a project's own CLAUDE.md needs for /watch to run
@@ -44,6 +47,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/test-floor-browser.py  the floor page loaded and clicked in that browser; also the worked example of a suite built on it
     bin/test-spawn.sh     the spawner's cases, no network, every external command stubbed
     bin/test-detect.sh    the detector's cases, offline, every external command stubbed
+    bin/test-hygiene-run.sh  bin/hygiene-run.sh's cases, offline, real git, gh/board stubbed
+    bin/test-install-hygiene.sh  deploy/install.sh's hygiene opt-in logic, offline, real git
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
@@ -94,10 +99,9 @@ when In progress and Waiting are both dry, moving it to In progress before it la
 than per lane, so the loop keeps a fixed number of cards moving and leaves the rest of
 Ready alone. Off by default: starting work nobody handed over is a policy choice, not a
 default. Order is always In progress, then Waiting, then Ready — a card the owner moved by
-hand is never overtaken by one the loop chose. The one card pulled out of **Backlog** is a
-machine-filed one — the weekly hygiene sweep's, titled `Weekly hygiene sweep — <date>` —
-after Ready, under the same cap, and once: declined back there, it waits for the owner like
-any other card. Details in `docs/how-it-works.md`,
+hand is never overtaken by one the loop chose. **Backlog is never pulled from** — it is the
+owner's, full stop; the weekly hygiene sweep's card (below) files straight into Ready by
+itself, so it needs no exception here either. Details in `docs/how-it-works.md`,
 "Self-pull".
 
 **Stage.** Besides Status, the board carries a single-select `Stage` field (Waiting,
@@ -273,17 +277,17 @@ Deploying is deliberately not a CI job: it would need a runner on the agents box
 
 Debt that lives *between* PRs — an abandoned branch, a skipped case, a TODO nobody filed, a
 script nothing runs, a link to a file that moved — is invisible to CI, which only ever sees
-one PR. `bin/hygiene.sh` sweeps for it; `.github/workflows/hygiene.yml` runs the sweep
-every Monday and files **one** card, `Weekly hygiene sweep — <date>`, with the report as
-its body — or files nothing when the sweep is clean. Auto-add lands it in **Backlog** and
-the watcher's own lane pulls it from there itself — the one Backlog exception, see
-"Self-pull" above — so the week's debt is paid with nobody moving a card. The job runs
-GitHub-hosted and its token cannot touch the board, which is why the lane does the
-pulling rather than the workflow the moving. While a hygiene card is open the next sweep comments the
-fresh list on it instead of filing a second one. The same routine runs on riffmap
-([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711)) and riffmap-site
-([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)); the script is
-one script with each repo's paths.
+one PR. `bin/hygiene.sh` sweeps for it; `bin/hygiene-run.sh`, off `watcher-hygiene@watcher.timer`
+on the agents box (card #196), runs the sweep every Monday and files **one** card,
+`Weekly hygiene sweep — <date>`, with the report as its body — or files nothing when the
+sweep is clean. It files straight into **Ready** with the bot's own `gh` login, which
+already holds `project` scope, so no `BOARD_TOKEN` secret and no Backlog exception are
+needed any more: the week's debt is paid with nobody moving a card. While a hygiene card
+is open the next sweep comments the fresh list on it instead of filing a second one. The
+same script runs on riffmap ([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711))
+and riffmap-site ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)) —
+still from each repo's own GitHub Actions workflow and `BOARD_TOKEN`, pending their own
+box-side move; the script itself is one script with each repo's paths either way.
 
 Three rules keep it cheap:
 
