@@ -875,8 +875,9 @@ board unclaim <n>
 **parks it in Stuck after two** — so a tick that correctly obeys a gate gets punished for
 it, twice, and then wakes the owner. Moving the card out of In progress is what makes the
 exit read as the success it is (`how-it-works.md`, "How a tick ends"). Backlog is the
-honest column: *filed, not scheduled*. Nothing pulls from Backlog, so the card waits there
-until the owner moves it to Ready again — which is them answering the gate.
+honest column: *filed, not scheduled*. Nothing pulls from Backlog (bar the weekly hygiene
+card, which a lane takes from there once and never again after a decline), so the card
+waits there until the owner moves it to Ready again — which is them answering the gate.
 
 The comment is `🤖 FYI:` shaped — nothing is being asked, so **no question and no lettered
 options**:

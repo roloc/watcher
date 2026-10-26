@@ -211,23 +211,6 @@ fi
 # (riffmap's "agent files vs agent labels" section has no counterpart here: one lane takes
 # every card, there are no agent: labels, and agents/ holds review passes, not lanes.)
 
-# ---------------------------------------------------------------- board token
-# The workflow moves the card this sweep files to Ready with BOARD_TOKEN (the Actions
-# token cannot touch Projects at all). A missing or dead token means the card lands in
-# Backlog, where nobody reads it — so the token is the one finding the card itself cannot
-# deliver, and the workflow's move step goes red as well. Checked only where the workflow
-# sets BOARD_NUMBER: a local run has no board to check, and --no-remote has no gh.
-if [ "$REMOTE" = 1 ] && [ -n "${BOARD_NUMBER:-}" ]; then
-  token_why="Not a gate: the sweep still files its card, it just cannot move it. Re-set the secret — \`gh secret set BOARD_TOKEN -R ${REPO:-roloc/watcher}\` (README, \"The weekly hygiene card\")."
-  if [ -z "${BOARD_TOKEN:-}" ]; then
-    section "Board token" "$token_why" \
-      "\`BOARD_TOKEN\` is not set — the card this sweep files cannot be moved to Ready"
-  elif ! GH_TOKEN="$BOARD_TOKEN" gh project view "$BOARD_NUMBER" --owner "${BOARD_OWNER:-roloc}" --format json >/dev/null 2>&1; then
-    section "Board token" "$token_why" \
-      "\`BOARD_TOKEN\` cannot read board $BOARD_NUMBER (expired, revoked, or missing the \`project\` scope) — the card this sweep files cannot be moved to Ready"
-  fi
-fi
-
 # ---------------------------------------------------------------- report
 done_ok=1
 echo "## Hygiene sweep — $(date +%Y-%m-%d), \`$(git rev-parse --short HEAD)\`"
