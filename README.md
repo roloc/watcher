@@ -186,7 +186,8 @@ your own Claude subscription token, the box, a first project, a first card. Shor
     apt install git
     git clone <your fork's clone URL> /opt/watcher   # or rsync it in
     /opt/watcher/deploy/bootstrap.sh               # idempotent: git, python3, curl, gh,
-                                                    # chromium, node 22, the claude CLI
+                                                    # chromium, node 22, the claude CLI,
+                                                    # godot 4 + xvfb (engine-run projects)
     /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, symlinks, `board`
 
 Then by hand, once:
