@@ -56,7 +56,7 @@ gh issue create -R roloc/watcher --title "<what ships, in one line>" --body-file
 ```
 
 **This board's Auto-add workflow is on**, so a new issue lands in **Backlog** by itself
-(the weekly hygiene card is the one exception: its workflow moves it on to Ready). Confirm,
+(the weekly hygiene card is filed with `gh issue create` alone and arrives there). Confirm,
 because a card that is not on the board is invisible to the lane:
 
 ```bash

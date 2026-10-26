@@ -272,17 +272,10 @@ Debt that lives *between* PRs — an abandoned branch, a skipped case, a TODO no
 script nothing runs, a link to a file that moved — is invisible to CI, which only ever sees
 one PR. `bin/hygiene.sh` sweeps for it; `.github/workflows/hygiene.yml` runs the sweep
 every Monday and files **one** card, `Weekly hygiene sweep — <date>`, with the report as
-its body — or files nothing when the sweep is clean. The workflow then moves the card to
-**Ready** — the lane's queue — so the next idle tick works it like any other card, with
-nobody moving it by hand. That move needs the repo secret `BOARD_TOKEN`, a classic PAT
-of the owner's with the `project` and `repo` scopes (the shape the move was tested with; a
-fine-grained token may not reach a user-owned board), set with `gh secret set BOARD_TOKEN
--R roloc/watcher`; without it the card still arrives, in **Backlog** through Auto-add,
-and the run log carries a warning saying so. With a token that no longer works the run
-goes red after filing the card, and that card needs moving by hand once: the red run is
-the signal to mint a new token. While a hygiene card is
-open the next sweep comments the fresh list on it instead of filing a second one. The
-same routine runs on riffmap
+its body — or files nothing when the sweep is clean. Auto-add lands it in **Backlog**;
+the owner moves it to **Ready** when they want the week's debt paid, and the watcher's own
+lane works it like any other card. While a hygiene card is open the next sweep comments the
+fresh list on it instead of filing a second one. The same routine runs on riffmap
 ([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711)) and riffmap-site
 ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)); the script is
 one script with each repo's paths.
