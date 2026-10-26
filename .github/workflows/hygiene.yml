@@ -4,8 +4,9 @@ name: Hygiene sweep
 # abandoned branches, skipped cases, old TODOs, orphan scripts, dead doc links, stale
 # paths in the tick-loaded docs — and this files one card with the report when it finds
 # any, or files nothing when the repo is clean. The card lands in Backlog through the
-# board's Auto-add; Steve moves it to Ready and the watcher's own lane clears it like any
-# other card. Mechanical checks only, on purpose: a judgment finding is a card somebody
+# board's Auto-add and the watcher's own lane pulls it from there itself (bin/spawn.sh,
+# machine-filed cards) — this job's token cannot touch the board, and nobody has to.
+# Mechanical checks only, on purpose: a judgment finding is a card somebody
 # files with evidence, not a weekly pass. README, "The weekly hygiene card", is the
 # contract. Same shape as riffmap's (https://github.com/roloc/riffmap/pull/711) and
 # riffmap-site's (https://github.com/roloc/riffmap-site/pull/54).
@@ -66,4 +67,4 @@ jobs:
           fi
           cat bin/hygiene-card.md report.md > body.md
           url="$(gh issue create --repo "$repo" --title "Weekly hygiene sweep — $today" --body-file body.md)"
-          echo "Filed $url — the board's Auto-add puts it in Backlog"
+          echo "Filed $url — the board's Auto-add puts it in Backlog; the lane pulls it from there"

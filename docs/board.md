@@ -66,8 +66,9 @@ gh issue view <n> -R roloc/watcher --json projectItems --jq '.projectItems[].sta
 If that prints nothing, put it on by hand:
 `gh project item-add 2 --owner roloc --url https://github.com/roloc/watcher/issues/<n>`.
 
-**It stays in Backlog unless the owner says otherwise.** Backlog is never pulled from; it
-is where a card waits for the owner to move it. "Put it in Ready" is
+**It stays in Backlog unless the owner says otherwise.** Backlog is never pulled from — bar
+one machine-filed card, the weekly hygiene sweep's, which the lane takes from there itself,
+once (README, "Self-pull"); it is where a card waits for the owner to move it. "Put it in Ready" is
 `python3 bin/board.py move <n> Ready` (with the env sourced, above) — and on this board
 **Ready is the lane's queue** (`READY_PULL=1`): the lane promotes the top Ready card to In
 progress and starts on it the next time nothing is in flight, so moving a card there is
