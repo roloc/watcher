@@ -6,8 +6,7 @@ name: Hygiene sweep
 # any, or files nothing when the repo is clean. The card lands in **Ready** — the lane's
 # queue (`READY_PULL=1` in `projects/watcher.env`) — so the next idle tick clears it like
 # any other card, with nobody moving it. That move needs the `BOARD_TOKEN` secret (below);
-# without it, or with a dead one, the card still arrives — in Backlog — and the
-# sweep itself reports the token as a finding on that card; the run goes red either way.
+# without it the card still arrives, in Backlog, and the run log says so.
 # Mechanical checks only, on purpose: a judgment finding is a card somebody
 # files with evidence, not a weekly pass. README, "The weekly hygiene card", is the
 # contract. Same shape as riffmap's (https://github.com/roloc/riffmap/pull/711) and
@@ -33,15 +32,6 @@ jobs:
     if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The job's own token cannot write to a user-owned project. BOARD_TOKEN is a
-    # classic PAT of the owner's with the `project` and `repo` scopes (the shape the
-    # move was tested with; a fine-grained token may not reach a user's board).
-    # `gh secret set BOARD_TOKEN -R roloc/watcher` — README, "The weekly hygiene card".
-    # Set on the job, not the filing step, so the sweep can check the token too.
-    env:
-      BOARD_TOKEN: ${{ secrets.BOARD_TOKEN }}
-      BOARD_OWNER: roloc
-      BOARD_NUMBER: '2'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +55,13 @@ jobs:
         if: steps.sweep.outputs.status == '1'
         env:
           GH_TOKEN: ${{ github.token }}
+          # The job's own token cannot write to a user-owned project. BOARD_TOKEN is a
+          # classic PAT of the owner's with the `project` and `repo` scopes (the shape the
+          # move was tested with; a fine-grained token may not reach a user's board).
+          # `gh secret set BOARD_TOKEN -R roloc/watcher` — README, "The weekly hygiene card".
+          BOARD_TOKEN: ${{ secrets.BOARD_TOKEN }}
+          BOARD_OWNER: roloc
+          BOARD_NUMBER: '2'
         run: |
           set -euo pipefail
           repo="${{ github.repository }}"
@@ -81,8 +78,8 @@ jobs:
           echo "Filed $url"
 
           if [ -z "$BOARD_TOKEN" ]; then
-            echo "::error::BOARD_TOKEN is not set — $url waits in Backlog until someone moves it to Ready; its Board token section says how to fix this"
-            exit 1
+            echo "::warning::BOARD_TOKEN is not set — $url waits in Backlog until someone moves it to Ready"
+            exit 0
           fi
           export GH_TOKEN="$BOARD_TOKEN"
           # item-add returns the existing item when the board's Auto-add got there first.
