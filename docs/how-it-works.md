@@ -31,7 +31,7 @@ Columns, in order: `Backlog | Ready | In progress | In review | Done | Stuck - N
 
 | Column | Who moves cards in | Meaning |
 |---|---|---|
-| Backlog | the owner, or a tick returning a card it declined (`watch.md` §4b) | **never pulled from** — bar a machine-filed card (the weekly hygiene sweep's, by title), taken once. Where a self-gated card waits until the owner moves it to Ready |
+| Backlog | the owner, or a tick returning a card it declined (`watch.md` §4b) | **never pulled from.** Where a self-gated card waits until the owner moves it to Ready |
 | **Ready** | the owner | **the loop's own queue** when `READY_PULL=1` (riffmap, since September 19, 2026): a lane promotes the top card here to In progress when In progress and Waiting are both dry and the column is under `WIP_MAX`. Without that setting it is Backlog's twin and nothing reads it |
 | **In progress** | the owner, a lane promoting a Ready or Waiting card, or the owner moving a Stuck card back | **what a tick is handed.** A card here is work in flight |
 | In review | the tick | the work is finished, reviewed and green, and only the merge did not happen. Not a resting place: the spawner sweeps it every poll (see "The In review sweep") |
@@ -502,14 +502,11 @@ In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third
 
 - **Order is fixed:** In progress, then Waiting, then Ready. A card the owner moved by
   hand is always served before one the loop chose, whatever the priorities say.
-- **One card comes out of Backlog:** a machine-filed one — the weekly hygiene sweep's,
-  titled `Weekly hygiene sweep — <date>`, filed by a GitHub-hosted job whose token cannot
-  move a project item. It is served after Ready, under the same cap, and pulled once: a
-  board-wide record (`boards/<owner>-<number>/pulled-from-backlog/<card>` under the
-  watcher's state root, shared by every lane on the board and written whenever any lane
-  launches such a card, from whichever column) means a card the tick declined back to
-  Backlog (§4b) waits there for the owner like any other. Every other Backlog card is the
-  owner's.
+- **Backlog has no exception.** It used to have one — the weekly hygiene sweep's card, filed
+  by a GitHub-hosted job whose token could not move a project item, so the lane pulled it
+  out of Backlog once. `bin/hygiene-run.sh` (card #196) runs that sweep on the box itself
+  now, with the bot's own `gh` login, and files the card straight into Ready — so the
+  exception is gone, and every Backlog card, without exception, is the owner's.
 - **`WIP_MAX` (default 2) is board-wide,** not per lane: it counts every open card in the
   In progress column, because that column *is* the work in flight. A lane stops promoting
   when the column is full, whoever filled it. It costs no extra API call — the count comes
@@ -590,7 +587,7 @@ money they had been charged (September 19, 2026). The number was never a bill.
 | Done | removed | success; attempts reset |
 | In review | removed | success; attempts reset |
 | Stuck - Needs help | removed | success as far as the tick goes; attempts reset; the owner's turn |
-| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog (the weekly hygiene card is taken from there once, never again after a decline), so it waits for the owner to move it to Ready again |
+| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog, so it waits for the owner to move it to Ready again |
 | In progress, labeled `awaiting-rebuild` | removed | success: the fix is merged but gated on a known downstream rebuild (`watch.md` §3); attempts reset. `pick_card` skips it until a project's workflow drops the label, or the stale-label sweep parks it after 12 hours |
 | In progress, with THIS lane's label (or none) | removed | no progress; attempts +1; at 2 the spawner parks it |
 | In progress, with ANOTHER lane's label | removed | success: the tick relabeled it for that lane (a triage, or `/watch` routing a design card); attempts reset, the other lane starts its own count |

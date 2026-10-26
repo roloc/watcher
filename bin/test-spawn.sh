@@ -123,7 +123,9 @@ case "$1" in
       cat "${BOARD_READY_FILE:-/dev/null}"
       exit 0
     fi
-    # Backlog, read only for machine-filed cards (the hygiene sweep's). Its own file too.
+    # Backlog: nothing in spawn.sh reads this column any more (card #196 removed the
+    # hygiene sweep's own exception); kept so a test can still prove a Backlog card sits
+    # there untouched.
     if [ "${2:-}" = "Backlog" ]; then
       cat "${BOARD_BACKLOG_FILE:-/dev/null}"
       exit 0
@@ -2047,50 +2049,29 @@ else
   flunk "dry-run Ready pick" "$OUT"
 fi
 if not_grepped "board.py move 870"; then pass "…and moves nothing"; else flunk "dry-run moved a card"; fi
-# --- machine-filed cards: the hygiene sweep's card is pulled out of Backlog, once ---------
-# The weekly hygiene sweep files from a GitHub-hosted job whose token cannot move a project
-# item, so its card lands in Backlog. Backlog is otherwise the owner's (and 4b's parking
-# spot), so the exception is one title prefix, served after Ready under the same cap, and
-# each card is pulled from there exactly once.
+# --- Backlog has no exception left: the hygiene sweep now files straight into Ready -----
+# bin/hygiene-run.sh (card #196) runs off the box's own clock, with the bot's own `gh`
+# login, and moves its own card into Ready itself — so the Backlog-pull exception this
+# file used to carry (one title prefix, served after Ready, pulled once) is gone.
+# An ordinary Backlog card — even one that happens to share the hygiene sweep's own title —
+# is never pulled, with or without READY_PULL.
 fresh_state; board_list ""; board_ready ""
-board_backlog $'880\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26' $'881\tP0\tbuilder\t-\t-\tAn ordinary Backlog card'
+board_backlog $'880\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 880" && not_grepped "board.py move 880"; then pass "READY_PULL unset: a hygiene card in Backlog is never pulled"; else flunk "pulled from Backlog with READY_PULL off" "$(cat "$TESTLOG")"; fi
+if not_grepped "/watch 880" && not_grepped "board.py move 880" && not_grepped "list Backlog"; then
+  pass "READY_PULL unset: a Backlog card is never pulled, Backlog is never even read"
+else
+  flunk "pulled from Backlog, or read it, with READY_PULL off" "$(cat "$TESTLOG")"
+fi
 
 fresh_state; board_list ""; board_ready ""
-board_backlog $'880\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26' $'881\tP0\tbuilder\t-\t-\tAn ordinary Backlog card'
-READY_PULL=1 run --once >/dev/null 2>"$TMP/machine.err" || true
-if grepped "board.py move 880 In progress" && grepped "/watch 880"; then pass "READY_PULL=1: the hygiene card is pulled out of Backlog, moved to In progress first"; else flunk "expected board.py move 880 In progress" "$(cat "$TESTLOG")"; fi
-if not_grepped "/watch 881" && not_grepped "board.py move 881"; then pass "…and an ordinary Backlog card is left alone, whatever its priority"; else flunk "pulled an ordinary card from Backlog" "$(cat "$TESTLOG")"; fi
-if grep -q "taken from Backlog" "$TMP/machine.err"; then pass "…and the log names Backlog"; else flunk "log says the wrong source column" "$(cat "$TMP/machine.err")"; fi
-[ -n "$(ls "$STATE"/boards/*/pulled-from-backlog/880 2>/dev/null)" ] && pass "…and the pull is recorded, board-wide (boards/<owner>-<n>/)" || flunk "no pulled-from-backlog record for 880" "$(find "$STATE" -path '*pulled*' 2>/dev/null)"
-# Once only: the same row still in Backlog (the tick declined it, 4b) is not pulled again.
+board_backlog $'880\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
 READY_PULL=1 run --once >/dev/null 2>&1 || true
-if [ "$(grep -c "board.py move 880 In progress" "$TESTLOG")" = 1 ]; then pass "pulled from Backlog once; declined back there, it waits for the owner"; else flunk "pulled the same Backlog card twice" "$(cat "$TESTLOG")"; fi
-
-# …and the record is written on ANY launch of such a card, not only a Backlog pull: a
-# hygiene card the owner moved to In progress by hand (or a triage lane labeled) is
-# worked, and then never pulled out of Backlog after a 4b decline — by any lane, since
-# the record is board-wide (WATCHER_STATE_ROOT/boards/<owner>-<n>/), not per lane.
-fresh_state; board_list $'882\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'; board_ready ""
-run --once >/dev/null 2>&1 || true
-[ -n "$(ls "$STATE"/boards/*/pulled-from-backlog/882 2>/dev/null)" ] && pass "a hygiene card launched from In progress is recorded too" || flunk "no record for a hygiene card worked from In progress"
-board_list ""; board_backlog $'882\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
-READY_PULL=1 run --once >/dev/null 2>&1 || true
-if not_grepped "board.py move 882 In progress"; then pass "…so it is not pulled out of Backlog afterwards"; else flunk "re-pulled a hygiene card another launch already worked" "$(cat "$TESTLOG")"; fi
-
-# Ready is served before it, like everything else the owner placed.
-fresh_state; board_list ""; board_ready $'890\tP2\tbuilder\t-\tReady\tA ready card'
-board_backlog $'891\tP0\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
-READY_PULL=1 run --once >/dev/null 2>&1 || true
-if grepped "/watch 890" && not_grepped "/watch 891"; then pass "Ready is served before a hygiene card in Backlog"; else flunk "Backlog beat Ready" "$(cat "$TESTLOG")"; fi
-
-# The WIP cap holds for it too.
-fresh_state; board_list $'892\tP1\tbuilder\tin-flight\t-\tBusy' $'893\tP1\tbuilder\tin-flight\t-\tBusy too'; board_ready ""
-board_backlog $'894\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
-READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>"$TMP/capbl.err" || true
-if not_grepped "/watch 894"; then pass "a full In progress column holds a hygiene card in Backlog back"; else flunk "WIP cap ignored for a Backlog pull" "$(cat "$TESTLOG")"; fi
-if grep -q "not pulling from Backlog" "$TMP/capbl.err"; then pass "…and the cap's log line names Backlog"; else flunk "cap log names the wrong column" "$(cat "$TMP/capbl.err")"; fi
+if not_grepped "/watch 880" && not_grepped "board.py move 880" && not_grepped "list Backlog"; then
+  pass "…and READY_PULL=1 does not change that — Backlog has no exception left"
+else
+  flunk "pulled from Backlog, or read it, with READY_PULL=1" "$(cat "$TESTLOG")"
+fi
 
 BOARD_READY_FILE=/dev/null; BOARD_READY_FAIL=0; BOARD_BACKLOG_FILE=/dev/null
 

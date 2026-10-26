@@ -55,9 +55,9 @@ backticks. Then one command:
 gh issue create -R roloc/watcher --title "<what ships, in one line>" --body-file card.md
 ```
 
-**This board's Auto-add workflow is on**, so a new issue lands in **Backlog** by itself
-(the weekly hygiene card is filed with `gh issue create` alone and arrives there). Confirm,
-because a card that is not on the board is invisible to the lane:
+**This board's Auto-add workflow is on**, so a new issue filed with `gh issue create` alone
+lands in **Backlog** by itself. Confirm, because a card that is not on the board is
+invisible to the lane:
 
 ```bash
 gh issue view <n> -R roloc/watcher --json projectItems --jq '.projectItems[].status.name'
@@ -66,9 +66,10 @@ gh issue view <n> -R roloc/watcher --json projectItems --jq '.projectItems[].sta
 If that prints nothing, put it on by hand:
 `gh project item-add 2 --owner roloc --url https://github.com/roloc/watcher/issues/<n>`.
 
-**It stays in Backlog unless the owner says otherwise.** Backlog is never pulled from — bar
-one machine-filed card, the weekly hygiene sweep's, which the lane takes from there itself,
-once (README, "Self-pull"); it is where a card waits for the owner to move it. "Put it in Ready" is
+**It stays in Backlog unless the owner says otherwise.** Backlog is never pulled from — it
+is where a card waits for the owner to move it (the weekly hygiene sweep's own card is the
+one exception to needing the owner for that, but it gets there by moving itself straight
+into Ready, never by being pulled out of Backlog — README, "Self-pull"). "Put it in Ready" is
 `python3 bin/board.py move <n> Ready` (with the env sourced, above) — and on this board
 **Ready is the lane's queue** (`READY_PULL=1`): the lane promotes the top Ready card to In
 progress and starts on it the next time nothing is in flight, so moving a card there is
