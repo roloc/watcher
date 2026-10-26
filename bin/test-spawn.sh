@@ -459,7 +459,7 @@ run() {
   BOARD_LIST_FILE="${BOARD_LIST_FILE:-/dev/null}" BOARD_LIST_FAIL="${BOARD_LIST_FAIL:-0}" \
   BOARD_QUEUE_FILE="${BOARD_QUEUE_FILE:-/dev/null}" \
   BOARD_READY_FILE="${BOARD_READY_FILE:-/dev/null}" BOARD_READY_FAIL="${BOARD_READY_FAIL:-0}" \
-  BOARD_BACKLOG_FILE="${BOARD_BACKLOG_FILE:-/dev/null}" \
+  BOARD_BACKLOG_FILE="${BOARD_BACKLOG_FILE:-/dev/null}" WATCHER_STATE_ROOT="${WATCHER_STATE_ROOT:-$STATE}" \
   READY_PULL="${READY_PULL:-}" WIP_MAX="${WIP_MAX:-}" \
   BOARD_REVIEW_FILE="${BOARD_REVIEW_FILE:-/dev/null}" BOARD_REVIEW_FAIL="${BOARD_REVIEW_FAIL:-0}" \
   INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-}" INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-}" \
@@ -2063,10 +2063,21 @@ READY_PULL=1 run --once >/dev/null 2>"$TMP/machine.err" || true
 if grepped "board.py move 880 In progress" && grepped "/watch 880"; then pass "READY_PULL=1: the hygiene card is pulled out of Backlog, moved to In progress first"; else flunk "expected board.py move 880 In progress" "$(cat "$TESTLOG")"; fi
 if not_grepped "/watch 881" && not_grepped "board.py move 881"; then pass "…and an ordinary Backlog card is left alone, whatever its priority"; else flunk "pulled an ordinary card from Backlog" "$(cat "$TESTLOG")"; fi
 if grep -q "taken from Backlog" "$TMP/machine.err"; then pass "…and the log names Backlog"; else flunk "log says the wrong source column" "$(cat "$TMP/machine.err")"; fi
-[ -e "$STATE/pulled-from-backlog/880" ] && pass "…and the pull is recorded" || flunk "no pulled-from-backlog marker for 880"
+[ -n "$(ls "$STATE"/boards/*/pulled-from-backlog/880 2>/dev/null)" ] && pass "…and the pull is recorded, board-wide (boards/<owner>-<n>/)" || flunk "no pulled-from-backlog record for 880" "$(find "$STATE" -path '*pulled*' 2>/dev/null)"
 # Once only: the same row still in Backlog (the tick declined it, 4b) is not pulled again.
 READY_PULL=1 run --once >/dev/null 2>&1 || true
 if [ "$(grep -c "board.py move 880 In progress" "$TESTLOG")" = 1 ]; then pass "pulled from Backlog once; declined back there, it waits for the owner"; else flunk "pulled the same Backlog card twice" "$(cat "$TESTLOG")"; fi
+
+# …and the record is written on ANY launch of such a card, not only a Backlog pull: a
+# hygiene card the owner moved to In progress by hand (or a triage lane labeled) is
+# worked, and then never pulled out of Backlog after a 4b decline — by any lane, since
+# the record is board-wide (WATCHER_STATE_ROOT/boards/<owner>-<n>/), not per lane.
+fresh_state; board_list $'882\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'; board_ready ""
+run --once >/dev/null 2>&1 || true
+[ -n "$(ls "$STATE"/boards/*/pulled-from-backlog/882 2>/dev/null)" ] && pass "a hygiene card launched from In progress is recorded too" || flunk "no record for a hygiene card worked from In progress"
+board_list ""; board_backlog $'882\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
+READY_PULL=1 run --once >/dev/null 2>&1 || true
+if not_grepped "board.py move 882 In progress"; then pass "…so it is not pulled out of Backlog afterwards"; else flunk "re-pulled a hygiene card another launch already worked" "$(cat "$TESTLOG")"; fi
 
 # Ready is served before it, like everything else the owner placed.
 fresh_state; board_list ""; board_ready $'890\tP2\tbuilder\t-\tReady\tA ready card'
@@ -2077,8 +2088,9 @@ if grepped "/watch 890" && not_grepped "/watch 891"; then pass "Ready is served 
 # The WIP cap holds for it too.
 fresh_state; board_list $'892\tP1\tbuilder\tin-flight\t-\tBusy' $'893\tP1\tbuilder\tin-flight\t-\tBusy too'; board_ready ""
 board_backlog $'894\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
-READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>&1 || true
+READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>"$TMP/capbl.err" || true
 if not_grepped "/watch 894"; then pass "a full In progress column holds a hygiene card in Backlog back"; else flunk "WIP cap ignored for a Backlog pull" "$(cat "$TESTLOG")"; fi
+if grep -q "not pulling from Backlog" "$TMP/capbl.err"; then pass "…and the cap's log line names Backlog"; else flunk "cap log names the wrong column" "$(cat "$TMP/capbl.err")"; fi
 
 BOARD_READY_FILE=/dev/null; BOARD_READY_FAIL=0; BOARD_BACKLOG_FILE=/dev/null
 

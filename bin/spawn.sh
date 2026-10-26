@@ -362,18 +362,26 @@ check_singleton() {
 # item, so the card lands in Backlog through the board's Auto-add — and Backlog is
 # otherwise never pulled from: it is the owner's, and watch.md §4b parks a self-gated
 # card there on purpose. So the exception is one title prefix, served after Ready under
-# the same WIP cap, and each card is pulled ONCE: the marker under
-# $WATCHER_STATE/pulled-from-backlog/<n> means a card the tick later declined back to
-# Backlog waits there for the owner like any other. Best-effort like the Ready read — a
-# failed list is "nothing to pull", never a poll failure.
+# the same WIP cap, and each card is pulled ONCE: a record under MACHINE_PULL_DIR means
+# a card the tick later declined back to Backlog waits there for the owner like any
+# other. The record is BOARD-wide, not per lane — every lane on a board (build, triage,
+# design) shares the directory, and it is written whenever any lane launches such a card
+# from whichever column — so a card a triage lane labeled, or the owner moved by hand,
+# is not pulled out of Backlog by a second lane after a decline. Best-effort like the
+# Ready read — a failed list is "nothing to pull", never a poll failure.
 MACHINE_TITLE_PREFIX="Weekly hygiene sweep"
+MACHINE_PULL_DIR="${WATCHER_STATE_ROOT:-$(dirname "$WATCHER_STATE")}/boards/${BOARD_OWNER:-board}-${BOARD_NUMBER:-0}/pulled-from-backlog"
+is_machine_filed() { # is_machine_filed <title>
+  case "$1" in "$MACHINE_TITLE_PREFIX"*) return 0 ;; esac
+  return 1
+}
 machine_filed_rows() {
   local rows line n
   rows="$($WATCHER_BOARD list Backlog 2>/dev/null)" || return 0
   printf '%s\n' "$rows" | awk -F'\t' -v p="$MACHINE_TITLE_PREFIX" 'index($6, p) == 1' | while IFS= read -r line; do
     n="${line%%$'\t'*}"
     [ -n "$n" ] || continue
-    [ -e "$WATCHER_STATE/pulled-from-backlog/$n" ] && continue
+    [ -e "$MACHINE_PULL_DIR/$n" ] && continue
     printf '%s\n' "$line"
   done
   return 0
@@ -651,12 +659,12 @@ wip_count() {
 # something to promote: otherwise an empty Ready column plus a full In progress column
 # would log "not pulling from Ready" once a minute, per lane, forever — a line that says
 # the cap is holding work back when nothing is waiting on it.
-ready_pull_allowed() {
+ready_pull_allowed() { # ready_pull_allowed [column] — the column only names the log line
   [ "$READY_PULL" = 1 ] || return 1
-  local wip
+  local wip col="${1:-Ready}"
   wip="$(wip_count)"
   if [ "$wip" -ge "$WIP_MAX" ]; then
-    log "not pulling from Ready: $wip card(s) already In progress, WIP_MAX=$WIP_MAX"
+    log "not pulling from $col: $wip card(s) already In progress, WIP_MAX=$WIP_MAX"
     return 1
   fi
   return 0
@@ -928,7 +936,7 @@ do_dry_run() {
       PROMOTE_FROM="Waiting"
     elif [ -n "${READY_ROWS:-}" ] && ready_pull_allowed && pick_card "$READY_ROWS"; then
       PROMOTE_FROM="Ready"
-    elif [ -n "${MACHINE_ROWS:-}" ] && ready_pull_allowed && pick_card "$MACHINE_ROWS"; then
+    elif [ -n "${MACHINE_ROWS:-}" ] && ready_pull_allowed Backlog && pick_card "$MACHINE_ROWS"; then
       PROMOTE_FROM="Backlog"
     else
       local where="In progress or Waiting"
@@ -1876,7 +1884,7 @@ tick_once() {
       QUEUED=1; PROMOTE_FROM="Waiting"
     elif [ -n "${READY_ROWS:-}" ] && ready_pull_allowed && pick_card "$READY_ROWS"; then
       QUEUED=1; PROMOTE_FROM="Ready"
-    elif [ -n "${MACHINE_ROWS:-}" ] && ready_pull_allowed && pick_card "$MACHINE_ROWS"; then
+    elif [ -n "${MACHINE_ROWS:-}" ] && ready_pull_allowed Backlog && pick_card "$MACHINE_ROWS"; then
       QUEUED=1; PROMOTE_FROM="Backlog"
     else
       local where="In progress or Waiting"
@@ -1898,14 +1906,16 @@ tick_once() {
     # sit on a card the board says nobody is working.
     if $WATCHER_BOARD move "$ISSUE" "In progress"; then
       log "#$ISSUE taken from $PROMOTE_FROM → In progress"
-      # Once: a machine-filed card is never pulled out of Backlog a second time.
-      if [ "$PROMOTE_FROM" = Backlog ]; then
-        mkdir -p "$WATCHER_STATE/pulled-from-backlog" && : > "$WATCHER_STATE/pulled-from-backlog/$ISSUE"
-      fi
     else
       log "#$ISSUE: could not move from $PROMOTE_FROM to In progress; not launching"
       return 1
     fi
+  fi
+  # Once: a machine-filed card is recorded on every launch, from whichever column and by
+  # whichever lane, so no lane pulls it out of Backlog again (see MACHINE_PULL_DIR).
+  if is_machine_filed "$TITLE"; then
+    { mkdir -p "$MACHINE_PULL_DIR" && : > "$MACHINE_PULL_DIR/$ISSUE"; } \
+      || log "#$ISSUE: could not record the machine-filed launch under $MACHINE_PULL_DIR"
   fi
 
   if [ "$LANE_WORKDIR" = root ]; then

@@ -504,10 +504,12 @@ In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third
   hand is always served before one the loop chose, whatever the priorities say.
 - **One card comes out of Backlog:** a machine-filed one — the weekly hygiene sweep's,
   titled `Weekly hygiene sweep — <date>`, filed by a GitHub-hosted job whose token cannot
-  move a project item. It is served after Ready, under the same cap, and pulled once: the
-  marker `pulled-from-backlog/<n>` in the lane's state means a card the tick declined back
-  to Backlog (§4b) waits there for the owner like any other. Every other Backlog card is
-  the owner's.
+  move a project item. It is served after Ready, under the same cap, and pulled once: a
+  board-wide record (`boards/<owner>-<number>/pulled-from-backlog/<card>` under the
+  watcher's state root, shared by every lane on the board and written whenever any lane
+  launches such a card, from whichever column) means a card the tick declined back to
+  Backlog (§4b) waits there for the owner like any other. Every other Backlog card is the
+  owner's.
 - **`WIP_MAX` (default 2) is board-wide,** not per lane: it counts every open card in the
   In progress column, because that column *is* the work in flight. A lane stops promoting
   when the column is full, whoever filled it. It costs no extra API call — the count comes
@@ -588,7 +590,7 @@ money they had been charged (September 19, 2026). The number was never a bill.
 | Done | removed | success; attempts reset |
 | In review | removed | success; attempts reset |
 | Stuck - Needs help | removed | success as far as the tick goes; attempts reset; the owner's turn |
-| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog, so it waits for the owner to move it to Ready again |
+| Backlog | removed | the tick **declined** a card that gates itself (`watch.md` §4b): success, attempts reset. Nothing pulls from Backlog (the weekly hygiene card is taken from there once, never again after a decline), so it waits for the owner to move it to Ready again |
 | In progress, labeled `awaiting-rebuild` | removed | success: the fix is merged but gated on a known downstream rebuild (`watch.md` §3); attempts reset. `pick_card` skips it until a project's workflow drops the label, or the stale-label sweep parks it after 12 hours |
 | In progress, with THIS lane's label (or none) | removed | no progress; attempts +1; at 2 the spawner parks it |
 | In progress, with ANOTHER lane's label | removed | success: the tick relabeled it for that lane (a triage, or `/watch` routing a design card); attempts reset, the other lane starts its own count |
