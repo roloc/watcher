@@ -16,10 +16,11 @@
 # deploy/install.sh's canary_clone uses for the canary checkout).
 #
 # Runs that checkout's own hygiene.sh (bin/ or scripts/, whichever the project ships) with
-# no BOARD_NUMBER/BOARD_TOKEN in its environment: those only ever mattered for the
-# GitHub-hosted job's own board-token check (hygiene.sh's "board token" section, gated on
-# BOARD_NUMBER being set), which this path has no use for — the bot's own `gh` login
-# already reaches the board, so the script itself is never touched by this change.
+# no BOARD_NUMBER/BOARD_TOKEN in its environment, on principle: those two only ever meant
+# anything to a board-token check hygiene.sh carried briefly and has since dropped (added
+# by #192, reverted by #195) — this box needs no such secret, the bot's own `gh` login
+# already reaches the board — but isolating the subprocess's environment costs nothing and
+# means a future check gated the same way starts clean here too.
 #
 # On a finding (exit 1): dedupe against an already-open card by title and comment the
 # fresh list there, or file a new one straight into Ready. On exit 0: nothing. On exit 2
@@ -48,14 +49,24 @@ git -C "$PROJECT_ROOT" fetch -q origin main 2>/dev/null \
   || { say "could not fetch origin/main for $PROJECT_ROOT"; exit 2; }
 ref="$(git -C "$PROJECT_ROOT" rev-parse origin/main 2>/dev/null)" \
   || { say "no origin/main in $PROJECT_ROOT"; exit 2; }
+real_origin="$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null)" \
+  || { say "could not read $PROJECT_ROOT's own origin url"; exit 2; }
 
 CHECKOUT="$(dirname "$PROJECT_ROOT")/$(basename "$PROJECT_ROOT")-worktrees/hygiene-sweep"
 mkdir -p "$(dirname "$CHECKOUT")"
 if [ ! -d "$CHECKOUT/.git" ]; then
   rm -rf "$CHECKOUT"
+  # Cloned FROM PROJECT_ROOT — fast, local, no login needed for the clone itself (the same
+  # trick deploy/install.sh's canary_clone uses). But hygiene.sh's own stale-branch check
+  # runs `git fetch --prune origin` and reads `refs/remotes/origin/*` INSIDE this checkout,
+  # so `origin` has to be the real GitHub remote by the time that runs, never PROJECT_ROOT's
+  # own path — otherwise it reports PROJECT_ROOT's local, possibly stale, branch list
+  # instead of what is actually on GitHub.
   git clone -q "$PROJECT_ROOT" "$CHECKOUT" \
     || { say "could not create the throwaway checkout at $CHECKOUT"; exit 2; }
 fi
+git -C "$CHECKOUT" remote set-url origin "$real_origin" \
+  || { say "could not point $CHECKOUT's origin at $real_origin"; exit 2; }
 if ! git -C "$CHECKOUT" fetch -q origin "$ref" 2>/dev/null \
    || ! git -C "$CHECKOUT" checkout -q --detach "$ref" 2>/dev/null; then
   say "could not check out $ref in $CHECKOUT"
@@ -73,8 +84,7 @@ report="$(mktemp)"; errlog="$(mktemp)"
 # unset, not just "don't export": if BOARD_NUMBER/BOARD_TOKEN are already exported in
 # THIS process's own environment (a by-hand run under a shell that sourced a project env,
 # say), a later plain assignment from sourcing PROJECT_ENV above keeps them exported —
-# bash's export bit is sticky per-variable, not per-assignment. hygiene.sh's own
-# board-token check is gated on BOARD_NUMBER being set, and this box never needs it.
+# bash's export bit is sticky per-variable, not per-assignment.
 ( unset BOARD_NUMBER BOARD_TOKEN; cd "$CHECKOUT" && GITHUB_REPOSITORY="$PROJECT_REPO" "$SCRIPT" ) > "$report" 2>"$errlog"
 status=$?
 
@@ -112,9 +122,8 @@ if ! [[ "$iss" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-# Exported only now: hygiene.sh above never saw BOARD_NUMBER, so its own board-token check
-# (which only ever mattered for the GitHub-hosted job's separate BOARD_TOKEN secret) stayed
-# off — this box files and moves the card with its own `gh` login instead.
+# Exported only now that hygiene.sh is done running, so board/gh use them for the move
+# below without ever handing them to the sweep itself.
 export BOARD_OWNER BOARD_NUMBER
 if gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" >/dev/null 2>&1 \
    && board move "$iss" Ready >/dev/null 2>&1; then

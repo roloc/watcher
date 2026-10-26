@@ -176,11 +176,12 @@ install -m 644 "$WATCHER_DIR/deploy/watcher-detect@.service" /etc/systemd/system
 install -m 644 "$WATCHER_DIR/deploy/watcher-detect@.timer" /etc/systemd/system/watcher-detect@.timer
 # The weekly hygiene sweep (bin/hygiene-run.sh, card #196): the unit is installed for
 # every box, same as the detector above, but an instance only starts for a project that
-# opts in — HYGIENE=1 in its own projects/<name>.env, or simply having a hygiene.sh
-# already checked out (bin/ or scripts/, whichever the project ships). One un-suffixed
-# project file per project is the canonical one to check: a `-design`/`-triage` file is a
-# second lane on the SAME checkout (PROJECT_ROOT, PROJECT_REPO, BOARD_OWNER, BOARD_NUMBER
-# all identical), so checking it too would just enable the same sweep twice.
+# opts in — HYGIENE=1 in its own projects/<name>.env, or simply shipping a hygiene.sh on
+# its own origin/main (bin/ or scripts/, whichever the project ships; checked against
+# that ref, not PROJECT_ROOT's own working tree, below). One un-suffixed project file per
+# project is the canonical one to check: a `-design`/`-triage` file is a second lane on
+# the SAME checkout (PROJECT_ROOT, PROJECT_REPO, BOARD_OWNER, BOARD_NUMBER all identical),
+# so checking it too would just enable the same sweep twice.
 install -m 644 "$WATCHER_DIR/deploy/watcher-hygiene@.service" /etc/systemd/system/watcher-hygiene@.service
 install -m 644 "$WATCHER_DIR/deploy/watcher-hygiene@.timer" /etc/systemd/system/watcher-hygiene@.timer
 systemctl daemon-reload
@@ -207,8 +208,17 @@ for f in "$WATCHER_DIR"/projects/*.env; do
   unset PROJECT_ROOT HYGIENE
   # shellcheck disable=SC1090
   . "$f"
+  # Probed against origin/main's own tree, never PROJECT_ROOT's checked-out working
+  # copy: that checkout can sit on an old commit, or detached off main entirely (a lane
+  # mid-build, or simply never fetched since this box was set up), and the working tree
+  # is then not evidence of what the repo ships on main. `cat-file -e <rev>:<path>` reads
+  # a blob's existence straight out of the object store, no checkout required, and a
+  # fetch first makes sure that ref itself is not stale.
   if [ "${HYGIENE:-0}" = 1 ] \
-     || { [ -n "${PROJECT_ROOT:-}" ] && { [ -x "$PROJECT_ROOT/bin/hygiene.sh" ] || [ -x "$PROJECT_ROOT/scripts/hygiene.sh" ]; }; }; then
+     || { [ -n "${PROJECT_ROOT:-}" ] && [ -d "$PROJECT_ROOT/.git" ] \
+          && { git -C "$PROJECT_ROOT" fetch -q origin main 2>/dev/null; true; } \
+          && { git -C "$PROJECT_ROOT" cat-file -e origin/main:bin/hygiene.sh 2>/dev/null \
+               || git -C "$PROJECT_ROOT" cat-file -e origin/main:scripts/hygiene.sh 2>/dev/null; }; }; then
     systemctl is-enabled --quiet "watcher-hygiene@$p.timer" 2>/dev/null \
       || systemctl enable --now "watcher-hygiene@$p.timer" >/dev/null 2>&1 \
       || echo "warning: could not enable watcher-hygiene@$p.timer" >&2

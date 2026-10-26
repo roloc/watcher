@@ -208,7 +208,7 @@ grep -q "stale branch card-9-old" "$TMP/last-body" && pass "…the card body car
 #    checks can still run.
 fresh; hygiene_fixture bin; exitcode 1; report "finding"; next_issue 702
 run
-grep -q "^BOARD_NUMBER=unset$" "$TMP/hygiene-calls" && pass "hygiene.sh never saw BOARD_NUMBER (its board-token check stays off)" || flunk "BOARD_NUMBER leaked into hygiene.sh" "$(cat "$TMP/hygiene-calls")"
+grep -q "^BOARD_NUMBER=unset$" "$TMP/hygiene-calls" && pass "hygiene.sh's own subprocess never sees BOARD_NUMBER" || flunk "BOARD_NUMBER leaked into hygiene.sh" "$(cat "$TMP/hygiene-calls")"
 grep -q "^GITHUB_REPOSITORY=roloc/testproj$" "$TMP/hygiene-calls" && pass "…but GITHUB_REPOSITORY is set" || flunk "GITHUB_REPOSITORY missing" "$(cat "$TMP/hygiene-calls")"
 
 # 10. hygiene-card.md, when the project ships one, is prepended to the card body
@@ -232,6 +232,13 @@ run
 called "gh issue create -R roloc/testproj" && pass "board move fails: the card still gets filed" || flunk "card not filed" "$(cat "$CALLS")"
 out_has "could not put it on the board" && pass "…and says to check by hand" || flunk "no warning for the failed move" "$(cat "$TMP/out")"
 
+# 12b. Same, when it's the item-add step that fails rather than the move
+fresh; hygiene_fixture bin; exitcode 1; report "finding"; next_issue 705; touch "$TMP/item-add-fails"
+run
+called "gh issue create -R roloc/testproj" && pass "item-add fails: the card still gets filed" || flunk "card not filed" "$(cat "$CALLS")"
+out_has "could not put it on the board" && pass "…and says to check by hand" || flunk "no warning for the failed item-add" "$(cat "$TMP/out")"
+not_called "board move" && pass "…and never calls board move at all" || flunk "moved a card never added to the board" "$(cat "$CALLS")"
+
 # 13. The throwaway checkout never touches PROJECT_ROOT's own working tree
 fresh; hygiene_fixture bin; exitcode 0
 echo "untouched sentinel" > "$TMP/project-root/sentinel.txt"
@@ -245,6 +252,36 @@ fresh; hygiene_fixture bin; exitcode 0
 run
 run
 [ "$(rc)" = 0 ] && pass "a second run reuses the throwaway checkout and still succeeds" || flunk "second run failed" "$(cat "$TMP/out")"
+
+# 15. The throwaway checkout's own `origin` is the real remote (PROJECT_ROOT's own origin
+#    url) — never PROJECT_ROOT's local path. Otherwise hygiene.sh's own stale-branch
+#    check, which fetches and reads refs/remotes/origin/* INSIDE the checkout, would see
+#    PROJECT_ROOT's own local branch state instead of what is actually on GitHub.
+fresh; hygiene_fixture bin; exitcode 0
+run
+checkout_origin="$(git -C "$TMP/project-root-worktrees/hygiene-sweep" remote get-url origin)"
+if [ "$checkout_origin" = "$ORIGIN" ]; then
+  pass "the throwaway checkout's origin is the real remote, not PROJECT_ROOT's local path"
+else
+  flunk "checkout's origin is wrong" "got $checkout_origin, wanted $ORIGIN"
+fi
+
+# 16. PROJECT_ROOT's own checked-out branch can lag behind origin/main — nothing promises
+#    it is current. hygiene-run.sh fetches origin/main itself before anything else, so a
+#    stale PROJECT_ROOT does not leave the throwaway checkout behind.
+fresh; hygiene_fixture bin; exitcode 0
+echo newer > "$ORIGIN/newer.txt"
+git -C "$ORIGIN" add newer.txt
+git -C "$ORIGIN" commit -q -m "a newer commit, not yet in PROJECT_ROOT" >/dev/null
+latest="$(git -C "$ORIGIN" rev-parse main)"
+# PROJECT_ROOT is deliberately NOT fetched here — its own idea of main is still the older commit.
+run
+checkout_head="$(git -C "$TMP/project-root-worktrees/hygiene-sweep" rev-parse HEAD)"
+if [ "$checkout_head" = "$latest" ]; then
+  pass "a stale PROJECT_ROOT does not leave the throwaway checkout behind"
+else
+  flunk "throwaway checkout is on the wrong commit" "wanted $latest got $checkout_head"
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then

@@ -629,6 +629,14 @@ def set_option(issue, field_name, value):
                  + " | ".join(o["name"] for o in f["options"]))
     it = next((i for i in items() if i["number"] == issue_num(issue)), None)
     if not it:
+        # Same miss-invalidates-and-retries-once-live rule as the field/option lookup
+        # above: a card added to the board seconds ago (card #196's hygiene-run.sh files
+        # and moves one in the same breath) is almost certainly missing from a cache that
+        # can be up to BOARD_CACHE_SEC old, and a stale-cache miss here used to read as
+        # "not on the board" rather than "not in the cache yet."
+        _cache_invalidate(_items_cache_name())
+        it = next((i for i in items(fresh=True) if i["number"] == issue_num(issue)), None)
+    if not it:
         sys.exit(f"board.py: issue #{issue} is not on the board")
     m = """mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{
       projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item{ id } } }"""

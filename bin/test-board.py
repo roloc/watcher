@@ -436,6 +436,45 @@ check("even with a reader racing inside the mutation's own call, the cache is li
       "function's own invalidate is always the LAST write, so the race's re-warm can "
       "never be the one left standing", len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
 
+print("15c. card #196 (bin/hygiene-run.sh): set_option's own ITEM lookup, not just "
+      "project()'s field/option lookup, retries once live on a miss — a card added to "
+      "the board seconds ago is almost certainly missing from a cache that can be up to "
+      "BOARD_CACHE_SEC old, and a stale-cache miss here used to read as the issue never "
+      "having been on the board at all, which is exactly what a `move` right after "
+      "`item-add` hits")
+board.OWNER, board.NUMBER = "roloc", 107
+item_miss_calls = []
+
+
+def item_miss_then_found_stub_run(cmd, **kwargs):
+    if cmd[:3] != ["gh", "api", "graphql"]:
+        return stub_run(cmd, **kwargs)
+    kv = _graphql_kv(cmd)
+    if "items(first:100" not in kv["query"]:
+        # The field/option fetch, and the mutation itself (set_option's own write) —
+        # neither is the items() lookup this case is about.
+        return graphql_stub_run(cmd, **kwargs)
+    item_miss_calls.append(1)
+    # Missing on the first (cached-path) read, present on the second (fresh) one — the
+    # same shape renamed_column_stub_run uses above for project()'s own miss-retry.
+    nodes = [] if len(item_miss_calls) == 1 else [
+        {"id": "ITEM_107", "fieldValues": {"nodes": []},
+         "content": {"number": 107, "title": "t", "url": "https://x", "state": "OPEN",
+                      "labels": {"nodes": []}}}]
+    payload = {"rateLimit": {"remaining": 4312, "resetAt": "2026-10-09T20:00:00Z", "limit": 5000, "cost": 1},
+               "user": {"projectV2": {"items": {
+                   "pageInfo": {"hasNextPage": False, "endCursor": None},
+                   "nodes": nodes}}}}
+    return FakeResult(json.dumps({"data": payload}))
+
+
+board.subprocess.run = item_miss_then_found_stub_run
+board.cmd_move("107", "In progress")
+check("a freshly-added card missing from the stale cache is found on the live retry, "
+      "not reported as never having been on the board",
+      len(item_miss_calls) == 2, item_miss_calls)
+board.subprocess.run = graphql_stub_run
+
 print("16. BOARD_CACHE_SEC=0 disables the cache entirely — reads and writes both — "
       "which is what the offline suites set")
 board.OWNER, board.NUMBER = "roloc", 101
