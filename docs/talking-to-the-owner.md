@@ -78,11 +78,16 @@ comment, a log line). Those can be as dense as they need to be.
 
 A good test: could the owner answer with a single letter, from the first screen, without
 opening the details? If the answer needs them to look at something, is the link to it on
-that first screen? If not, rewrite.
+that first screen? If not, rewrite. (An access fact, rule 3, has no letter to answer with —
+the test there is whether the one action is clear enough to just do.)
 
 ## Templates
 
 ### A Stuck card comment (the tick)
+
+The shape below is for a question — a product decision, a judgment call. An access-fact ask
+(rule 3) is not this template with blanks filled in: it drops the `**Look:**` list down to
+the one action line, with no `**Question:**` block and no lettered options after it.
 
 ```
 🤖 **Needs @<login>: <one sentence saying what you need decided>**
