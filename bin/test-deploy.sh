@@ -814,6 +814,8 @@ check "bootstrap: the gh keyring and apt source land under the overridden dirs, 
 check "bootstrap: ends by pointing at install.sh"            bout_has "install.sh"
 check "bootstrap: installs xvfb, unzip and Godot's shared libraries in one apt call" \
       bash -c 'grep -q "apt-get install -y -qq xvfb unzip libfontconfig1" "'"$CALLS"'"'
+check "bootstrap: installs xauth on its own, not inside the godot gate" \
+      bash -c 'grep -q "apt-get install -y -qq xauth$" "'"$CALLS"'" && grep -q "installed xauth$" "'"$TMP/bout"'"'
 check "bootstrap: downloads the pinned Godot from the official release" \
       bash -c 'grep -q "curl.*godotengine/godot/releases/download/4.7.2-stable" "'"$CALLS"'"'
 check "bootstrap: puts godot4 under the overridden install dir, never /usr/local" \
@@ -822,10 +824,17 @@ check "bootstrap: puts godot4 under the overridden install dir, never /usr/local
 bootstrap_run
 check "bootstrap: a second run on the same box exits clean"  brc_is 0
 check "bootstrap: ...finds every tool already there now"     bash -c '
-  for p in git python3 curl chromium gh; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done
+  for p in git python3 curl chromium gh xauth; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done
   grep -q "already have godot4" "'"$TMP/bout"'"'
 check "bootstrap: ...and never calls apt-get or npm a second time" bash -c '
   not_called() { ! grep -q -- "$1" "'"$CALLS"'"; }; not_called "apt-get" && not_called "npm i"'
+
+# The box that stalled twreborn #7: godot4 already installed (so the godot gate is
+# skipped), xauth missing. A re-run must still install xauth, not say "done" and leave it.
+rm -f "$BBIN/xauth"
+bootstrap_run
+check "bootstrap: a box with godot4 but no xauth still gets xauth" bash -c '
+  grep -q "apt-get install -y -qq xauth$" "'"$CALLS"'" && grep -q "already have godot4" "'"$TMP/bout"'"'
 
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi

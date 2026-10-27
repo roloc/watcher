@@ -105,6 +105,18 @@ fi
 # own scripts/godot.sh prefers a matching godot4 on the PATH and otherwise downloads the
 # same pin per-user, so this step is what saves every lane on the box that download — bump
 # GODOT_VERSION here and in that script (and its version test) together.
+# xvfb-run refuses to start without the xauth binary (exit 3, "xauth command not found"),
+# and xauth is only a Recommends of xvfb, which a no-recommends LXC skips. It gets its own
+# check OUTSIDE the godot gate below: that gate is skipped on a box that already has the
+# engine — exactly the box that stalled on it (twreborn card #7, October 26, 2026).
+if have xauth; then
+  say "already have xauth"
+else
+  apt_update_once
+  apt-get install -y -qq xauth
+  say "installed xauth"
+fi
+
 GODOT_VERSION="${GODOT_VERSION:-4.7.2-stable}"
 GODOT_INSTALL_DIR="${GODOT_INSTALL_DIR:-/usr/local}"
 GODOT_BIN="$GODOT_INSTALL_DIR/bin/godot4"
