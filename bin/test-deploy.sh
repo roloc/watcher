@@ -829,7 +829,7 @@ check "bootstrap: ...finds every tool already there now"     bash -c '
 check "bootstrap: ...and never calls apt-get or npm a second time" bash -c '
   not_called() { ! grep -q -- "$1" "'"$CALLS"'"; }; not_called "apt-get" && not_called "npm i"'
 
-# The box that stalled twreborn #7: godot4 already installed (so the godot gate is
+# The box that stalled NullTrader #7: godot4 already installed (so the godot gate is
 # skipped), xauth missing. A re-run must still install xauth, not say "done" and leave it.
 rm -f "$BBIN/xauth"
 bootstrap_run
