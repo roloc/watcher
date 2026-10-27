@@ -12,7 +12,7 @@
 # carry it), chromium (the browser bin/browse.py and every tick's reviewer pass need), Node
 # 22 (NodeSource's setup script — Debian 12's own archive ships Node 18),
 # `@anthropic-ai/claude-code` (npm -g, the CLI every tick runs as), and the pinned Godot 4
-# plus Xvfb and the engine's shared libraries (for projects like twreborn whose tests and
+# plus Xvfb and the engine's shared libraries (for projects like nulltrader whose tests and
 # screenshots run the engine headless). Card #160.
 #
 # What it does not do: write /etc/watcher/env, create the watcher user, or start any unit —
@@ -98,7 +98,7 @@ else
 fi
 
 # --- Godot 4 (pinned) + Xvfb, for projects whose tests and screenshots run the engine ----
-# twreborn (Trade Wars Reborn, the Godot prototype) runs its GUT suites through the engine
+# nulltrader (Null Trader, the Godot prototype) runs its GUT suites through the engine
 # on every tick, and its screenshot script renders under a virtual display. The official
 # linux binary loads X11/GL shared libraries even with --headless, so on a minimal LXC
 # they come with it; xvfb is the virtual display, unzip unpacks the release. The project's
@@ -108,7 +108,7 @@ fi
 # xvfb-run refuses to start without the xauth binary (exit 3, "xauth command not found"),
 # and xauth is only a Recommends of xvfb, which a no-recommends LXC skips. It gets its own
 # check OUTSIDE the godot gate below: that gate is skipped on a box that already has the
-# engine — exactly the box that stalled on it (twreborn card #7, October 26, 2026).
+# engine — exactly the box that stalled on it (NullTrader card #7, October 26, 2026).
 if have xauth; then
   say "already have xauth"
 else
