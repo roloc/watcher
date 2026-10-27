@@ -812,8 +812,8 @@ check "bootstrap: installs the CLI with npm -g"              bash -c 'grep -q "n
 check "bootstrap: the gh keyring and apt source land under the overridden dirs, never /etc" \
       bash -c '[ -f "'"$TMP"'/apt-keyrings/githubcli-archive-keyring.gpg" ] && [ -f "'"$TMP"'/apt-sources/github-cli.list" ]'
 check "bootstrap: ends by pointing at install.sh"            bout_has "install.sh"
-check "bootstrap: installs xvfb, unzip and Godot's shared libraries in one apt call" \
-      bash -c 'grep -q "apt-get install -y -qq xvfb unzip libfontconfig1" "'"$CALLS"'"'
+check "bootstrap: installs xvfb, xauth, unzip and Godot's shared libraries in one apt call" \
+      bash -c 'grep -q "apt-get install -y -qq xvfb xauth unzip libfontconfig1" "'"$CALLS"'"'
 check "bootstrap: downloads the pinned Godot from the official release" \
       bash -c 'grep -q "curl.*godotengine/godot/releases/download/4.7.2-stable" "'"$CALLS"'"'
 check "bootstrap: puts godot4 under the overridden install dir, never /usr/local" \
