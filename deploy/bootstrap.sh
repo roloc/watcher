@@ -101,11 +101,22 @@ fi
 # twreborn (Trade Wars Reborn, the Godot prototype) runs its GUT suites through the engine
 # on every tick, and its screenshot script renders under a virtual display. The official
 # linux binary loads X11/GL shared libraries even with --headless, so on a minimal LXC
-# they come with it; xvfb is the virtual display (xauth because xvfb-run refuses to start
-# without it), unzip unpacks the release. The project's
+# they come with it; xvfb is the virtual display, unzip unpacks the release. The project's
 # own scripts/godot.sh prefers a matching godot4 on the PATH and otherwise downloads the
 # same pin per-user, so this step is what saves every lane on the box that download — bump
 # GODOT_VERSION here and in that script (and its version test) together.
+# xvfb-run refuses to start without the xauth binary (exit 3, "xauth command not found"),
+# and xauth is only a Recommends of xvfb, which a no-recommends LXC skips. It gets its own
+# check OUTSIDE the godot gate below: that gate is skipped on a box that already has the
+# engine — exactly the box that stalled on it (twreborn card #7, October 26, 2026).
+if have xauth; then
+  say "already have xauth"
+else
+  apt_update_once
+  apt-get install -y -qq xauth
+  say "installed xauth"
+fi
+
 GODOT_VERSION="${GODOT_VERSION:-4.7.2-stable}"
 GODOT_INSTALL_DIR="${GODOT_INSTALL_DIR:-/usr/local}"
 GODOT_BIN="$GODOT_INSTALL_DIR/bin/godot4"
@@ -121,9 +132,9 @@ if [ -x "$GODOT_LIB_DIR/Godot_v${GODOT_VERSION}_${GODOT_ASSET}" ] && [ -x "$GODO
   say "already have godot4"
 else
   apt_update_once
-  apt-get install -y -qq xvfb xauth unzip libfontconfig1 libx11-6 libxcursor1 libxinerama1 \
+  apt-get install -y -qq xvfb unzip libfontconfig1 libx11-6 libxcursor1 libxinerama1 \
     libxrandr2 libxi6 libgl1 libegl1 libgl1-mesa-dri
-  say "installed xvfb, xauth, unzip, and Godot's shared libraries"
+  say "installed xvfb, unzip, and Godot's shared libraries"
   install -d -m 0755 "$GODOT_LIB_DIR" "$GODOT_INSTALL_DIR/bin"
   # This script's command surface has no mktemp or rm (the offline suite stubs it, same
   # as apt), so the zip lands next to the unpacked binary and stays there — ~60 MB, once
