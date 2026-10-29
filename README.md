@@ -33,8 +33,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/hygiene.sh        the weekly debt sweep: stale branches, old TODOs, orphan scripts, dead doc
                           links; bin/hygiene-run.sh runs it on the box every Monday and files one
                           card from it (see "The weekly hygiene card")
-    bin/hygiene-run.sh    runs a project's own hygiene.sh on the box and files/moves its card;
-                          deploy/watcher-hygiene@.service, .timer, per project, opt-in (see below)
+    bin/hygiene-run.sh    runs a project's own hygiene.sh on the box, adds the watcher's own
+                          section (agent copies behind the watcher's agents/) and files/moves
+                          its card; deploy/watcher-hygiene@.service, .timer, per project,
+                          opt-in (see below)
     deploy/add-project.sh the dozen hand steps of putting a new project on the watcher, as one
                           idempotent script — run from the owner's Mac, never by a tick (see below)
     templates/project-CLAUDE.md  the section a project's own CLAUDE.md needs for /watch to run
@@ -289,6 +291,15 @@ same script runs on riffmap ([roloc/riffmap#711](https://github.com/roloc/riffma
 and riffmap-site ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)) —
 still from each repo's own GitHub Actions workflow and `BOARD_TOKEN`, pending their own
 box-side move; the script itself is one script with each repo's paths either way.
+
+On the box the runner adds one section of the watcher's own to every project's sweep
+(card [#206](https://github.com/roloc/watcher/issues/206)): a project's
+`.claude/agents/reviewer.md` or `usability.md` that no longer matches the deployed
+watcher's `agents/` copy is a finding naming the file and the watcher commit it differs
+from. Those copies shadow the installed ones, and the watcher's `agents/` changes with no
+PR in the project, so no check on the project's own PRs can see it; the fix is mechanical,
+copy the file in and open the PR. A project with `HYGIENE=1` in its project file and no
+`hygiene.sh` of its own (azeroth-rewind) gets that section alone.
 
 Three rules keep it cheap:
 

@@ -65,6 +65,18 @@ WDIR="$TMP/opt"
 mkdir -p "$WDIR/projects"
 export WATCHER_DIR="$WDIR"
 
+# The fixture watcher's own agents/ (card #206): what a project's .claude/agents copies
+# are compared against. A git repo with one commit, so the finding line can name the
+# watcher's commit the way the real one names /opt/watcher's.
+mkdir -p "$WDIR/agents"
+echo "reviewer v1" > "$WDIR/agents/reviewer.md"
+echo "usability v1" > "$WDIR/agents/usability.md"
+git -C "$WDIR" init -q -b main
+git -C "$WDIR" config user.email test@example.com
+git -C "$WDIR" config user.name Test
+git -C "$WDIR" add -A; git -C "$WDIR" commit -q -m "fixture watcher"
+WATCHER_SHA="$(git -C "$WDIR" rev-parse --short HEAD)"
+
 cat > "$WDIR/projects/testproj.env" <<EOF
 PROJECT_NAME=testproj
 PROJECT_ROOT=$TMP/project-root
@@ -121,6 +133,25 @@ hygiene_card_md() {
   echo "CARD TEMPLATE" > "$ORIGIN/$dir/hygiene-card.md"
   git -C "$ORIGIN" add "$dir/hygiene-card.md"
   git -C "$ORIGIN" commit -q -m "add $dir/hygiene-card.md" >/dev/null
+  git -C "$TMP/project-root" fetch -q origin main
+  git -C "$TMP/project-root" merge -q --ff-only origin/main
+}
+
+# agent_copy <name> <content> — commits .claude/agents/<name>.md into $ORIGIN (the project's
+# own copy, the shape riffmap, riffmap-site and azeroth-rewind carry) and fetches it into
+# PROJECT_ROOT; no_agent_copies removes them all again.
+agent_copy() {
+  mkdir -p "$ORIGIN/.claude/agents"
+  printf '%s\n' "$2" > "$ORIGIN/.claude/agents/$1.md"
+  git -C "$ORIGIN" add -A
+  git -C "$ORIGIN" commit -q -m "agent copy $1" >/dev/null
+  git -C "$TMP/project-root" fetch -q origin main
+  git -C "$TMP/project-root" merge -q --ff-only origin/main
+}
+no_agent_copies() {
+  rm -rf "$ORIGIN/.claude"
+  git -C "$ORIGIN" add -A
+  git -C "$ORIGIN" commit -q -m "remove agent copies" --allow-empty >/dev/null
   git -C "$TMP/project-root" fetch -q origin main
   git -C "$TMP/project-root" merge -q --ff-only origin/main
 }
@@ -282,6 +313,55 @@ if [ "$checkout_head" = "$latest" ]; then
 else
   flunk "throwaway checkout is on the wrong commit" "wanted $latest got $checkout_head"
 fi
+
+# 17. (card #206) The project's own sweep is clean, but its .claude/agents/reviewer.md is a
+#     fork of the watcher's: one finding, filed, naming the file and the watcher's commit.
+#     Its usability.md copy matches and is not listed. This is the case that fails on main.
+fresh; hygiene_fixture bin; exitcode 0
+agent_copy reviewer "reviewer v0 — a September fork"; agent_copy usability "usability v1"
+next_issue 706
+run
+if [ "$(rc)" = 0 ] && called "gh issue create -R roloc/testproj"; then pass "a drifted reviewer.md copy: a card is filed"; else flunk "drifted copy filed nothing" "rc=$(rc) $(cat "$CALLS")"; fi
+grep -q '`.claude/agents/reviewer.md` differs from the watcher'"'"'s `agents/reviewer.md`' "$TMP/last-body" \
+  && pass "…the body names the file" || flunk "body does not name reviewer.md" "$(cat "$TMP/last-body" 2>/dev/null)"
+grep -q "at $WATCHER_SHA" "$TMP/last-body" && pass "…and the watcher commit it differs from" || flunk "body does not name the watcher commit" "$(cat "$TMP/last-body" 2>/dev/null)"
+! grep -q 'usability.md` differs' "$TMP/last-body" && pass "…a matching usability.md copy is not listed" || flunk "listed a copy that matches" "$(cat "$TMP/last-body")"
+! grep -q "Clean: nothing to do" "$TMP/last-body" && pass "…and the project's own 'clean' line does not head a card with a finding" || flunk "'clean' line left in the body" "$(cat "$TMP/last-body")"
+called "board move 706 Ready" && pass "…filed straight into Ready like any other finding" || flunk "not moved to Ready" "$(cat "$CALLS")"
+
+# 17b. The project's own finding and the watcher's land in the one card body
+fresh; hygiene_fixture bin; exitcode 1; report "- stale branch card-9-old"; next_issue 707
+run
+if grep -q "stale branch card-9-old" "$TMP/last-body" && grep -q 'reviewer.md` differs' "$TMP/last-body"; then
+  pass "the project's own finding and the watcher's section share one body"
+else
+  flunk "one of the two findings is missing from the body" "$(cat "$TMP/last-body" 2>/dev/null)"
+fi
+
+# 18. Copies identical to the watcher's: clean, nothing filed
+fresh; hygiene_fixture bin; exitcode 0; agent_copy reviewer "reviewer v1"
+run
+if [ "$(rc)" = 0 ] && out_has "clean"; then pass "copies identical to the watcher's: clean"; else flunk "identical copies not clean" "$(cat "$TMP/out")"; fi
+not_called "gh" && pass "…and no gh calls" || flunk "gh called with identical copies" "$(cat "$CALLS")"
+
+# 18b. No copies at all (the installed agents serve the project): clean too
+fresh; no_agent_copies; exitcode 0
+run
+if [ "$(rc)" = 0 ] && out_has "clean"; then pass "no .claude/agents copies at all: clean"; else flunk "absent copies not clean" "$(cat "$TMP/out")"; fi
+not_called "gh" && pass "…and no gh calls" || flunk "gh called with no copies" "$(cat "$CALLS")"
+
+# 19. HYGIENE=1 and no hygiene.sh of its own (azeroth-rewind): the watcher's section runs
+#     alone; clean exits 0 with nothing filed, a drifted copy still files a card.
+fresh; no_hygiene_script
+echo "HYGIENE=1" >> "$WDIR/projects/testproj.env"
+run
+if [ "$(rc)" = 0 ] && out_has "clean"; then pass "HYGIENE=1, no hygiene.sh: the watcher's section alone, clean exits 0"; else flunk "HYGIENE=1 without a script" "rc=$(rc) $(cat "$TMP/out")"; fi
+not_called "gh" && pass "…and no gh calls" || flunk "gh called on a clean watcher-only sweep" "$(cat "$CALLS")"
+fresh; agent_copy usability "usability v0 — drifted"; next_issue 708
+run
+if [ "$(rc)" = 0 ] && called "gh issue create -R roloc/testproj"; then pass "HYGIENE=1, no hygiene.sh, a drifted copy: a card is filed"; else flunk "watcher-only sweep filed nothing" "rc=$(rc) $(cat "$TMP/out")"; fi
+grep -q 'usability.md` differs' "$TMP/last-body" && pass "…naming the file" || flunk "body does not name usability.md" "$(cat "$TMP/last-body" 2>/dev/null)"
+grep -q "the watcher's own checks" "$TMP/last-body" && pass "…under the watcher's own header" || flunk "no header on a watcher-only body" "$(cat "$TMP/last-body" 2>/dev/null)"
 
 echo
 if [ "$fail" -eq 0 ]; then
