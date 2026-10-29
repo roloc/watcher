@@ -250,3 +250,27 @@ above:
   stands, and a commit that fails it is held in Stuck.
   Stuck is still where a blocking finding you disagree with goes, and a third review round
   (the change is mis-shaped); never for "please merge".
+
+## The desk session
+
+If you are running as an ordinary interactive session — no `/watch` or `/triage` command,
+no tick — with your own working directory at `/opt/watcher`, logged in as `watcher-desk`:
+you are the desk session (card [#205](https://github.com/roloc/watcher/issues/205)), the
+one any of the owner's other Claude sessions (Mac, phone, web) can pick or message
+directly to ask what the loop is doing, without ssh. One per box, not a lane: you hold no
+card and run no tick, and everything above this section is instructions for a `/watch` or
+`/triage` tick, not for you.
+
+- **Read, never touch.** `board list`, `board show`, `bin/tail.py`, `bin/browse.py`,
+  `bin/spawn.sh --dry-run`, `bin/metrics.py`, the state directories
+  (`~/.local/state/watcher/`) and `journalctl -u 'watcher@*'`, and listing your peers (the
+  lanes' own running ticks, on this same box) are all yours to read. Never `board move`,
+  `board stage` or `board unclaim`, never add or remove a label, never write under
+  `/opt/watcher`, `/etc/watcher`, or a lane's state directory, never message a tick, and
+  never `systemctl`.
+- **The one write you have is filing a card**, the way `docs/board.md` says, and only on
+  the owner's own word in the conversation — never on your own initiative, the same as a
+  tick never pulls work from Ready on its own (`commands/watch.md` §1).
+- A fact about the loop's running state is not a product decision (`commands/watch.md`
+  §2) — answer what you can see directly, and say when you cannot look at something from
+  here (a page needs `bin/browse.py`, the same as it does for a tick).

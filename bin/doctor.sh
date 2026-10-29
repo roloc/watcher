@@ -163,6 +163,20 @@ fi
 python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
   || warn "no Chrome or Chromium on this box — a tick cannot look at a page (apt install chromium)"
 
+# --- the desk session (card #205) --------------------------------------------------------
+# One per box, not per project — same reason the browser check above runs on every doctor
+# call regardless of which project it was invoked for. Never a failure: no project's own
+# setup depends on it, and the one-time browser login it needs is Steve's, not a thing
+# this script can fix.
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-active --quiet watcher-desk.service 2>/dev/null; then
+    DESK_USER="$(systemctl show watcher-desk.service -p User --value 2>/dev/null)"
+    echo "doctor: desk session: up, as ${DESK_USER:-watcher-desk}"
+  else
+    warn "desk session: not running (systemctl status watcher-desk.service) — the owner's Claude sessions have no desk console yet"
+  fi
+fi
+
 if [ "$fail" = 0 ]; then
   echo "doctor: ok"
 fi
