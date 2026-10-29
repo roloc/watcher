@@ -1,0 +1,8 @@
+{
+  "name": "guard",
+  "version": "0.1.0",
+  "description": "Refuses the watcher's hard-rule commands inside a tick before they run: a force-push, a push to main, an admin merge, systemctl, the deploy scripts, and a file write outside the worktree.",
+  "author": {
+    "name": "roloc/watcher"
+  }
+}
