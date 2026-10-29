@@ -240,6 +240,19 @@ to send it to Discord by hand instead of waiting for Monday.
 
 ## Pause, resume, logs
 
+**The desk.** The box keeps a Claude session of its own, named **`agents desk`** (the
+box's name, then "desk"), in your own sessions list — the Claude app's sidebar, the phone
+app, claude.ai/code — whenever the box is up and the desk is logged in. Open it, or message
+it from another session, and ask in plain words: *is the riffmap lane idle?* — *what did the
+tick on #204 do with my change?* — *what did the deployer last say?* — *show me the dry run
+for the watcher lane* — *tell me when riffmap goes idle*. It reads the lanes, the board and
+the deployer's history and never changes a card, a label or a service; the one thing it will
+write is a card, when you ask for one. A command it is not sure about asks you, right there
+in the session. If it is missing from the list, it has not been logged in yet: once, on the
+box, `sudo -u watcher-desk -H claude auth login` (and `sudo -u watcher-desk -H gh auth
+login`, so it can read the board) — it comes up on its own a few minutes after. Everything
+under the fold is the fallback for someone at a terminal on the box.
+
 <details><summary>Commands (on the box)</summary>
 
 ```

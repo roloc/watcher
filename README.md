@@ -51,6 +51,11 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/test-detect.sh    the detector's cases, offline, every external command stubbed
     bin/test-hygiene-run.sh  bin/hygiene-run.sh's cases, offline, real git, gh/board stubbed
     bin/test-install-hygiene.sh  deploy/install.sh's hygiene opt-in logic, offline, real git
+    bin/desk.sh           the desk: a read-only Remote Control session on the box, in the owner's own
+                          Claude sessions list (deploy/watcher-desk.service runs it; deploy/desk/ is its
+                          CLAUDE.md and permission lists; see "The desk")
+    bin/test-desk.sh      the desk runner's cases, offline, claude and gh stubbed
+    bin/test-install-desk.sh  deploy/install.sh's install_desk, offline, every root-only command stubbed
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
@@ -275,6 +280,36 @@ nothing beyond bash and python3.
 
 Deploying is deliberately not a CI job: it would need a runner on the agents box. CI's
 `verify` is instead the first thing the box's deployer checks — see below.
+
+## The desk
+
+The owner never sshes to the box, and the floor page answers the phone's questions. The
+questions a developer has while changing the watcher from another Claude session are
+different — *is the lane idle yet*, *what did the tick on #204 do with my change*, *show me
+the dry run* — and since card [#205](https://github.com/roloc/watcher/issues/205) the box
+answers them itself: `watcher-desk.service` runs `bin/desk.sh`, which keeps a Claude Code
+Remote Control session open on the box, named `<box> desk`, in the owner's own sessions
+list on every device. Any of their sessions can open it or message it.
+
+It is read-only toward the loop, three ways at once: its `CLAUDE.md`
+(`deploy/desk/CLAUDE.md`) says what it may run and what it never does; its
+`.claude/settings.json` (`deploy/desk/settings.json`) allows the reads outright, denies
+`board move`, `systemctl`, the deploy scripts, `gh` writes and every write under
+`/opt/watcher`, `/etc/watcher` and `/home/watcher`, and asks the owner about anything else
+(permission mode `default`); and the guard mod (`mods/guard`) is loaded into it too. It runs
+as its own user, `watcher-desk`, never as `watcher`: Remote Control needs a full browser
+login of the owner's account (the lanes' `CLAUDE_CODE_OAUTH_TOKEN` is inference-only and it
+refuses it), and that credential must not sit where a tick can `cat` it. `install.sh` makes
+the user, stocks `/home/watcher-desk/desk` (a small git repo — Remote Control wants a git
+root) and enables the unit; it restarts the desk only when those files changed, so a deploy
+does not cut a conversation off. The one thing done by hand, once per box:
+
+    sudo -u watcher-desk -H claude auth login     # the owner's own account
+    sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work
+
+Until then `desk.sh` says so once in the journal and checks again every five minutes; the
+desk appears in the sessions list on its own once the login lands. `bin/doctor.sh` adds a
+one-line note when the unit is not running.
 
 ## The weekly hygiene card
 

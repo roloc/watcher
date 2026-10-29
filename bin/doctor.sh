@@ -163,6 +163,17 @@ fi
 python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
   || warn "no Chrome or Chromium on this box — a tick cannot look at a page (apt install chromium)"
 
+# --- the desk (card #205): a note, never a failure ---------------------------------------
+# One line when the box's desk session (watcher-desk.service) is not running — usually
+# because nobody has done its one-time login yet. Nothing a lane needs; a reader on the box
+# is the one who acts on it. Skipped where there is no systemd at all (a Mac).
+if command -v systemctl >/dev/null 2>&1; then
+  case "$(systemctl is-active watcher-desk.service 2>/dev/null)" in
+    active|"") ;;
+    *) warn "the desk session is not running (watcher-desk.service) — once, on the box: sudo -u watcher-desk -H claude auth login (docs/owner-cheat-sheet.md, \"The desk\")" ;;
+  esac
+fi
+
 if [ "$fail" = 0 ]; then
   echo "doctor: ok"
 fi

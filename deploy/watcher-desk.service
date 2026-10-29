@@ -1,0 +1,44 @@
+# The desk (card #205): a read-only Remote Control session on this box, in the owner's own
+# Claude sessions list, so a session on their Mac, phone or claude.ai/code can ask the box
+# in plain words what every lane is doing, what a tick did with a card, whether a lane is
+# idle, what the deployer last said — without ssh. One per box, not a lane: it holds no card
+# and does no work. The floor page stays the owner's view; this is the developer's.
+#
+# It runs as its OWN user, watcher-desk, never as watcher: Remote Control needs a full
+# browser login of the owner's account (the lanes' CLAUDE_CODE_OAUTH_TOKEN is inference-only
+# and Remote Control refuses it), and that credential must not sit in a home every tick —
+# a Claude process with no permission prompts — can read with one `cat`. watcher-desk reads
+# the lanes' state directories (world-readable) and the journal (SupplementaryGroups) and
+# writes nothing of the loop's. It is NOT in the `watcher` group and there is no
+# EnvironmentFile=/etc/watcher/env here, on purpose: that file (root:watcher 640) holds the
+# lanes' token and the webhook, and the desk has no business reading either.
+#
+# bin/desk.sh is what runs: it seeds the folder's trust, waits (one journal line, then
+# quietly) until `claude auth login` has been done once as watcher-desk, then execs
+# `claude remote-control` in /home/watcher-desk/desk — a small git repo deploy/install.sh
+# keeps stocked with deploy/desk/CLAUDE.md and deploy/desk/settings.json (the allow and
+# deny lists that make "read-only" a setting, not a hope). install.sh restarts this unit
+# only when those files changed, so a deploy does not cut a conversation off.
+[Unit]
+Description=The desk: a read-only Remote Control session on this box for the owner's own Claude sessions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=watcher-desk
+Group=watcher-desk
+SupplementaryGroups=systemd-journal
+WorkingDirectory=/home/watcher-desk/desk
+Environment=HOME=/home/watcher-desk
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=WATCHER_DIR=/opt/watcher
+Environment=DESK_DIR=/home/watcher-desk/desk
+ExecStart=/opt/watcher/bin/desk.sh
+Restart=always
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

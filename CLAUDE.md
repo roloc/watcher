@@ -86,6 +86,16 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   review that never ran, fails it instead of merging silently. Required alongside `verify`
   in `.github/workflows/ci.yml`'s `review-receipt` job. `bash bin/test-receipt.sh` is its
   offline suite (CI runs it); run it after touching the file.
+- `bin/desk.sh`, `deploy/watcher-desk.service`, `deploy/desk/` — the desk (card #205): a
+  read-only Remote Control session on the box, in the owner's own Claude sessions list, run
+  as its own user `watcher-desk` (its login is the owner's own browser login, never
+  `/etc/watcher/env`'s token). `deploy/desk/CLAUDE.md` is what the desk reads and
+  `deploy/desk/settings.json` its allow and deny lists — a change to either reaches the box
+  on the next deploy (`install.sh`'s `install_desk` copies them in and restarts the desk only
+  when they changed). Read-only toward the loop: never `board move`, never `systemctl`,
+  never a write under `/opt/watcher`, `/etc/watcher` or `/home/watcher`. `bash
+  bin/test-desk.sh` and `bash bin/test-install-desk.sh` are the offline suites (CI runs
+  both); run them after touching any of these files. README, "The desk".
 - `templates/` — what a project copies in: `project-CLAUDE.md` (the section its `CLAUDE.md`
   needs for `/watch`) and `board.md` (its `docs/board.md`, blanks for the repo, board
   owner, number and login; `deploy/add-project.sh` prints the `sed` that fills them, and
