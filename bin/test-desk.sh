@@ -148,7 +148,10 @@ import os, sys
 open(os.environ["CALLS"], "a").write("board.py %s owner=%s number=%s\n" % (" ".join(sys.argv[1:]), os.environ.get("BOARD_OWNER", "unset"), os.environ.get("BOARD_NUMBER", "unset")))
 EOF2
 printf '#!/usr/bin/env bash\necho "spawn.sh $* owner=${BOARD_OWNER:-unset}" >> "$CALLS"\n' > "$RDIR/bin/spawn.sh"
-read_() { : > "$CALLS"; WATCHER_DIR="$RDIR" bash "$DESKREAD" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"; }
+# The script finds its release by its own location, so a copy under $RDIR/bin reads $RDIR —
+# and WATCHER_DIR in the environment is deliberately ignored (set here to prove it).
+cp "$DESKREAD" "$RDIR/bin/desk-read.sh"
+read_() { : > "$CALLS"; WATCHER_DIR="$TMP/not-this-one" bash "$RDIR/bin/desk-read.sh" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"; }
 echo
 echo "desk-read.sh"
 read_ riffmap show 12
@@ -171,6 +174,38 @@ read_ riffmap dry-run --once
 [ "$(rc)" = 2 ] && not_called "spawn.sh" && pass "dry-run takes no further arguments (no --once smuggled in)" || flunk "dry-run extra arg" "$(cat "$CALLS" "$TMP/out")"
 read_ riffmap
 [ "$(rc)" = 2 ] && pass "too few arguments: usage, exit 2" || flunk "usage" "rc=$(rc)"
+
+# 9. bin/desk-gh.sh: one owner/repo on github.com, four reads, no host, no URL, no browser, no write
+DESKGH="$HERE/desk-gh.sh"
+printf '#!/usr/bin/env bash\necho "gh $*" >> "$CALLS"\n' > "$BIN/gh.read"; chmod +x "$BIN/gh.read"
+cp "$BIN/gh.read" "$BIN/gh"   # replaces the login-status stub for these cases
+ghr() { : > "$CALLS"; bash "$DESKGH" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"; }
+echo
+echo "desk-gh.sh"
+ghr roloc/watcher issue view 204 --comments
+[ "$(rc)" = 0 ] && called "gh issue view -R roloc/watcher 204 --comments" && pass "issue view: gh with the repository fixed by the script" || flunk "issue view" "rc=$(rc) $(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher pr list --search "204 in:body" --state all --json number,title
+called "gh pr list -R roloc/watcher --search 204 in:body --state all --json number,title" && pass "pr list with a search, a state and --json goes through" || flunk "pr list" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher run view 123 --json conclusion; called "gh run view -R roloc/watcher 123 --json conclusion" && pass "run view" || flunk "run view" "$(cat "$CALLS")"
+ghr roloc/watcher pr checks 218; called "gh pr checks -R roloc/watcher 218" && pass "pr checks" || flunk "pr checks" "$(cat "$CALLS")"
+ghr evil.example/roloc/watcher issue view 1
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a host in the repository is refused" || flunk "host/owner/repo" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue view 1 -R evil.example/a/b
+[ "$(rc)" = 2 ] && not_called "gh" && pass "-R in the arguments is refused" || flunk "-R" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue view 1 --repo=evil.example/a/b
+[ "$(rc)" = 2 ] && not_called "gh" && pass "--repo= too" || flunk "--repo=" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher pr view https://evil.example/a/b/pull/1
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a URL in place of a number is refused" || flunk "URL" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue view 1 --web
+[ "$(rc)" = 2 ] && not_called "gh" && pass "--web is refused (a browser is a program)" || flunk "--web" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue edit 1 --add-label x
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a write subcommand is refused" || flunk "edit" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher pr merge 1
+[ "$(rc)" = 2 ] && not_called "gh" && pass "pr merge is refused" || flunk "merge" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher run view 1 --log
+[ "$(rc)" = 2 ] && not_called "gh" && pass "run view --log is refused (it is not needed, and it is large)" || flunk "--log" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc issue view 1
+[ "$(rc)" = 2 ] && pass "a bare owner is not a repository" || flunk "bare owner" "rc=$(rc)"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "$n cases, all passed"; else echo "$n cases, FAILURES ABOVE"; fi

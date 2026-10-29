@@ -26,7 +26,8 @@ in this folder) and by the guard mod, not only by this page.
   `floor-api.sh` is your only road to the floor service, and it takes one `/api/…` path and
   nothing else; `curl` itself is denied here, on purpose.
 - **The journal:** `journalctl -u 'watcher@*' -n 200`, `journalctl -u watcher@<lane> -n 50`,
-  `journalctl -u watcher-deploy -n 50`; `systemctl status|is-active|list-units|list-timers`.
+  `journalctl -u watcher-deploy -n 50`. Whether a unit is up is in the floor's
+  `/api/state.json` (`unit_active` per lane); `systemctl` itself asks.
 - **A lane's state:** `/home/watcher/.local/state/watcher/<lane>/` — `current` holds the
   card in flight (empty means idle), `logs/card-<n>-<ts>.json` the tick's result block and
   `logs/card-<n>-<ts>.stderr` its stderr, `attempts/`, `parked/`, `release` the release the
@@ -39,13 +40,15 @@ in this folder) and by the guard mod, not only by this page.
 - **A dry run of the spawner:** `/opt/watcher/bin/desk-read.sh <lane> dry-run` — the pick
   and the exact claude command, and it launches nothing.
 - Not on the list, and asked of the owner every time, on purpose: `git`, `awk`, `find`,
-  `sed`, `sort`, `uniq`, `cut`, `tr`, `jq`, `diff`, `python3` with anything but the two
-  wrappers, `metrics.py`, `browse.py` — anything that could reach `gh`, the network or a
-  file through a side door; `curl`, `wget`, `ssh`, `python3 -c`, `node -e`, `perl -e`,
-  `source` and `board` are denied outright. When a read needs one of them, ask — or use the
+  `sed`, `sort`, `uniq`, `cut`, `tr`, `jq`, `diff`, `systemctl`, `gh`, `python3` with
+  anything but the wrappers, `metrics.py`, `browse.py` — anything that could reach the
+  network or a file through a side door; `curl`, `wget`, `ssh`, `python3 -c`, `node -e`,
+  `perl -e`, `source`, `board` and `gh auth token` are denied outright. When a read needs one of them, ask — or use the
   listed command that does the same job.
-- `gh issue view`, `gh pr view`, `gh pr list`, `gh pr checks`, `gh run list|view` on the
-  projects' repos, with your own `gh` login.
+- **GitHub reads:** `/opt/watcher/bin/desk-gh.sh <owner/repo> issue view <n> --comments`,
+  `… issue list`, `… pr view|list|checks|diff …`, `… run view|list …` — on github.com, with
+  your own `gh` login; the script fixes the repository and refuses a host, a URL, `--web`
+  or a write. Never `gh` directly: it asks, on purpose.
 - Which release is live: `readlink -f /opt/watcher`; its commit is the folder's name. (Git
   itself is not on the list — `git log` can write a file — so a git read asks.)
 - The docs: `/opt/watcher/docs/how-it-works.md` is the map, `docs/board.md` the board
@@ -80,6 +83,7 @@ words; a path or a command only when they will need to go there.
 
 - "Is the riffmap lane idle?" — one line: idle, or which card, since when (`current`, and
   the newest `logs/` entry's time).
+- "Is there a PR for #204?" — `desk-gh.sh roloc/watcher pr list --search "204 in:body" --state all`.
 - "What did the tick on #204 do?" — the newest `logs/card-204-*.json`'s `result`,
   `subtype`, `num_turns` and cost, the last lines of its `.stderr`, and
   `floor-api.sh '/api/tail.json?lane=<lane>'` if a tick still holds it.

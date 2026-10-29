@@ -35,9 +35,11 @@ cat > "$BIN/id" <<'EOF2'
 [ "$1" = watcher-desk ] && { [ -f "$TMP/user-exists" ] && exit 0 || exit 1; }
 exec /usr/bin/id "$@"
 EOF2
+# useradd -m makes the home, as the real one does.
 cat > "$BIN/useradd" <<'EOF2'
 #!/usr/bin/env bash
 echo "useradd $*" >> "$CALLS"; touch "$TMP/user-exists"
+while [ $# -gt 0 ]; do case "$1" in -d) mkdir -p "$2"; shift 2 ;; *) shift ;; esac; done
 EOF2
 cat > "$BIN/getent" <<'EOF2'
 #!/usr/bin/env bash
@@ -99,6 +101,9 @@ cmp -s "$REPO/deploy/desk/settings.json" "$DESK_HOME/desk/.claude/settings.json"
 called "install -d -o root -g root -m 755 $DESK_HOME/desk/.claude" && called "install -m 644 -o root -g root $REPO/deploy/desk/settings.json" && pass "…and .claude/ and settings.json are root's, so the desk cannot rewrite its own allow list" || flunk "settings not root-owned" "$(grep install "$CALLS")"
 called "chown root:watcher-desk $DESK_HOME" && called "chmod 1775 $DESK_HOME" && called "install -d -o root -g watcher-desk -m 1775 $DESK_HOME/desk" && called "install -m 644 -o root -g root $REPO/deploy/desk/CLAUDE.md" && pass "…the home and the desk folder are root's, sticky, group-writable (nothing root put there can be renamed away), CLAUDE.md root's" || flunk "home/desk ownership" "$(grep -E 'chown|chmod|install -d' "$CALLS")"
 [ "$(git config --file "$RUNNER_HOME/.gitconfig" --get-all safe.directory 2>/dev/null)" = "$DESK_HOME/desk" ] && pass "…and the desk user's own ~/.gitconfig names the root-owned repo safe (git's dubious-ownership check)" || flunk "safe.directory not set" "$(cat "$RUNNER_HOME/.gitconfig" 2>/dev/null)"
+ok=1; for f in .bashrc .bash_profile .bash_login .profile .bash_logout; do called "install -m 644 -o root -g root /dev/null $DESK_HOME/$f" && [ -f "$DESK_HOME/$f" ] && [ ! -s "$DESK_HOME/$f" ] || ok=0; done
+[ "$ok" = 1 ] && pass "…the shell startup files are root's and empty (the Bash tool loads ~/.bashrc)" || flunk "startup files not pinned" "$(grep dev/null "$CALLS")"
+called "install -d -o root -g watcher-desk -m 1775 $DESK_HOME/.config $DESK_HOME/.config/gh" && [ "$(cat "$DESK_HOME/.config/gh/config.yml")" = "git_protocol: https" ] && called "install -m 644 -o root -g root $DESK_HOME/.config/gh/config.yml.new" && pass "…and gh's config.yml is root's (its browser: setting is a program gh would run)" || flunk "gh config not pinned" "$(grep config "$CALLS")"
 cmp -s "$REPO/bin/desk.sh" "$DESK_HOME/.desk.sh.installed" && pass "…a copy of the installed desk.sh is kept, to notice a change next deploy" || flunk "no installed desk.sh copy"
 called "install -d -o root -g watcher-desk -m 1775 $DESK_HOME/.claude" && [ "$(cat "$DESK_HOME/.claude/settings.json")" = "{}" ] && called "install -m 644 -o root -g root $DESK_HOME/.claude/settings.json.new $DESK_HOME/.claude/settings.json" && pass "…and the USER-scope ~/.claude/settings.json is root's empty {} in a root-owned sticky folder (no self-widening through the user scope)" || flunk "user-scope settings not pinned" "$(grep -i 'claude' "$CALLS")"
 [ -d "$DESK_HOME/desk/.git" ] && [ "$(git -C "$DESK_HOME/desk" rev-list --count HEAD 2>/dev/null)" = 1 ] && pass "…the desk folder is a git repo with the files committed (Remote Control wants a git root)" || flunk "desk folder is not a committed git repo"
@@ -114,6 +119,7 @@ run
 not_called "useradd" && pass "…no second useradd" || flunk "useradd again" "$(cat "$CALLS")"
 not_called "install -m 644" && pass "…no file copied" || flunk "copied unchanged files" "$(cat "$CALLS")"
 [ "$(git config --file "$RUNNER_HOME/.gitconfig" --get-all safe.directory | wc -l | tr -d ' ')" = 1 ] && pass "…and safe.directory is not added a second time" || flunk "safe.directory duplicated" "$(cat "$RUNNER_HOME/.gitconfig")"
+not_called "install -m 644 -o root -g root /dev/null" && not_called "config.yml.new" && pass "…the pinned startup files and gh config are left alone when already right" || flunk "re-pinned unchanged files" "$(grep -E 'dev/null|config.yml' "$CALLS")"
 not_called "systemctl restart" && not_called "systemctl enable" && pass "…and the desk is left running (no restart, no re-enable)" || flunk "touched the unit" "$(cat "$CALLS")"
 
 # 3. The desk's CLAUDE.md changed on the box (an older deploy's copy): it is replaced,

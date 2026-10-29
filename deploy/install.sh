@@ -138,6 +138,23 @@ install_desk() {
   # unlink, rename or replace an entry root owns, because with the sticky bit only the
   # entry's owner, the directory's owner or root may — and the directory's owner is root.
   chown root:watcher-desk "$home" && chmod 1775 "$home"
+  # The shell startup files are root's and empty: the Bash tool loads ~/.bashrc, so a file
+  # the desk could write there would be code it runs on every command. Same for gh's
+  # config.yml (its `browser:` setting is a program gh would run); gh's own hosts.yml,
+  # which the login writes, is a new entry the desk creates itself.
+  local f
+  for f in .bashrc .bash_profile .bash_login .profile .bash_logout; do
+    # -O: owned by whoever runs this (root on the box). No `stat -c`: GNU-only, and
+    # bin/test-install-desk.sh runs this on a Mac.
+    [ -f "$home/$f" ] && [ ! -s "$home/$f" ] && [ -O "$home/$f" ] \
+      || install -m 644 -o root -g root /dev/null "$home/$f"
+  done
+  install -d -o root -g watcher-desk -m 1775 "$home/.config" "$home/.config/gh"
+  if ! printf 'git_protocol: https\n' | cmp -s - "$home/.config/gh/config.yml"; then
+    printf 'git_protocol: https\n' > "$home/.config/gh/config.yml.new" \
+      && install -m 644 -o root -g root "$home/.config/gh/config.yml.new" "$home/.config/gh/config.yml" \
+      && rm -f "$home/.config/gh/config.yml.new"
+  fi
   install -d -o root -g watcher-desk -m 1775 "$desk"
   install -d -o root -g root -m 755 "$desk/.claude"
   if ! cmp -s "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; then

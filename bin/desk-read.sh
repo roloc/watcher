@@ -14,10 +14,12 @@
 #   bin/desk-read.sh <lane> dry-run           # the spawner's pick and exact command; launches nothing
 #
 # <lane> is a file name under projects/ (riffmap, riffmap-design, watcher, …), letters,
-# digits and dashes only. WATCHER_DIR is where the release is (default /opt/watcher).
+# digits and dashes only. The release is the folder this script lives in (resolved, so a
+# copy in /opt/watcher-releases/<sha>/bin reads that release) — never an environment
+# variable a desk-written startup file could point elsewhere.
 set -uo pipefail
 
-WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
+WATCHER_DIR="$(cd -P "$(dirname "$0")/.." && pwd)"
 usage() { echo "desk-read.sh: usage: desk-read.sh <lane> show <n> | list <column> | ask <n> | images <n> | dry-run" >&2; exit 2; }
 
 [ $# -ge 2 ] || usage

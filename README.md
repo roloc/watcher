@@ -316,12 +316,17 @@ argument) and pure readers (`cat`, `ls`, `grep`, `journalctl`, `systemctl status
 `gh … view|list` reads). Everything else asks the owner, in the session, on their phone.
 Three review rounds on [#218](https://github.com/roloc/watcher/pull/218) found what a
 general tool on such a list can be bent into — `curl` to any host, `git log --output`
-writing chosen text, `uniq IN OUT` copying a file — and each came off the list. What
-remains open, and is accepted: a reader with a shell redirection (`cat a > b`) can still
-write a file in the desk user's own home, nowhere else, and a card body is untrusted text
-the desk reads. The desk's own credentials (the owner's Claude login, its `gh` token) are
-the thing worth protecting there, and every road out — the network clients, the
-interpreters, `gh`'s writes — is denied or asks. The one thing done by hand, once per box:
+writing chosen text, `uniq IN OUT` copying a file — and each came off the list. GitHub is
+reached only through `bin/desk-gh.sh`, which fixes the repository to one `owner/repo` on
+github.com and refuses a host, a URL, `--web` or a write; `systemctl` asks, since `-H`
+reaches a host. What remains open, and is accepted: a reader with a shell redirection
+(`cat a > b`) can still write a file in the desk user's own home, nowhere else — and a
+file there can become code the desk runs as itself through `~/.claude.json` (which Claude
+Code must be able to write; the shell startup files and gh's `config.yml` are pinned
+root-owned and empty so those two roads are shut). A card body is untrusted text the desk
+reads. The desk's own credentials (the owner's Claude login, its `gh` token) are the thing
+worth protecting there, and every road out — the network clients, the interpreters,
+`gh`'s writes and `gh auth token` — is denied or asks. The one thing done by hand, once per box:
 
     sudo -u watcher-desk -H claude auth login     # the owner's own account
     sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work
