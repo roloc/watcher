@@ -874,6 +874,15 @@ Reply A, B or C on this card, or say which way you lean, then move it.
 # The exact claude command from section 1 step 5, flags verbatim — shared by the real
 # launch and --dry-run so they can never drift apart.
 #
+# `--plugin-dir "$WATCHER_HOME/mods/guard"` (card #204): the guard mod, loaded into every
+# tick. Its hooks refuse the hard-rule commands (a force-push, a push to main, an admin
+# merge, systemctl, the deploy scripts, a write outside the worktree) before they run — a
+# second wall behind the prose in docs/how-it-works.md, never the only one. WATCHER_HOME,
+# not /opt/watcher: a canary lane's WATCHER_HOME is its own checkout, so it gets its own
+# copy of the mod, and a tick pinned to a release folder (card #106) keeps that release's.
+# A mod that fails to load is one line on this tick's .stderr (bin/tail.py and the floor
+# page's Peek read it) and the tick runs unguarded by the mod — the prose still holds.
+#
 # No `--no-session-persistence`: the tick's full transcript (every tool call, every file it
 # read, every picture it looked at) is kept under the tick user's `~/.claude/projects/<cwd>/
 # <session>.jsonl`, keyed by the worktree path. `$WATCHER_LOGS/card-<n>-<ts>.json` holds only
@@ -887,6 +896,7 @@ print_claude_cmd() {
   WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" \\
   "$WATCHER_REAL_CLAUDE" -p "$LANE_COMMAND $n" \\
   --dangerously-skip-permissions \\
+  --plugin-dir "$WATCHER_HOME/mods/guard" \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
   --output-format json \\
   > "$WATCHER_LOGS/card-$n-$ts.json" 2> "$WATCHER_LOGS/card-$n-$ts.stderr")

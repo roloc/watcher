@@ -314,6 +314,7 @@ run_case() {
     OWNER_LOGIN="$EVAL_OWNER_LOGIN" \
     timeout "$secs" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
       --dangerously-skip-permissions \
+      --plugin-dir "$REPO/mods/guard" \
       --max-turns "$turns" --max-budget-usd "$budget" \
       --output-format json \
     > "$out" 2> "$err" )

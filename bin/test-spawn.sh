@@ -2368,5 +2368,24 @@ else
   flunk "the check missed a var added only to example.env.txt"
 fi
 
+# ============================================================================
+echo "38. card #204: every tick is launched with the guard mod (--plugin-dir …/mods/guard)"
+# The real launch and --dry-run share print_claude_cmd, so the flag read off the dry run is
+# the flag a tick gets. The path is WATCHER_HOME's own mods/guard — a canary lane's
+# WATCHER_HOME is its own checkout, so it loads its own copy.
+fresh_state
+board_list $'12\tP2\tbuilder\t-\tCard twelve (claimable)'
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'/mods/guard"'; then
+  pass "the dry-run's claude command carries --plugin-dir <WATCHER_HOME>/mods/guard"
+else
+  flunk "no --plugin-dir …/mods/guard in the launch" "out=[$OUT]"
+fi
+if [ -f "$(dirname "$HERE")/mods/guard/hooks/hooks.json" ] && [ -f "$(dirname "$HERE")/mods/guard/.claude-plugin/plugin.json" ]; then
+  pass "…and the folder it names is a plugin in this checkout (hooks.json, plugin.json)"
+else
+  flunk "mods/guard is not a plugin folder in this checkout"
+fi
+
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

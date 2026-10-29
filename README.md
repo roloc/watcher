@@ -51,6 +51,9 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/test-detect.sh    the detector's cases, offline, every external command stubbed
     bin/test-hygiene-run.sh  bin/hygiene-run.sh's cases, offline, real git, gh/board stubbed
     bin/test-install-hygiene.sh  deploy/install.sh's hygiene opt-in logic, offline, real git
+    mods/guard/           the guard mod, loaded into every tick: refuses the hard-rule commands
+                          before they run (see "The guard inside every tick"); its tests are
+                          `claude plugin test mods/guard`
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
@@ -275,6 +278,30 @@ nothing beyond bash and python3.
 
 Deploying is deliberately not a CI job: it would need a runner on the agents box. CI's
 `verify` is instead the first thing the box's deployer checks — see below.
+
+## The guard inside every tick
+
+A tick is asked, in prose, never to force-push, never to push `main`, never to merge with
+`--admin`, never to touch the box's services or the deployed checkout
+(`docs/how-it-works.md`, "Hard rules for every agent"; this repo's `CLAUDE.md`). Since card
+[#204](https://github.com/roloc/watcher/issues/204) a second wall stands behind the prose:
+`mods/guard/`, a Claude Code mod (a plugin of function hooks) that `bin/spawn.sh` loads into
+every tick with `--plugin-dir "$WATCHER_HOME/mods/guard"`, and `bin/eval.sh` into every
+replay case. Its hooks answer the tool call before the command runs: a `git push --force`,
+a push whose refspec lands on `main`, `gh pr merge --admin`, `systemctl`, the deploy
+scripts, and a redirect, `tee`, `rm`, `cp`, `sed -i` or `git pull` aimed at `/opt/watcher`,
+`/etc/watcher` or a lane's state directory are refused with a one-line reason the model
+reads as the tool's error. A `Write`, `Edit` or `NotebookEdit` whose path resolves (every
+symlink followed) outside the worktree, `$TMPDIR` or `~/.claude` is refused the same way.
+Nothing it does approves, merges or moves a card. A refused command is one line in the
+tick's own session, where the floor page's Peek shows it like any other tool result.
+
+The mod API is early access and moves between releases, so the box's `claude` has to be a
+build that has it (2.1.312 or later; `claude plugin test --help` prints usage on one that
+does). A mod that fails to load is one line on the tick's `.stderr` and the tick runs with
+the prose rules alone. `claude plugin validate --strict mods/guard` lists every gating hook
+and its fail-closed handler; `claude plugin test mods/guard` runs its tests offline, no
+login needed, and CI runs both on a pinned build through `npx`.
 
 ## The weekly hygiene card
 
