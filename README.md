@@ -293,7 +293,9 @@ list on every device. Any of their sessions can open it or message it.
 
 It is read-only toward the loop, three ways at once: its `CLAUDE.md`
 (`deploy/desk/CLAUDE.md`) says what it may run and what it never does; its
-`.claude/settings.json` (`deploy/desk/settings.json`) allows the reads outright, denies
+`.claude/settings.json` (`deploy/desk/settings.json`) allows the reads outright (the floor
+service only through `bin/floor-api.sh`, which takes one `/api/…` path and nothing else),
+denies `curl`, the interpreters,
 `board move`, `systemctl`, the deploy scripts, `gh` writes and every write under
 `/opt/watcher`, `/etc/watcher` and `/home/watcher`, and asks the owner about anything else
 (permission mode `default`); and the guard mod (`mods/guard`) is loaded into it too. It runs
@@ -302,7 +304,9 @@ login of the owner's account (the lanes' `CLAUDE_CODE_OAUTH_TOKEN` is inference-
 refuses it), and that credential must not sit where a tick can `cat` it. `install.sh` makes
 the user, stocks `/home/watcher-desk/desk` (a small git repo — Remote Control wants a git
 root) and enables the unit; it restarts the desk only when those files changed, so a deploy
-does not cut a conversation off. The one thing done by hand, once per box:
+does not cut a conversation off. Both settings files — the folder's and the user-scope
+`~/.claude/settings.json` — are installed root-owned, in folders the desk cannot unlink
+from, so nothing the desk runs can widen its own allow list. The one thing done by hand, once per box:
 
     sudo -u watcher-desk -H claude auth login     # the owner's own account
     sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work

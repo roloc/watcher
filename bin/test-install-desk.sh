@@ -92,6 +92,7 @@ cmp -s "$REPO/deploy/desk/CLAUDE.md" "$DESK_HOME/desk/CLAUDE.md" && pass "…des
 cmp -s "$REPO/deploy/desk/settings.json" "$DESK_HOME/desk/.claude/settings.json" && pass "…desk/.claude/settings.json is deploy/desk/settings.json" || flunk "settings.json not installed"
 called "install -d -o root -g root -m 755 $DESK_HOME/desk/.claude" && called "install -m 644 -o root -g root $REPO/deploy/desk/settings.json" && pass "…and .claude/ and settings.json are root's, so the desk cannot rewrite its own allow list" || flunk "settings not root-owned" "$(grep install "$CALLS")"
 cmp -s "$REPO/bin/desk.sh" "$DESK_HOME/.desk.sh.installed" && pass "…a copy of the installed desk.sh is kept, to notice a change next deploy" || flunk "no installed desk.sh copy"
+called "install -d -o root -g watcher-desk -m 1775 $DESK_HOME/.claude" && [ "$(cat "$DESK_HOME/.claude/settings.json")" = "{}" ] && called "install -m 644 -o root -g root $DESK_HOME/.claude/settings.json.new $DESK_HOME/.claude/settings.json" && pass "…and the USER-scope ~/.claude/settings.json is root's empty {} in a root-owned sticky folder (no self-widening through the user scope)" || flunk "user-scope settings not pinned" "$(grep -i 'claude' "$CALLS")"
 [ -d "$DESK_HOME/desk/.git" ] && [ "$(git -C "$DESK_HOME/desk" rev-list --count HEAD 2>/dev/null)" = 1 ] && pass "…the desk folder is a git repo with the files committed (Remote Control wants a git root)" || flunk "desk folder is not a committed git repo"
 called "su - watcher-desk -c git -C '$DESK_HOME/desk' init" && pass "…git init ran as watcher-desk, through su" || flunk "init not through su" "$(cat "$CALLS")"
 cmp -s "$REPO/deploy/watcher-desk.service" "$UNITDIR/watcher-desk.service" && pass "…the unit is installed" || flunk "unit not installed"
@@ -115,6 +116,11 @@ called "systemctl restart watcher-desk.service" && pass "…and the desk is rest
 # The stale copy was never committed, so putting the deployed file back leaves nothing to
 # commit — the repo simply tracks what is on disk, which is the property that matters.
 [ -z "$(git -C "$DESK_HOME/desk" status --porcelain)" ] && pass "…and the desk repo tracks exactly what is on disk (clean after the refresh)" || flunk "desk repo dirty after a refresh" "$(git -C "$DESK_HOME/desk" status --porcelain)"
+
+# 3a. A widened user-scope settings file (whatever wrote it) is put back to {} and counts as a change
+echo '{"permissions":{"allow":["Bash"]}}' > "$DESK_HOME/.claude/settings.json"
+run
+[ "$(cat "$DESK_HOME/.claude/settings.json")" = "{}" ] && called "systemctl restart watcher-desk.service" && pass "a widened ~/.claude/settings.json is reset to {} and the desk restarted" || flunk "user-scope settings not reset" "$(cat "$DESK_HOME/.claude/settings.json")"
 
 # 3b. A stray file the session left in the folder is not committed (only the two desk files are)
 echo "scratch" > "$DESK_HOME/desk/notes.txt"

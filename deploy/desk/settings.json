@@ -18,6 +18,8 @@
       "Bash(python3 /opt/watcher/bin/browse.py:*)",
       "Bash(bash /opt/watcher/bin/spawn.sh --dry-run:*)",
       "Bash(/opt/watcher/bin/spawn.sh --dry-run:*)",
+      "Bash(/opt/watcher/bin/floor-api.sh:*)",
+      "Bash(bash /opt/watcher/bin/floor-api.sh:*)",
       "Bash(journalctl:*)",
       "Bash(systemctl status:*)",
       "Bash(systemctl is-active:*)",
@@ -41,7 +43,6 @@
       "Bash(readlink:*)",
       "Bash(realpath:*)",
       "Bash(jq:*)",
-      "Bash(sort:*)",
       "Bash(uniq:*)",
       "Bash(cut:*)",
       "Bash(tr:*)",
@@ -53,8 +54,6 @@
       "Bash(id:*)",
       "Bash(whoami:*)",
       "Bash(echo:*)",
-      "Bash(curl -s http://localhost:8787/:*)",
-      "Bash(curl -sS http://localhost:8787/:*)",
       "Bash(git -C /opt/watcher log:*)",
       "Bash(git -C /opt/watcher show:*)",
       "Bash(git -C /opt/watcher diff:*)",
@@ -167,7 +166,17 @@
       "Write(//home/watcher-desk/desk/.claude/**)",
       "Edit(//home/watcher-desk/desk/.claude/**)",
       "Write(//home/watcher-desk/.claude/settings.json)",
-      "Edit(//home/watcher-desk/.claude/settings.json)"
-    ]
+      "Edit(//home/watcher-desk/.claude/settings.json)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(nc:*)",
+      "Bash(python3 -c:*)",
+      "Bash(python3 -m:*)",
+      "Bash(node -e:*)",
+      "Bash(perl -e:*)"
+    ],
+    "disableBypassPermissionsMode": "disable"
   }
 }

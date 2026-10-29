@@ -141,6 +141,16 @@ install_desk() {
   if ! cmp -s "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; then
     install -m 644 -o root -g root "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; changed=1
   fi
+  # The USER-scope settings too (review of #218, round 2): allow lists merge across scopes,
+  # so a ~/.claude/settings.json the desk could write would widen what the project file
+  # closes. Root-owned `{}`, in a root-owned sticky folder (1775, group watcher-desk):
+  # claude itself still writes its login, projects and sessions there as a group member,
+  # and nothing running as watcher-desk can unlink or replace a file root put there.
+  install -d -o root -g watcher-desk -m 1775 "$home/.claude"
+  if ! printf '{}\n' | cmp -s - "$home/.claude/settings.json"; then
+    printf '{}\n' > "$home/.claude/settings.json.new" && install -m 644 -o root -g root "$home/.claude/settings.json.new" "$home/.claude/settings.json" && rm -f "$home/.claude/settings.json.new"
+    changed=1
+  fi
   # bin/desk.sh runs through the /opt/watcher pointer, so a new release's copy is what the
   # NEXT start runs — but the running desk is the old one. A copy of what was last
   # installed is kept so a changed desk.sh counts as a change and restarts it.
