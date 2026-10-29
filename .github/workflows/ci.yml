@@ -112,6 +112,19 @@ jobs:
       - name: The floor page, in a real browser
         run: python3 bin/test-floor-browser.py
 
+      # Card #204: the guard mod's own suite, through the engine's own kit. `claude plugin
+      # test` needs no login (each test file runs in a child of the binary, nothing of the
+      # network) but it needs the binary, which no runner is promised to have: a pinned
+      # build fetched through npx and cached by the runner, the one other fetch this job
+      # makes beside the browser's below. Pinned, so a release that moves the early-access
+      # mod API shows up as a deliberate bump of this line, never as a red run nobody asked
+      # for; the box's own `claude` is kept at or above it (README, "The guard inside every
+      # tick").
+      - name: The guard mod (validate, then its tests)
+        run: |
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate --strict mods/guard
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin test mods/guard
+
       - name: The lane-tail suite
         run: bash bin/test-tail.sh
 

@@ -91,6 +91,16 @@ fi
 
 CASE_TIMEOUT="${EVAL_CASE_TIMEOUT_SEC:-480}"
 CLAUDE_BIN="${WATCHER_CLAUDE:-claude}"
+# Card #204: a case's tick runs under the same guard mod a real tick does — on a claude
+# build that has the mod runtime (2.1.312+; `claude plugin test --help` prints usage there),
+# the same probe bin/spawn.sh makes. On an older build the flag is left off and one line
+# says so, rather than every case failing at launch for a reason no check would name.
+GUARD_PLUGIN_ARGV=()
+if [ -f "$REPO/mods/guard/hooks/hooks.json" ] && "$CLAUDE_BIN" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
+  GUARD_PLUGIN_ARGV=(--plugin-dir "$REPO/mods/guard")
+elif [ -f "$REPO/mods/guard/hooks/hooks.json" ]; then
+  echo "eval.sh: guard mod NOT loaded into the cases: $CLAUDE_BIN has no mod runtime (card #204 needs 2.1.312 or later)" >&2
+fi
 MAX_TURNS="${EVAL_MAX_TURNS:-60}"
 MAX_BUDGET="${EVAL_MAX_BUDGET_USD:-3}"
 # owner/repo a case's tick sees in $GH_REPO, exactly as bin/spawn.sh exports it for a real
@@ -313,7 +323,7 @@ run_case() {
     GH_REPO="$EVAL_GH_REPO" \
     OWNER_LOGIN="$EVAL_OWNER_LOGIN" \
     timeout "$secs" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
-      --dangerously-skip-permissions \
+      --dangerously-skip-permissions ${GUARD_PLUGIN_ARGV[@]+"${GUARD_PLUGIN_ARGV[@]}"} \
       --max-turns "$turns" --max-budget-usd "$budget" \
       --output-format json \
     > "$out" 2> "$err" )
