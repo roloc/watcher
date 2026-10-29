@@ -92,8 +92,12 @@ run
 check "existing user: useradd is not called again"       not_called "useradd"
 check "...but id is still asked"                          called "id watcher-desk"
 
-# 3. Every run — new user or not — adds it to the watcher group for read access
-check "every run: usermod adds watcher-desk to the watcher group" called "usermod -aG watcher watcher-desk"
+# 3. Card #205 review: watcher-desk is never put in the `watcher` group — that group is
+#    what makes /etc/watcher/env (the lanes' own token and webhook secrets) readable, and
+#    nothing watcher-desk legitimately needs (the lanes' state, the deploy history) is
+#    behind it; both are already world-readable. A regression here hands a long-lived
+#    OAuth token to an always-on, owner-messageable session.
+check "never joins the watcher group (would read the lanes' own secrets)" not_called "usermod"
 
 # 4. The real unit file this repo ships lands at the (overridden) systemd unit dir,
 #    byte-for-byte — not a stub standing in for it.

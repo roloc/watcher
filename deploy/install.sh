@@ -118,9 +118,12 @@ install_desk_service() {
   local unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
   id watcher-desk >/dev/null 2>&1 || useradd -m -s /bin/bash watcher-desk
   chmod 700 /home/watcher-desk 2>/dev/null || true
-  # Read access to the lanes' state and the deploy history, never write — watcher-desk.service's
-  # own header says why this is a second user rather than `watcher` itself.
-  usermod -aG watcher watcher-desk
+  # Never in the `watcher` group: /etc/watcher/env (640 root:watcher) is every lane's own
+  # token and webhook secrets, and group membership is the only thing that would ever
+  # open — review of #107, the same direction watcher-desk.service's own header already
+  # guards the other way. What it actually needs to read (the lanes' state, the deploy
+  # history) is already world-readable (reviewer, card #205), so there is nothing a group
+  # would add.
   install -m 644 "$WATCHER_DIR/deploy/watcher-desk.service" "$unit_dir/watcher-desk.service"
   systemctl daemon-reload
   systemctl enable --now watcher-desk.service >/dev/null 2>&1 \

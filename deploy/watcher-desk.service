@@ -12,9 +12,11 @@
 # tick's own environment — never carries a secret a tick has no business reading). So this
 # unit runs as `watcher-desk`, whose own one-time `claude auth login` (docs/owner-cheat-
 # sheet.md, "Pause, resume, logs") puts the credential under /home/watcher-desk/.claude/,
-# readable by no one else. deploy/install.sh adds watcher-desk to the `watcher` group so
-# its own CLAUDE.md can still read the lanes' state and the deploy history — never write
-# either.
+# readable by no one else. The same rule runs the other way: watcher-desk is never added
+# to the `watcher` group either (review of #205) — /etc/watcher/env, the lanes' own token
+# and webhook secrets, is group-readable, and that is the only thing membership would
+# open. The lanes' state and the deploy history, which its CLAUDE.md does read, are
+# already world-readable, so there is nothing a group grants it there.
 [Unit]
 Description=The desk session: a read-only Remote Control console for the owner's own sessions
 After=network-online.target
