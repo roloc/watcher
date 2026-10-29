@@ -163,18 +163,15 @@ fi
 python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
   || warn "no Chrome or Chromium on this box — a tick cannot look at a page (apt install chromium)"
 
-# --- the desk session (card #205) --------------------------------------------------------
-# One per box, not per project — same reason the browser check above runs on every doctor
-# call regardless of which project it was invoked for. Never a failure: no project's own
-# setup depends on it, and the one-time browser login it needs is Steve's, not a thing
-# this script can fix.
+# --- the desk (card #205): a note, never a failure ---------------------------------------
+# One line when the box's desk session (watcher-desk.service) is not running — usually
+# because nobody has done its one-time login yet. Nothing a lane needs; a reader on the box
+# is the one who acts on it. Skipped where there is no systemd at all (a Mac).
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl is-active --quiet watcher-desk.service 2>/dev/null; then
-    DESK_USER="$(systemctl show watcher-desk.service -p User --value 2>/dev/null)"
-    echo "doctor: desk session: up, as ${DESK_USER:-watcher-desk}"
-  else
-    warn "desk session: not running (systemctl status watcher-desk.service) — the owner's Claude sessions have no desk console yet"
-  fi
+  case "$(systemctl is-active watcher-desk.service 2>/dev/null)" in
+    active|"") ;;
+    *) warn "the desk session is not running (watcher-desk.service) — once, on the box: sudo -u watcher-desk -H claude auth login (docs/owner-cheat-sheet.md, \"The desk\")" ;;
+  esac
 fi
 
 if [ "$fail" = 0 ]; then

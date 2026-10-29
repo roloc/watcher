@@ -54,6 +54,11 @@ probes and a classifier, and the day that was tried it cost more than the featur
     mods/guard/           the guard mod, loaded into every tick: refuses the hard-rule commands
                           before they run (see "The guard inside every tick"); its tests are
                           `claude plugin test mods/guard`
+    bin/desk.sh           the desk: a read-only Remote Control session on the box, in the owner's own
+                          Claude sessions list (deploy/watcher-desk.service runs it; deploy/desk/ is its
+                          CLAUDE.md and permission lists; see "The desk")
+    bin/test-desk.sh      the desk runner's cases, offline, claude and gh stubbed
+    bin/test-install-desk.sh  deploy/install.sh's install_desk, offline, every root-only command stubbed
     .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
@@ -305,6 +310,60 @@ cases. A mod that fails to load on a build that has the runtime is one line on t
 `.stderr`, with the same result. `claude plugin validate --strict mods/guard` lists every gating hook
 and its fail-closed handler; `claude plugin test mods/guard` runs its tests offline, no
 login needed, and CI runs both on a pinned build through `npx`.
+
+## The desk
+
+The owner never sshes to the box, and the floor page answers the phone's questions. The
+questions a developer has while changing the watcher from another Claude session are
+different — *is the lane idle yet*, *what did the tick on #204 do with my change*, *show me
+the dry run* — and since card [#205](https://github.com/roloc/watcher/issues/205) the box
+answers them itself: `watcher-desk.service` runs `bin/desk.sh`, which keeps a Claude Code
+Remote Control session open on the box, named `<box> desk`, in the owner's own sessions
+list on every device. Any of their sessions can open it or message it.
+
+It is read-only toward the loop, three ways at once: its `CLAUDE.md`
+(`deploy/desk/CLAUDE.md`) says what it may run and what it never does; its
+`.claude/settings.json` (`deploy/desk/settings.json`) allows the reads outright (the floor
+service only through `bin/floor-api.sh`, which takes one `/api/…` path and nothing else),
+denies `curl`, the interpreters,
+`board move`, `systemctl`, the deploy scripts, `gh` writes and every write under
+`/opt/watcher`, `/etc/watcher` and `/home/watcher`, and asks the owner about anything else
+(permission mode `default`); and the guard mod (`mods/guard`) is loaded into it too. It runs
+as its own user, `watcher-desk`, never as `watcher`: Remote Control needs a full browser
+login of the owner's account (the lanes' `CLAUDE_CODE_OAUTH_TOKEN` is inference-only and it
+refuses it), and that credential must not sit where a tick can `cat` it. `install.sh` makes
+the user, stocks `/home/watcher-desk/desk` (a small git repo — Remote Control wants a git
+root) and enables the unit; it restarts the desk only when those files changed, so a deploy
+does not cut a conversation off. Both settings files — the folder's and the user-scope
+`~/.claude/settings.json` — are installed root-owned, and the home, the desk folder and
+`~/.claude` are root-owned sticky directories, so nothing the desk runs can rewrite,
+replace or rename away its own allow list.
+
+**What that does and does not close.** A permission rule is a command prefix, which is why
+the allow list holds only two purpose-built wrappers (`bin/desk-read.sh` for the board and
+a dry run, `bin/floor-api.sh` for the floor service; each takes one fixed shape of
+argument) and pure readers (`cat`, `ls`, `grep`, `journalctl`, `systemctl status`, the
+`gh … view|list` reads). Everything else asks the owner, in the session, on their phone.
+Three review rounds on [#218](https://github.com/roloc/watcher/pull/218) found what a
+general tool on such a list can be bent into — `curl` to any host, `git log --output`
+writing chosen text, `uniq IN OUT` copying a file — and each came off the list. GitHub is
+reached only through `bin/desk-gh.sh`, which fixes the repository to one `owner/repo` on
+github.com and refuses a host, a URL, `--web` or a write; `systemctl` asks, since `-H`
+reaches a host. What remains open, and is accepted: a reader with a shell redirection
+(`cat a > b`) can still write a file in the desk user's own home, nowhere else — and a
+file there can become code the desk runs as itself through `~/.claude.json` (which Claude
+Code must be able to write; the shell startup files and gh's `config.yml` are pinned
+root-owned and empty so those two roads are shut). A card body is untrusted text the desk
+reads. The desk's own credentials (the owner's Claude login, its `gh` token) are the thing
+worth protecting there, and every road out — the network clients, the interpreters,
+`gh`'s writes and `gh auth token` — is denied or asks. The one thing done by hand, once per box:
+
+    sudo -u watcher-desk -H claude auth login     # the owner's own account
+    sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work
+
+Until then `desk.sh` says so once in the journal and checks again every five minutes; the
+desk appears in the sessions list on its own once the login lands. `bin/doctor.sh` adds a
+one-line note when the unit is not running.
 
 ## The weekly hygiene card
 

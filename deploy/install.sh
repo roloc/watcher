@@ -108,33 +108,103 @@ hygiene_opts_in() {
        || git -C '$PROJECT_ROOT' cat-file -e origin/main:scripts/hygiene.sh 2>/dev/null"
 }
 
-# install_desk_service: the watcher-desk user and its unit (card #205) — a function, same
-# reason hygiene_opts_in and canary_clone are, so bin/test-install-desk.sh can call it
-# directly with INSTALL_LIB_ONLY=1 and every root-only command (useradd, usermod,
-# systemctl) stubbed on PATH, same trick test-install-hygiene.sh already uses for su.
-# SYSTEMD_UNIT_DIR overrides where the unit file lands — tests only; an ordinary run
-# always means /etc/systemd/system.
-install_desk_service() {
-  local unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
-  id watcher-desk >/dev/null 2>&1 || useradd -m -s /bin/bash watcher-desk
-  chmod 700 /home/watcher-desk 2>/dev/null || true
-  # Never in the `watcher` group: /etc/watcher/env (640 root:watcher) is every lane's own
-  # token and webhook secrets, and group membership is the only thing that would ever
-  # open — review of #107, the same direction watcher-desk.service's own header already
-  # guards the other way. What it actually needs to read (the lanes' state, the deploy
-  # history) is already world-readable (reviewer, card #205), so there is nothing a group
-  # would add.
-  install -m 644 "$WATCHER_DIR/deploy/watcher-desk.service" "$unit_dir/watcher-desk.service"
-  systemctl daemon-reload
-  systemctl enable --now watcher-desk.service >/dev/null 2>&1 \
-    && systemctl restart watcher-desk.service \
-    || echo "warning: could not start watcher-desk.service" >&2
+# install_desk — the desk (card #205): a read-only Remote Control session on this box for
+# the owner's own Claude sessions (deploy/watcher-desk.service says why, and why it is its
+# own user). Its own Unix user, watcher-desk, with its own home and its own logins; a small
+# git repo at $DESK_HOME/desk (Remote Control wants a git root) stocked from
+# deploy/desk/CLAUDE.md and deploy/desk/settings.json on every deploy; the unit installed
+# and enabled. Restarted ONLY when one of those files actually changed — a deploy must not
+# cut off a conversation the owner is having with the desk — so `cmp -s` decides, and the
+# first install is the one `enable --now`. The login itself (`claude auth login` as
+# watcher-desk, a browser flow of the owner's own account) is never done here: bin/desk.sh
+# waits for it and says so in the journal. A function, not inline, so
+# bin/test-install-desk.sh can call it with INSTALL_LIB_ONLY=1 and every root-only command
+# stubbed; DESK_HOME and DESK_UNIT_DIR exist for that test alone.
+install_desk() {
+  local home="${DESK_HOME:-/home/watcher-desk}" unitdir="${DESK_UNIT_DIR:-/etc/systemd/system}"
+  local desk="$home/desk" changed=0 groups=""
+  if ! id watcher-desk >/dev/null 2>&1; then
+    getent group systemd-journal >/dev/null 2>&1 && groups="systemd-journal"
+    useradd -m -d "$home" -s /bin/bash ${groups:+-G "$groups"} watcher-desk \
+      || { echo "warning: could not create the watcher-desk user; no desk on this box" >&2; return 1; }
+  fi
+  # The home, the desk folder and everything root puts in them (review of
+  # roloc/watcher#218, three rounds): the allow and deny lists are what make the desk
+  # read-only, so nothing running as watcher-desk may rewrite them, drop a
+  # settings.local.json beside them, OR rename the folder that holds them away and start a
+  # fresh one. A root-owned directory with the sticky bit and group write (1775,
+  # group watcher-desk) is exactly that: the desk creates its own files there (claude's
+  # login, projects and sessions under ~/.claude; the git repo under ~/desk) but cannot
+  # unlink, rename or replace an entry root owns, because with the sticky bit only the
+  # entry's owner, the directory's owner or root may — and the directory's owner is root.
+  chown root:watcher-desk "$home" && chmod 1775 "$home"
+  # The shell startup files are root's and empty: the Bash tool loads ~/.bashrc, so a file
+  # the desk could write there would be code it runs on every command. Same for gh's
+  # config.yml (its `browser:` setting is a program gh would run); gh's own hosts.yml,
+  # which the login writes, is a new entry the desk creates itself.
+  local f
+  for f in .bashrc .bash_profile .bash_login .profile .bash_logout; do
+    # -O: owned by whoever runs this (root on the box). No `stat -c`: GNU-only, and
+    # bin/test-install-desk.sh runs this on a Mac.
+    [ -f "$home/$f" ] && [ ! -s "$home/$f" ] && [ -O "$home/$f" ] \
+      || install -m 644 -o root -g root /dev/null "$home/$f"
+  done
+  install -d -o root -g watcher-desk -m 1775 "$home/.config" "$home/.config/gh"
+  if ! printf 'git_protocol: https\n' | cmp -s - "$home/.config/gh/config.yml"; then
+    printf 'git_protocol: https\n' > "$home/.config/gh/config.yml.new" \
+      && install -m 644 -o root -g root "$home/.config/gh/config.yml.new" "$home/.config/gh/config.yml" \
+      && rm -f "$home/.config/gh/config.yml.new"
+  fi
+  install -d -o root -g watcher-desk -m 1775 "$desk"
+  install -d -o root -g root -m 755 "$desk/.claude"
+  if ! cmp -s "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; then
+    install -m 644 -o root -g root "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; changed=1
+  fi
+  if ! cmp -s "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; then
+    install -m 644 -o root -g root "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; changed=1
+  fi
+  # The USER-scope settings too (review of #218, round 2): allow lists merge across scopes,
+  # so a ~/.claude/settings.json the desk could write would widen what the project file
+  # closes. Root-owned `{}`, in a root-owned sticky folder (1775, group watcher-desk) that
+  # itself sits in the root-owned sticky home above, so neither the file nor its folder
+  # can be renamed away from underneath.
+  install -d -o root -g watcher-desk -m 1775 "$home/.claude"
+  if ! printf '{}\n' | cmp -s - "$home/.claude/settings.json"; then
+    printf '{}\n' > "$home/.claude/settings.json.new" && install -m 644 -o root -g root "$home/.claude/settings.json.new" "$home/.claude/settings.json" && rm -f "$home/.claude/settings.json.new"
+    changed=1
+  fi
+  # bin/desk.sh runs through the /opt/watcher pointer, so a new release's copy is what the
+  # NEXT start runs — but the running desk is the old one. A copy of what was last
+  # installed is kept so a changed desk.sh counts as a change and restarts it.
+  if ! cmp -s "$WATCHER_DIR/bin/desk.sh" "$home/.desk.sh.installed"; then
+    install -m 644 -o root -g root "$WATCHER_DIR/bin/desk.sh" "$home/.desk.sh.installed"; changed=1
+  fi
+  # git refuses a repository whose top folder another user owns ("dubious ownership"), and
+  # $desk is root's now — so the desk user's own ~/.gitconfig names it safe, once.
+  su - watcher-desk -c "git config --global --get-all safe.directory 2>/dev/null | grep -qx '$desk' || git config --global --add safe.directory '$desk'" \
+    || echo "warning: could not mark $desk safe for git as watcher-desk" >&2
+  [ -d "$desk/.git" ] || su - watcher-desk -c "git -C '$desk' init -q" \
+    || { echo "warning: could not make $desk a git repo (Remote Control needs one)" >&2; return 1; }
+  # Committed so the folder is a repository with a history, not just an init; nothing to
+  # commit is the common case and not an error.
+  su - watcher-desk -c "git -C '$desk' add CLAUDE.md .claude/settings.json && git -C '$desk' -c user.name=desk -c user.email=desk@localhost commit -q -m 'desk files'" >/dev/null 2>&1 || true
+  if ! cmp -s "$WATCHER_DIR/deploy/watcher-desk.service" "$unitdir/watcher-desk.service"; then
+    install -m 644 "$WATCHER_DIR/deploy/watcher-desk.service" "$unitdir/watcher-desk.service"; changed=1
+    systemctl daemon-reload
+  fi
+  if ! systemctl is-enabled --quiet watcher-desk.service 2>/dev/null; then
+    systemctl enable --now watcher-desk.service >/dev/null 2>&1 \
+      || echo "warning: could not start watcher-desk.service" >&2
+  elif [ "$changed" = 1 ]; then
+    systemctl restart watcher-desk.service \
+      || echo "warning: could not restart watcher-desk.service" >&2
+  fi
 }
 
 # bin/test-deploy.sh sources this file with INSTALL_LIB_ONLY=1 to call canary_clone directly,
 # with no root, no watcher user and no network — stopping here is what makes that possible.
-# bin/test-install-hygiene.sh does the same to call hygiene_opts_in, and
-# bin/test-install-desk.sh to call install_desk_service.
+# bin/test-install-hygiene.sh does the same to call hygiene_opts_in, bin/test-install-desk.sh
+# to call install_desk.
 if [ "${INSTALL_LIB_ONLY:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
 id watcher >/dev/null 2>&1 || useradd -m -s /bin/bash watcher
@@ -273,10 +343,9 @@ systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
   && systemctl restart watcher-floor.service \
   || echo "warning: could not start watcher-floor.service" >&2
 
-# The desk session (card #205): one instance per box, same reason and same cadence as the
-# floor page just above — holds no card, so it is restarted on every install rather than
-# drained or paused.
-install_desk_service
+# The desk (card #205): one per box, beside the floor page. Unlike the floor it is only
+# restarted when its own files changed (install_desk, above).
+install_desk || true
 
 NOT_STARTED=()
 for p in "$@"; do
@@ -326,12 +395,6 @@ su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su 
 # tick's own call will look.
 su - watcher -c "python3 '$WATCHER_DIR/bin/browse.py' find" >/dev/null 2>&1 || MISSING+=("  Browser:    apt install chromium   (ticks look at pages with bin/browse.py, which needs a
               Chrome or Chromium; without one a tick cannot check a page it changed)")
-# The desk session (card #205): Remote Control refuses the lanes' own long-lived token, so
-# watcher-desk needs its own full-scope browser login — a one-time step only Steve can do.
-# Until it's done, watcher-desk.service just restarts every 10s with nothing to show for
-# it, which is expected and not itself a problem to fix here.
-su - watcher-desk -c 'test -s ~/.claude/.credentials.json' >/dev/null 2>&1 || MISSING+=("  Desk login: su - watcher-desk; claude   (once, in /opt/watcher — trusts the folder and
-              opens the browser login; claude auth login if it doesn't prompt)")
 if [ $# -eq 0 ]; then
   MISSING+=("  Project:    deploy/add-project.sh <name> <owner/repo>, then install.sh <project> clones it; drop its .env.local / private inputs in place.")
   MISSING+=("  Start:      systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f")
@@ -353,3 +416,5 @@ echo "  Detector:   optional (card #36). Drop in projects/<project>.detect.env a
 echo "              install.sh (or wait for the next deploy) — the timer starts on its own."
 echo "  Hygiene:    on its own for a project that ships a hygiene.sh (card #196); set"
 echo "              HYGIENE=1 in projects/<project>.env to opt in without one."
+echo "  Desk:       once, so the box shows up in your own Claude sessions (card #205):"
+echo "              sudo -u watcher-desk -H claude auth login; sudo -u watcher-desk -H gh auth login"

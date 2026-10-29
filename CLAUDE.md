@@ -100,6 +100,16 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `spawn.sh`'s `guard_plugin_probe` leaves the flag off an older build and says so in the
   journal, so a merge never depends on the box's version — and a bump of the pinned build
   in `.github/workflows/ci.yml` is where a moved API shows up first.
+- `bin/desk.sh`, `deploy/watcher-desk.service`, `deploy/desk/` — the desk (card #205): a
+  read-only Remote Control session on the box, in the owner's own Claude sessions list, run
+  as its own user `watcher-desk` (its login is the owner's own browser login, never
+  `/etc/watcher/env`'s token). `deploy/desk/CLAUDE.md` is what the desk reads and
+  `deploy/desk/settings.json` its allow and deny lists — a change to either reaches the box
+  on the next deploy (`install.sh`'s `install_desk` copies them in and restarts the desk only
+  when they changed). Read-only toward the loop: never `board move`, never `systemctl`,
+  never a write under `/opt/watcher`, `/etc/watcher` or `/home/watcher`. `bash
+  bin/test-desk.sh` and `bash bin/test-install-desk.sh` are the offline suites (CI runs
+  both); run them after touching any of these files. README, "The desk".
 - `templates/` — what a project copies in: `project-CLAUDE.md` (the section its `CLAUDE.md`
   needs for `/watch`) and `board.md` (its `docs/board.md`, blanks for the repo, board
   owner, number and login; `deploy/add-project.sh` prints the `sed` that fills them, and
@@ -264,27 +274,3 @@ above:
   stands, and a commit that fails it is held in Stuck.
   Stuck is still where a blocking finding you disagree with goes, and a third review round
   (the change is mis-shaped); never for "please merge".
-
-## The desk session
-
-If you are running as an ordinary interactive session — no `/watch` or `/triage` command,
-no tick — with your own working directory at `/opt/watcher`, logged in as `watcher-desk`:
-you are the desk session (card [#205](https://github.com/roloc/watcher/issues/205)), the
-one any of the owner's other Claude sessions (Mac, phone, web) can pick or message
-directly to ask what the loop is doing, without ssh. One per box, not a lane: you hold no
-card and run no tick, and everything above this section is instructions for a `/watch` or
-`/triage` tick, not for you.
-
-- **Read, never touch.** `board list`, `board show`, `bin/tail.py`, `bin/browse.py`,
-  `bin/spawn.sh --dry-run`, `bin/metrics.py`, the state directories
-  (`~/.local/state/watcher/`) and `journalctl -u 'watcher@*'`, and listing your peers (the
-  lanes' own running ticks, on this same box) are all yours to read. Never `board move`,
-  `board stage` or `board unclaim`, never add or remove a label, never write under
-  `/opt/watcher`, `/etc/watcher`, or a lane's state directory, never message a tick, and
-  never `systemctl`.
-- **The one write you have is filing a card**, the way `docs/board.md` says, and only on
-  the owner's own word in the conversation — never on your own initiative, the same as a
-  tick never pulls work from Ready on its own (`commands/watch.md` §1).
-- A fact about the loop's running state is not a product decision (`commands/watch.md`
-  §2) — answer what you can see directly, and say when you cannot look at something from
-  here (a page needs `bin/browse.py`, the same as it does for a tick).

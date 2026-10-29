@@ -1,24 +1,26 @@
-# The desk session (card #205): a read-only Remote Control console on the box, always on,
-# that any of the owner's own Claude sessions — Mac, phone, web — can pick or message
-# directly, without ssh: "is the lane idle yet", "what did the tick on #204 do", "run the
-# dry-run and show me the command". One per box, not a lane: it holds no card, runs no
-# tick, and never touches the board or a worktree — see this repo's CLAUDE.md, "The desk
-# session".
+# The desk (card #205): a read-only Remote Control session on this box, in the owner's own
+# Claude sessions list, so a session on their Mac, phone or claude.ai/code can ask the box
+# in plain words what every lane is doing, what a tick did with a card, whether a lane is
+# idle, what the deployer last said — without ssh. One per box, not a lane: it holds no card
+# and does no work. The floor page stays the owner's view; this is the developer's.
 #
-# A dedicated user, never `watcher`'s own: Remote Control refuses the lanes' long-lived
-# CLAUDE_CODE_OAUTH_TOKEN outright ("Long-lived tokens … are limited to inference-only");
-# it needs a full-scope browser login, and that credential must never land where a tick
-# could read it (deploy/install.sh's review of #107 is why /etc/watcher/env — every
-# tick's own environment — never carries a secret a tick has no business reading). So this
-# unit runs as `watcher-desk`, whose own one-time `claude auth login` (docs/owner-cheat-
-# sheet.md, "Pause, resume, logs") puts the credential under /home/watcher-desk/.claude/,
-# readable by no one else. The same rule runs the other way: watcher-desk is never added
-# to the `watcher` group either (review of #205) — /etc/watcher/env, the lanes' own token
-# and webhook secrets, is group-readable, and that is the only thing membership would
-# open. The lanes' state and the deploy history, which its CLAUDE.md does read, are
-# already world-readable, so there is nothing a group grants it there.
+# It runs as its OWN user, watcher-desk, never as watcher: Remote Control needs a full
+# browser login of the owner's account (the lanes' CLAUDE_CODE_OAUTH_TOKEN is inference-only
+# and Remote Control refuses it), and that credential must not sit in a home every tick —
+# a Claude process with no permission prompts — can read with one `cat`. watcher-desk reads
+# the lanes' state directories (world-readable) and the journal (SupplementaryGroups) and
+# writes nothing of the loop's. It is NOT in the `watcher` group and there is no
+# EnvironmentFile=/etc/watcher/env here, on purpose: that file (root:watcher 640) holds the
+# lanes' token and the webhook, and the desk has no business reading either.
+#
+# bin/desk.sh is what runs: it seeds the folder's trust, waits (one journal line, then
+# quietly) until `claude auth login` has been done once as watcher-desk, then execs
+# `claude remote-control` in /home/watcher-desk/desk — a small git repo deploy/install.sh
+# keeps stocked with deploy/desk/CLAUDE.md and deploy/desk/settings.json (the allow and
+# deny lists that make "read-only" a setting, not a hope). install.sh restarts this unit
+# only when those files changed, so a deploy does not cut a conversation off.
 [Unit]
-Description=The desk session: a read-only Remote Control console for the owner's own sessions
+Description=The desk: a read-only Remote Control session on this box for the owner's own Claude sessions
 After=network-online.target
 Wants=network-online.target
 
@@ -26,15 +28,15 @@ Wants=network-online.target
 Type=simple
 User=watcher-desk
 Group=watcher-desk
-WorkingDirectory=/opt/watcher
+SupplementaryGroups=systemd-journal
+WorkingDirectory=/home/watcher-desk/desk
 Environment=HOME=/home/watcher-desk
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-# No name passed: the CLI's own default session-name prefix is the box's hostname
-# (`claude --help`), which is already "a session named for the box" — the one thing the
-# card asks the name to do.
-ExecStart=/bin/sh -c 'exec claude --remote-control'
+Environment=WATCHER_DIR=/opt/watcher
+Environment=DESK_DIR=/home/watcher-desk/desk
+ExecStart=/opt/watcher/bin/desk.sh
 Restart=always
-RestartSec=10
+RestartSec=30
 KillMode=control-group
 TimeoutStopSec=30
 
