@@ -87,6 +87,7 @@ import json, sys
 d = json.load(open(sys.argv[1])); sys.exit(0 if d["projects"][sys.argv[2]]["hasTrustDialogAccepted"] is True else 1)
 PY
 out_has "starting Remote Control as 'testbox desk'" && pass "…and says so in the journal" || flunk "no starting line" "$(cat "$TMP/out")"
+out_has "exited after 0s (exit 0); waiting 0s" && pass "…a server that quits at once is followed by a wait before the unit's restart (no 30-second loop)" || flunk "no wait after a quick exit" "$(cat "$TMP/out")"
 
 # 4. Trust is merged into an existing ~/.claude.json, never overwriting what is there
 fresh; logged_in

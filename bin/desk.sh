@@ -12,7 +12,7 @@
 #      (`claude auth login`, done once as watcher-desk); until then this says so in the
 #      journal once and checks again every DESK_WAIT_SEC, so the desk comes up on its own a
 #      few minutes after the login lands, with nobody touching systemctl.
-#   3. exec `claude remote-control` in the desk folder, named for the box, permission mode
+#   3. run `claude remote-control` in the desk folder, named for the box, permission mode
 #      `default` — a command outside the folder's allow list asks the owner, in the session,
 #      on their phone, which is the right answer for a console; the deny list in
 #      deploy/desk/settings.json refuses the loop's writes outright. The guard mod
@@ -73,4 +73,16 @@ if [ -d "$WATCHER_DIR/mods/guard" ]; then
   export CLAUDE_CODE_PLUGIN_DIRS="$WATCHER_DIR/mods/guard"
 fi
 say "starting Remote Control as '$DESK_NAME' in $DESK_DIR"
-exec "$DESK_CLAUDE" remote-control --name "$DESK_NAME" --spawn same-dir --capacity "$DESK_CAPACITY" --permission-mode default
+# Not exec'd: when the server quits at once (a login that expired while `auth status` still
+# said yes, a server-side refusal), this waits DESK_WAIT_SEC before exiting, so the unit's
+# Restart=always is a check every few minutes, not three journal lines every 30 seconds.
+# systemd's stop signal reaches the whole control group, claude included.
+started="$(date +%s)"
+"$DESK_CLAUDE" remote-control --name "$DESK_NAME" --spawn same-dir --capacity "$DESK_CAPACITY" --permission-mode default
+rc=$?
+ran=$(( $(date +%s) - started ))
+if [ "$ran" -lt 60 ]; then
+  say "Remote Control exited after ${ran}s (exit $rc); waiting ${DESK_WAIT_SEC}s before the unit starts it again"
+  sleep "$DESK_WAIT_SEC"
+fi
+exit "$rc"

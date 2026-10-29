@@ -90,6 +90,8 @@ fresh; run
 called "useradd -m -d $DESK_HOME -s /bin/bash -G systemd-journal watcher-desk" && pass "…creates watcher-desk with its own home, in systemd-journal" || flunk "useradd" "$(cat "$CALLS")"
 cmp -s "$REPO/deploy/desk/CLAUDE.md" "$DESK_HOME/desk/CLAUDE.md" && pass "…desk/CLAUDE.md is deploy/desk/CLAUDE.md" || flunk "CLAUDE.md not installed"
 cmp -s "$REPO/deploy/desk/settings.json" "$DESK_HOME/desk/.claude/settings.json" && pass "…desk/.claude/settings.json is deploy/desk/settings.json" || flunk "settings.json not installed"
+called "install -d -o root -g root -m 755 $DESK_HOME/desk/.claude" && called "install -m 644 -o root -g root $REPO/deploy/desk/settings.json" && pass "…and .claude/ and settings.json are root's, so the desk cannot rewrite its own allow list" || flunk "settings not root-owned" "$(grep install "$CALLS")"
+cmp -s "$REPO/bin/desk.sh" "$DESK_HOME/.desk.sh.installed" && pass "…a copy of the installed desk.sh is kept, to notice a change next deploy" || flunk "no installed desk.sh copy"
 [ -d "$DESK_HOME/desk/.git" ] && [ "$(git -C "$DESK_HOME/desk" rev-list --count HEAD 2>/dev/null)" = 1 ] && pass "…the desk folder is a git repo with the files committed (Remote Control wants a git root)" || flunk "desk folder is not a committed git repo"
 called "su - watcher-desk -c git -C '$DESK_HOME/desk' init" && pass "…git init ran as watcher-desk, through su" || flunk "init not through su" "$(cat "$CALLS")"
 cmp -s "$REPO/deploy/watcher-desk.service" "$UNITDIR/watcher-desk.service" && pass "…the unit is installed" || flunk "unit not installed"
@@ -113,6 +115,17 @@ called "systemctl restart watcher-desk.service" && pass "…and the desk is rest
 # The stale copy was never committed, so putting the deployed file back leaves nothing to
 # commit — the repo simply tracks what is on disk, which is the property that matters.
 [ -z "$(git -C "$DESK_HOME/desk" status --porcelain)" ] && pass "…and the desk repo tracks exactly what is on disk (clean after the refresh)" || flunk "desk repo dirty after a refresh" "$(git -C "$DESK_HOME/desk" status --porcelain)"
+
+# 3b. A stray file the session left in the folder is not committed (only the two desk files are)
+echo "scratch" > "$DESK_HOME/desk/notes.txt"
+run
+git -C "$DESK_HOME/desk" ls-files --error-unmatch notes.txt >/dev/null 2>&1 && flunk "a stray file was committed" || pass "a stray file left by the session is never committed"
+rm -f "$DESK_HOME/desk/notes.txt"
+
+# 3c. desk.sh itself changed since the last deploy: that counts, and the desk restarts
+echo "# older desk.sh" > "$DESK_HOME/.desk.sh.installed"
+run
+called "systemctl restart watcher-desk.service" && cmp -s "$REPO/bin/desk.sh" "$DESK_HOME/.desk.sh.installed" && pass "a changed bin/desk.sh restarts the desk and refreshes the kept copy" || flunk "desk.sh change not noticed" "$(cat "$CALLS")"
 
 # 4. Only the unit changed: installed, daemon-reload, restart; files untouched
 echo "# old unit" > "$UNITDIR/watcher-desk.service"

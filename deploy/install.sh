@@ -128,18 +128,30 @@ install_desk() {
     useradd -m -d "$home" -s /bin/bash ${groups:+-G "$groups"} watcher-desk \
       || { echo "warning: could not create the watcher-desk user; no desk on this box" >&2; return 1; }
   fi
-  install -d -o watcher-desk -g watcher-desk "$desk" "$desk/.claude"
+  install -d -o watcher-desk -g watcher-desk "$desk"
+  # .claude/ and the settings in it are ROOT's (review of roloc/watcher#218): the allow and
+  # deny lists are what make the desk read-only, so the desk process must not be able to
+  # rewrite them, nor drop a settings.local.json beside them from an "always allow" click.
+  # A root-owned 755 folder with a root-owned 644 file is readable by the session and
+  # writable by nobody in it.
+  install -d -o root -g root -m 755 "$desk/.claude"
   if ! cmp -s "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; then
     install -m 644 -o watcher-desk -g watcher-desk "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; changed=1
   fi
   if ! cmp -s "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; then
-    install -m 644 -o watcher-desk -g watcher-desk "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; changed=1
+    install -m 644 -o root -g root "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; changed=1
+  fi
+  # bin/desk.sh runs through the /opt/watcher pointer, so a new release's copy is what the
+  # NEXT start runs — but the running desk is the old one. A copy of what was last
+  # installed is kept so a changed desk.sh counts as a change and restarts it.
+  if ! cmp -s "$WATCHER_DIR/bin/desk.sh" "$home/.desk.sh.installed"; then
+    install -m 644 -o root -g root "$WATCHER_DIR/bin/desk.sh" "$home/.desk.sh.installed"; changed=1
   fi
   [ -d "$desk/.git" ] || su - watcher-desk -c "git -C '$desk' init -q" \
     || { echo "warning: could not make $desk a git repo (Remote Control needs one)" >&2; return 1; }
   # Committed so the folder is a repository with a history, not just an init; nothing to
   # commit is the common case and not an error.
-  su - watcher-desk -c "git -C '$desk' add -A && git -C '$desk' -c user.name=desk -c user.email=desk@localhost commit -q -m 'desk files'" >/dev/null 2>&1 || true
+  su - watcher-desk -c "git -C '$desk' add CLAUDE.md .claude/settings.json && git -C '$desk' -c user.name=desk -c user.email=desk@localhost commit -q -m 'desk files'" >/dev/null 2>&1 || true
   if ! cmp -s "$WATCHER_DIR/deploy/watcher-desk.service" "$unitdir/watcher-desk.service"; then
     install -m 644 "$WATCHER_DIR/deploy/watcher-desk.service" "$unitdir/watcher-desk.service"; changed=1
     systemctl daemon-reload
