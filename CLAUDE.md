@@ -96,7 +96,9 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   and `claude plugin test mods/guard` are its suites (offline, no login; CI runs both on a
   pinned build through `npx`) — run them after touching anything under it, and the mod's
   `register.ts` header is the list of what it refuses and how it decides. The mod API is
-  early access: the box's `claude` must be 2.1.312 or later, and a bump of the pinned build
+  early access: the box's `claude` must be 2.1.312 or later for the guard to be live —
+  `spawn.sh`'s `guard_plugin_probe` leaves the flag off an older build and says so in the
+  journal, so a merge never depends on the box's version — and a bump of the pinned build
   in `.github/workflows/ci.yml` is where a moved API shows up first.
 - `templates/` — what a project copies in: `project-CLAUDE.md` (the section its `CLAUDE.md`
   needs for `/watch`) and `board.md` (its `docs/board.md`, blanks for the repo, board

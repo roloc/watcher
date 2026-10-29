@@ -25,6 +25,7 @@ const FS: Record<string, string> = {
   '/opt/watcher/commands': `${RELEASE}/commands`,
   [`${HOME}/.claude`]: `${HOME}/.claude`,
   [`${HOME}/.claude/projects`]: `${HOME}/.claude/projects`,
+  [`${HOME}/.claude/settings.json`]: `${HOME}/.claude/settings.json`,
   '/': '/',
 }
 
@@ -62,7 +63,7 @@ const REFUSED: Array<[string, RegExp]> = [
   ['git push origin main', /push to main/],
   ['git push -u origin main', /push to main/],
   ['git push origin HEAD:main', /push to main/],
-  ['git push origin +main', /push to main/],
+  ['git push origin +main', /force-push|push to main/],
   ['git push origin card-9:main', /push to main/],
   ['git push origin refs/heads/main', /push to main/],
   ['git push origin :main', /push to main/],
@@ -79,6 +80,16 @@ const REFUSED: Array<[string, RegExp]> = [
   ['bash deploy/rollout.sh', /deployer/],
   ['/opt/watcher/deploy/autodeploy.sh', /deployer/],
   ['sh ../watcher/deploy/rollout.sh abc123', /deployer/],
+  ['source deploy/rollout.sh', /deployer/],
+  ['. ./deploy/autodeploy.sh', /deployer/],
+  ['git push origin +card-1', /force-push/],
+  ['bash -c "git push origin main"', /push to main/],
+  ["sh -c 'git push -f origin card-9'", /force-push/],
+  ['eval "git push --force origin card-9"', /force-push/],
+  ['gh api -X PUT repos/roloc/watcher/pulls/12/merge', /through the API/],
+  ['gh api --method PUT repos/roloc/watcher/pulls/12/merge -f merge_method=squash', /through the API/],
+  ['gh api -X PATCH repos/roloc/watcher/git/refs/heads/main -f sha=abc', /through the API/],
+  ['gh api -X DELETE repos/roloc/watcher/branches/main/protection', /through the API/],
   ['echo x > /opt/watcher/commands/watch.md', /protected root/],
   ['echo x >> /opt/watcher-releases/4a12ba7d8c90/CLAUDE.md', /protected root/],
   ['echo x >/opt/watcher-canary/x', /protected root/],
@@ -136,6 +147,20 @@ const ALLOWED = [
   'python3 /opt/watcher/bin/browse.py check http://localhost:8787/',
   'board move 87 "In review"',
   'rm -rf node_modules',
+  'cat deploy/autodeploy.sh',
+  'grep -n flip deploy/autodeploy.sh',
+  'bash -n deploy/rollout.sh',
+  'bash -n deploy/autodeploy.sh && echo ok',
+  'git add deploy/autodeploy.sh bin/test-deploy.sh',
+  'git diff origin/main...HEAD -- deploy/autodeploy.sh',
+  'git commit -m "fix: x" -- deploy/autodeploy.sh',
+  'sed -n 1,40p deploy/rollout.sh',
+  'bash bin/test-deploy.sh',
+  'bash -c "git push -u origin card-9"',
+  'gh api repos/roloc/watcher/pulls/12/merge',
+  'gh api -X DELETE repos/roloc/watcher/git/refs/heads/card-9-old',
+  'gh api repos/roloc/watcher/branches/main/protection',
+  'gh api -X POST repos/roloc/watcher/issues/12/comments -f body=hi',
 ]
 
 test('the Bash judge refuses each hard-rule spelling with a reason that names the rule', () => {
@@ -216,6 +241,8 @@ test('Write and Edit outside the worktree are refused — a symlink that resolve
   expect(viaLink.deny).toMatch(new RegExp(`lands at ${RELEASE}/commands/watch.md`))
   const dotdot = await $.tool.call({ tool: 'Write', file_path: `${WORKTREE}/../other.md`, content: 'x' })
   expect(dotdot.deny).toMatch(/outside the worktree/)
+  const settings = await $.tool.call({ tool: 'Write', file_path: `${HOME}/.claude/settings.json`, content: '{}' })
+  expect(settings.deny).toMatch(/outside the worktree/)
   const nb = await $.tool.call({ tool: 'NotebookEdit', notebook_path: '/opt/watcher/x.ipynb', new_source: '' })
   expect(nb.deny).toMatch(/outside the worktree|cannot tell/)
   expect(ran).toEqual([])

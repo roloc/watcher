@@ -298,8 +298,11 @@ tick's own session, where the floor page's Peek shows it like any other tool res
 
 The mod API is early access and moves between releases, so the box's `claude` has to be a
 build that has it (2.1.312 or later; `claude plugin test --help` prints usage on one that
-does). A mod that fails to load is one line on the tick's `.stderr` and the tick runs with
-the prose rules alone. `claude plugin validate --strict mods/guard` lists every gating hook
+does). `bin/spawn.sh` asks exactly that once per process and, on an older build, leaves the
+flag off and writes one journal line naming the build it found and the one it needs — the
+ticks still run, on the prose rules alone, and `bin/eval.sh` does the same for the replay
+cases. A mod that fails to load on a build that has the runtime is one line on the tick's
+`.stderr`, with the same result. `claude plugin validate --strict mods/guard` lists every gating hook
 and its fail-closed handler; `claude plugin test mods/guard` runs its tests offline, no
 login needed, and CI runs both on a pinned build through `npx`.
 

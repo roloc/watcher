@@ -12,11 +12,15 @@
 //
 // What it refuses, and how it decides (best effort, by the command's spelling — the robust
 // half is the Write/Edit fence, which judges where a path really lands):
-//   Bash  git push with --force / -f / --force-with-lease / --force-if-includes / --mirror / --all
+//   Bash  git push with --force / -f / --force-with-lease / --force-if-includes / --mirror / --all,
+//         or a + refspec
 //         git push whose refspec lands on main (origin main, HEAD:main, +main, refs/heads/main, :main)
-//         gh pr merge --admin
+//         gh pr merge --admin; gh api with a write method at …/pulls/<n>/merge, …/git/refs/heads/main
+//         or …/branches/main/protection
 //         systemctl (any form, sudo included)
-//         deploy/rollout.sh, deploy/autodeploy.sh (run directly or through sh/bash)
+//         deploy/rollout.sh, deploy/autodeploy.sh when RUN (as the program, or the script given to
+//         sh/bash/source) — naming them (cat, git add, bash -n, git diff) is fine
+//         the string handed to `bash -c`, `sh -c` or `eval`, judged as a command of its own
 //         a write by spelling under a protected root: a redirect (> >> &>) or tee into it;
 //         rm/mv/cp/mkdir/touch/ln/chmod/chown/truncate/install/rsync/sed -i/dd of= on it;
 //         git -C <root> (or after `cd <root> &&`) with a subcommand that writes.
@@ -26,8 +30,12 @@
 //   Write, Edit, NotebookEdit  a file_path whose RESOLVED path (every symlink followed, `..`
 //         folded) is not under the worktree (the session's cwd, resolved the same way), the
 //         system temp directory ($TMPDIR, else /tmp — watch.md §1's `mktemp -d` scratch), or
-//         the engine's own ~/.claude (its transcripts and memory). A path that cannot be
-//         placed at all is refused too: a spelling the fence cannot resolve, the tool might open.
+//         the engine's own ~/.claude/projects and ~/.claude/plans (its transcripts, memory and
+//         plans — never its settings.json or plugins/). A path that cannot be placed at all is
+//         refused too: a spelling the fence cannot resolve, the tool might open.
+//   Known to pass, by design of "by spelling": a path hidden in a variable (`"$STATE/PAUSE"`),
+//         a program that writes a path it computes (python, perl), a heredoc into a script. The
+//         Write/Edit fence is the robust half; the Bash list is the second wall's second wall.
 //
 // Tests: hooks/guard.test.ts — `claude plugin test mods/guard` (offline; the engine's own
 // kit, `fs.stat` answered from memory). `claude plugin validate mods/guard` reads this file
@@ -93,7 +101,10 @@ async function fence($: Engine, path: string): Promise<string | undefined> {
   const r = await loadRoots($)
   const real = await placed($, path)
   if (real === undefined) return `cannot tell where ${path} lands, so the write was refused (a spelling the fence cannot resolve, the tool might open).`
-  const allowed = [r.worktree, r.temp, ...(r.claudeDir ? [r.claudeDir] : [])]
+  // Of the engine's own folder only what a session writes as it runs — its transcripts and
+  // memory under projects/, a plan under plans/ — never its settings.json or plugins/,
+  // which a tick could otherwise use to rewrite its own rules.
+  const allowed = [r.worktree, r.temp, ...(r.claudeDir ? [`${r.claudeDir}/projects`, `${r.claudeDir}/plans`] : [])]
   if (allowed.some((root) => under(real, root))) return undefined
   return `${path} lands at ${real}, outside the worktree ${r.worktree} (and ${r.temp}). CLAUDE.md: never write outside your worktree.`
 }
@@ -228,15 +239,38 @@ export function judgeBash(command: string, r: Pick<Roots, 'home' | 'stateRoot'>)
 
     if (base === 'cd') { cwdHint = w[1] ? expand(w[1]) : ''; continue }
 
-    // deploy scripts, run directly or through a shell
-    const scriptish = w.filter((x) => /(^|\/)deploy\/(rollout|autodeploy)\.sh$/.test(x))
-    if (scriptish.length) return `${scriptish[0]} is the deployer's, never a tick's (CLAUDE.md: never deploy/rollout.sh or deploy/autodeploy.sh).`
+    // deploy scripts: refused when RUN — as the program, or as the script handed to a shell
+    // (`bash deploy/rollout.sh`, `sh -x …`, `source …`, `. …`) — never when merely named:
+    // a tick on a deploy card has to `cat`, `bash -n`, `git add` and `git diff` them.
+    const DEPLOY = /(^|\/)deploy\/(rollout|autodeploy)\.sh$/
+    if (DEPLOY.test(w[0])) return `${w[0]} is the deployer's, never a tick's (CLAUDE.md: never deploy/rollout.sh or deploy/autodeploy.sh).`
+    if (base === 'sh' || base === 'bash' || base === 'zsh' || base === 'dash' || base === 'source' || base === '.') {
+      const k = w.slice(1).findIndex((x) => !x.startsWith('-'))
+      const script = k < 0 ? undefined : w[k + 1]
+      // `bash -n <script>` only parses it (a syntax check, CI's own first step): not a run.
+      const noexec = w.slice(1, k < 0 ? w.length : k + 1).some((x) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(x))
+      if (script && !noexec && DEPLOY.test(script)) return `${script} is the deployer's, never a tick's (CLAUDE.md: never deploy/rollout.sh or deploy/autodeploy.sh).`
+    }
+
+    // a command string handed to a shell or eval is judged as a command of its own
+    if (base === 'sh' || base === 'bash' || base === 'zsh' || base === 'dash') {
+      const c = w.indexOf('-c')
+      if (c > 0 && w[c + 1]) { const inner = judgeBash(w[c + 1], r); if (inner) return inner }
+    }
+    if (base === 'eval') { const inner = judgeBash(w.slice(1).join(' '), r); if (inner) return inner }
 
     if (base === 'systemctl') return `never systemctl from a tick (CLAUDE.md: deploying and the services are the deployer's).`
 
     if (base === 'gh') {
       const pos = w.slice(1).filter((x) => !x.startsWith('-'))
       if (pos[0] === 'pr' && pos[1] === 'merge' && w.includes('--admin')) return `never gh pr merge --admin (docs/how-it-works.md, hard rules: the gate is the gate).`
+      if (pos[0] === 'api') {
+        const writes = w.some((x, k) => (x === '-X' || x === '--method') && /^(PUT|POST|PATCH|DELETE)$/i.test(w[k + 1] ?? ''))
+          || w.some((x) => /^(--method|-X)=(PUT|POST|PATCH|DELETE)$/i.test(x))
+          || w.some((x) => /^-[fF]$|^--(raw-)?field$/.test(x))
+        const target = pos.find((x) => /\/pulls\/\d+\/merge$|\/git\/refs\/heads\/main$|\/branches\/main\/protection/.test(x))
+        if (writes && target) return `never merge or move main through the API (${target}) — docs/how-it-works.md, hard rules.`
+      }
     }
 
     if (base === 'git') {
@@ -262,6 +296,7 @@ export function judgeBash(command: string, r: Pick<Roots, 'home' | 'stateRoot'>)
           positional.push(a)
         }
         for (const ref of positional.slice(1)) {
+          if (ref.startsWith('+')) return `never force-push (${ref}: a + refspec is a force) — docs/how-it-works.md, hard rules.`
           const dst = ref.includes(':') ? ref.slice(ref.indexOf(':') + 1) : ref
           if (MAIN.test(dst) || (ref.includes(':') && /^(refs\/heads\/)?main$/.test(dst))) return `never push to main (${ref}) — docs/how-it-works.md, hard rules: main moves only by a merged PR.`
         }
