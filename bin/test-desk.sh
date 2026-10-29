@@ -55,8 +55,8 @@ run() { # run [env...] — desk.sh with the test's env
 }
 rc()  { cat "$TMP/rc"; }
 out_has() { grep -q -- "$1" "$TMP/out"; }
-called() { grep -q -- "$1" "$CALLS"; }
-not_called() { ! grep -q -- "$1" "$CALLS"; }
+called() { grep -qF -- "$1" "$CALLS"; }
+not_called() { ! grep -qF -- "$1" "$CALLS"; }
 logged_in() { echo '{ "loggedIn": true, "authMethod": "claude.ai" }' > "$TMP/auth-status"; }
 
 echo "desk.sh"
@@ -183,11 +183,26 @@ ghr() { : > "$CALLS"; bash "$DESKGH" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"
 echo
 echo "desk-gh.sh"
 ghr roloc/watcher issue view 204 --comments
-[ "$(rc)" = 0 ] && called "gh issue view -R roloc/watcher 204 --comments" && pass "issue view: gh with the repository fixed by the script" || flunk "issue view" "rc=$(rc) $(cat "$CALLS" "$TMP/out")"
-ghr roloc/watcher pr list --search "204 in:body" --state all --json number,title
-called "gh pr list -R roloc/watcher --search 204 in:body --state all --json number,title" && pass "pr list with a search, a state and --json goes through" || flunk "pr list" "$(cat "$CALLS" "$TMP/out")"
-ghr roloc/watcher run view 123 --json conclusion; called "gh run view -R roloc/watcher 123 --json conclusion" && pass "run view" || flunk "run view" "$(cat "$CALLS")"
-ghr roloc/watcher pr checks 218; called "gh pr checks -R roloc/watcher 218" && pass "pr checks" || flunk "pr checks" "$(cat "$CALLS")"
+[ "$(rc)" = 0 ] && called "gh issue view 204 --comments -R roloc/watcher" && pass "issue view: gh with the repository fixed by the script, added LAST (gh takes the last -R)" || flunk "issue view" "rc=$(rc) $(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher pr list --search "204 in:body" --state all --json number,title --jq '.[] | .number'
+called "gh pr list --search 204 in:body --state all --json number,title --jq .[] | .number -R roloc/watcher" && pass "pr list with a search, a state, --json and a --jq goes through" || flunk "pr list" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue list --limit=5 --state=open; called "gh issue list --limit 5 --state open -R roloc/watcher" && pass "--flag=value is accepted and split" || flunk "flag=value" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher run view 123 --json conclusion; called "gh run view 123 --json conclusion -R roloc/watcher" && pass "run view" || flunk "run view" "$(cat "$CALLS")"
+ghr roloc/watcher pr checks 218; called "gh pr checks 218 -R roloc/watcher" && pass "pr checks" || flunk "pr checks" "$(cat "$CALLS")"
+ghr roloc/watcher issue view 1 -cRlocalhost/o/r
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a short-flag cluster ending in R is refused (no short flags at all)" || flunk "-cR" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue view 1 -cw
+[ "$(rc)" = 2 ] && not_called "gh" && pass "-cw (a cluster that opens the browser) is refused" || flunk "-cw" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue view 1 -t '{{.title}}'
+[ "$(rc)" = 2 ] && not_called "gh" && pass "-t (short --template) is refused" || flunk "-t" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue list --state --web
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a flag's value may not itself be a flag" || flunk "value-is-flag" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher issue list --search 'https://evil.example/x'
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a value carrying a URL is refused" || flunk "url value" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/watcher pr view main
+[ "$(rc)" = 2 ] && not_called "gh" && pass "a positional that is not a number is refused" || flunk "positional" "$(cat "$CALLS" "$TMP/out")"
+ghr roloc/.. issue view 1
+[ "$(rc)" = 2 ] && not_called "gh" && pass "owner/.. is not a repository" || flunk "dotdot repo" "$(cat "$CALLS" "$TMP/out")"
 ghr evil.example/roloc/watcher issue view 1
 [ "$(rc)" = 2 ] && not_called "gh" && pass "a host in the repository is refused" || flunk "host/owner/repo" "$(cat "$CALLS" "$TMP/out")"
 ghr roloc/watcher issue view 1 -R evil.example/a/b
