@@ -128,24 +128,29 @@ install_desk() {
     useradd -m -d "$home" -s /bin/bash ${groups:+-G "$groups"} watcher-desk \
       || { echo "warning: could not create the watcher-desk user; no desk on this box" >&2; return 1; }
   fi
-  install -d -o watcher-desk -g watcher-desk "$desk"
-  # .claude/ and the settings in it are ROOT's (review of roloc/watcher#218): the allow and
-  # deny lists are what make the desk read-only, so the desk process must not be able to
-  # rewrite them, nor drop a settings.local.json beside them from an "always allow" click.
-  # A root-owned 755 folder with a root-owned 644 file is readable by the session and
-  # writable by nobody in it.
+  # The home, the desk folder and everything root puts in them (review of
+  # roloc/watcher#218, three rounds): the allow and deny lists are what make the desk
+  # read-only, so nothing running as watcher-desk may rewrite them, drop a
+  # settings.local.json beside them, OR rename the folder that holds them away and start a
+  # fresh one. A root-owned directory with the sticky bit and group write (1775,
+  # group watcher-desk) is exactly that: the desk creates its own files there (claude's
+  # login, projects and sessions under ~/.claude; the git repo under ~/desk) but cannot
+  # unlink, rename or replace an entry root owns, because with the sticky bit only the
+  # entry's owner, the directory's owner or root may — and the directory's owner is root.
+  chown root:watcher-desk "$home" && chmod 1775 "$home"
+  install -d -o root -g watcher-desk -m 1775 "$desk"
   install -d -o root -g root -m 755 "$desk/.claude"
   if ! cmp -s "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; then
-    install -m 644 -o watcher-desk -g watcher-desk "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; changed=1
+    install -m 644 -o root -g root "$WATCHER_DIR/deploy/desk/CLAUDE.md" "$desk/CLAUDE.md"; changed=1
   fi
   if ! cmp -s "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; then
     install -m 644 -o root -g root "$WATCHER_DIR/deploy/desk/settings.json" "$desk/.claude/settings.json"; changed=1
   fi
   # The USER-scope settings too (review of #218, round 2): allow lists merge across scopes,
   # so a ~/.claude/settings.json the desk could write would widen what the project file
-  # closes. Root-owned `{}`, in a root-owned sticky folder (1775, group watcher-desk):
-  # claude itself still writes its login, projects and sessions there as a group member,
-  # and nothing running as watcher-desk can unlink or replace a file root put there.
+  # closes. Root-owned `{}`, in a root-owned sticky folder (1775, group watcher-desk) that
+  # itself sits in the root-owned sticky home above, so neither the file nor its folder
+  # can be renamed away from underneath.
   install -d -o root -g watcher-desk -m 1775 "$home/.claude"
   if ! printf '{}\n' | cmp -s - "$home/.claude/settings.json"; then
     printf '{}\n' > "$home/.claude/settings.json.new" && install -m 644 -o root -g root "$home/.claude/settings.json.new" "$home/.claude/settings.json" && rm -f "$home/.claude/settings.json.new"
@@ -157,6 +162,10 @@ install_desk() {
   if ! cmp -s "$WATCHER_DIR/bin/desk.sh" "$home/.desk.sh.installed"; then
     install -m 644 -o root -g root "$WATCHER_DIR/bin/desk.sh" "$home/.desk.sh.installed"; changed=1
   fi
+  # git refuses a repository whose top folder another user owns ("dubious ownership"), and
+  # $desk is root's now — so the desk user's own ~/.gitconfig names it safe, once.
+  su - watcher-desk -c "git config --global --get-all safe.directory 2>/dev/null | grep -qx '$desk' || git config --global --add safe.directory '$desk'" \
+    || echo "warning: could not mark $desk safe for git as watcher-desk" >&2
   [ -d "$desk/.git" ] || su - watcher-desk -c "git -C '$desk' init -q" \
     || { echo "warning: could not make $desk a git repo (Remote Control needs one)" >&2; return 1; }
   # Committed so the folder is a repository with a history, not just an init; nothing to

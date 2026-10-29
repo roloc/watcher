@@ -305,8 +305,23 @@ refuses it), and that credential must not sit where a tick can `cat` it. `instal
 the user, stocks `/home/watcher-desk/desk` (a small git repo — Remote Control wants a git
 root) and enables the unit; it restarts the desk only when those files changed, so a deploy
 does not cut a conversation off. Both settings files — the folder's and the user-scope
-`~/.claude/settings.json` — are installed root-owned, in folders the desk cannot unlink
-from, so nothing the desk runs can widen its own allow list. The one thing done by hand, once per box:
+`~/.claude/settings.json` — are installed root-owned, and the home, the desk folder and
+`~/.claude` are root-owned sticky directories, so nothing the desk runs can rewrite,
+replace or rename away its own allow list.
+
+**What that does and does not close.** A permission rule is a command prefix, which is why
+the allow list holds only two purpose-built wrappers (`bin/desk-read.sh` for the board and
+a dry run, `bin/floor-api.sh` for the floor service; each takes one fixed shape of
+argument) and pure readers (`cat`, `ls`, `grep`, `journalctl`, `systemctl status`, the
+`gh … view|list` reads). Everything else asks the owner, in the session, on their phone.
+Three review rounds on [#218](https://github.com/roloc/watcher/pull/218) found what a
+general tool on such a list can be bent into — `curl` to any host, `git log --output`
+writing chosen text, `uniq IN OUT` copying a file — and each came off the list. What
+remains open, and is accepted: a reader with a shell redirection (`cat a > b`) can still
+write a file in the desk user's own home, nowhere else, and a card body is untrusted text
+the desk reads. The desk's own credentials (the owner's Claude login, its `gh` token) are
+the thing worth protecting there, and every road out — the network clients, the
+interpreters, `gh`'s writes — is denied or asks. The one thing done by hand, once per box:
 
     sudo -u watcher-desk -H claude auth login     # the owner's own account
     sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work

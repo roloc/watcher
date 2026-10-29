@@ -121,7 +121,7 @@ cat > "$BIN/curl" <<'EOF2'
 echo "curl $*" >> "$CALLS"
 EOF2
 chmod +x "$BIN/curl"
-api() { : > "$CALLS"; FLOOR_API_CURL="$BIN/curl" bash "$FLOORAPI" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"; }
+api() { : > "$CALLS"; bash "$FLOORAPI" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"; }
 echo
 echo "floor-api.sh"
 api /api/state.json
@@ -138,6 +138,39 @@ api '/api/../etc/passwd'
 [ "$(rc)" = 0 ] && called "http://localhost:8787/api/../etc/passwd" && pass "a dotted path still only reaches the floor service (it answers 404; nothing else is reachable)" || flunk "dotted path" "$(cat "$CALLS" "$TMP/out")"
 api
 [ "$(rc)" = 2 ] && pass "no argument: usage, exit 2" || flunk "no-arg" "rc=$(rc)"
+
+# 8. bin/desk-read.sh: a lane name and one of five reads; it sources the lane's env itself
+DESKREAD="$HERE/desk-read.sh"
+RDIR="$TMP/release"; mkdir -p "$RDIR/projects" "$RDIR/bin"
+printf 'PROJECT_NAME=riffmap\nPROJECT_REPO=roloc/riffmap\nBOARD_OWNER=roloc\nBOARD_NUMBER=1\n' > "$RDIR/projects/riffmap.env"
+cat > "$RDIR/bin/board.py" <<'EOF2'
+import os, sys
+open(os.environ["CALLS"], "a").write("board.py %s owner=%s number=%s\n" % (" ".join(sys.argv[1:]), os.environ.get("BOARD_OWNER", "unset"), os.environ.get("BOARD_NUMBER", "unset")))
+EOF2
+printf '#!/usr/bin/env bash\necho "spawn.sh $* owner=${BOARD_OWNER:-unset}" >> "$CALLS"\n' > "$RDIR/bin/spawn.sh"
+read_() { : > "$CALLS"; WATCHER_DIR="$RDIR" bash "$DESKREAD" "$@" > "$TMP/out" 2>&1; echo $? > "$TMP/rc"; }
+echo
+echo "desk-read.sh"
+read_ riffmap show 12
+[ "$(rc)" = 0 ] && called "board.py show 12 owner=roloc number=1" && pass "show <n>: board.py show, with the lane's BOARD_OWNER and BOARD_NUMBER sourced for it" || flunk "show" "rc=$(rc) $(cat "$CALLS" "$TMP/out")"
+read_ riffmap list "In progress"
+called "board.py list In progress owner=roloc" && pass "list <column>: a column name with a space goes through whole" || flunk "list" "$(cat "$CALLS" "$TMP/out")"
+read_ riffmap ask 12; called "board.py ask 12" && pass "ask <n>" || flunk "ask" "$(cat "$CALLS")"
+read_ riffmap images 12; called "board.py images 12" && pass "images <n>" || flunk "images" "$(cat "$CALLS")"
+read_ riffmap dry-run
+[ "$(rc)" = 0 ] && called "spawn.sh --dry-run owner=roloc" && pass "dry-run: bash spawn.sh --dry-run under the lane's env, nothing else" || flunk "dry-run" "rc=$(rc) $(cat "$CALLS" "$TMP/out")"
+read_ riffmap move 12 Done
+[ "$(rc)" = 2 ] && not_called "board.py" && pass "move: not one of the five reads, refused" || flunk "move not refused" "$(cat "$CALLS" "$TMP/out")"
+read_ '../../home/watcher-desk/x' show 12
+[ "$(rc)" = 2 ] && not_called "board.py" && pass "a lane with a slash or dots is refused (no sourcing of an arbitrary file)" || flunk "bad lane not refused" "$(cat "$CALLS" "$TMP/out")"
+read_ nosuch show 12
+[ "$(rc)" = 2 ] && out_has "no such lane" && pass "an unknown lane is refused, naming where to look" || flunk "unknown lane" "$(cat "$TMP/out")"
+read_ riffmap show '12; rm -rf x'
+[ "$(rc)" = 2 ] && not_called "board.py" && pass "show takes a card number only" || flunk "non-number" "$(cat "$CALLS" "$TMP/out")"
+read_ riffmap dry-run --once
+[ "$(rc)" = 2 ] && not_called "spawn.sh" && pass "dry-run takes no further arguments (no --once smuggled in)" || flunk "dry-run extra arg" "$(cat "$CALLS" "$TMP/out")"
+read_ riffmap
+[ "$(rc)" = 2 ] && pass "too few arguments: usage, exit 2" || flunk "usage" "rc=$(rc)"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "$n cases, all passed"; else echo "$n cases, FAILURES ABOVE"; fi

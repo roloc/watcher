@@ -53,6 +53,9 @@ while [ $# -gt 0 ]; do
 done
 if [ "$mkdir_mode" = 1 ]; then mkdir -p "${args[@]}"; else cp "${args[0]}" "${args[1]}"; fi
 EOF2
+# chown / chmod: root-only against another user; logged, not done.
+printf '#!/usr/bin/env bash\necho "chown $*" >> "$CALLS"\n' > "$BIN/chown"
+printf '#!/usr/bin/env bash\necho "chmod $*" >> "$CALLS"\n' > "$BIN/chmod"
 cat > "$BIN/systemctl" <<'EOF2'
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$CALLS"
@@ -66,6 +69,9 @@ export PATH="$BIN:$PATH"
 
 DESK_HOME="$TMP/home/watcher-desk"; UNITDIR="$TMP/units"
 export DESK_HOME DESK_UNIT_DIR="$UNITDIR"
+# The `su - watcher-desk -c "git config --global …"` step writes the desk user's own
+# ~/.gitconfig; under the su stub that is OUR HOME, so HOME points into $TMP for every run.
+RUNNER_HOME="$TMP/runner-home"; mkdir -p "$RUNNER_HOME"
 
 fresh() { rm -rf "$TMP/home" "$UNITDIR" "$TMP/user-exists" "$TMP/unit-enabled" "$TMP/no-journal-group"; mkdir -p "$UNITDIR"; : > "$CALLS"; }
 run() {
@@ -73,7 +79,7 @@ run() {
   # WATCHER_DIR is this very checkout: deploy/desk/* and deploy/watcher-desk.service are the
   # real files. The .git check at the top of install.sh runs as whoever we are (no watcher
   # user here) and reads nothing we care about.
-  WATCHER_DIR="$REPO" WATCHER_REPO="https://example.test/dummy.git" INSTALL_LIB_ONLY=1 \
+  HOME="$RUNNER_HOME" WATCHER_DIR="$REPO" WATCHER_REPO="https://example.test/dummy.git" INSTALL_LIB_ONLY=1 \
     bash -c "source '$INSTALL'; install_desk" > "$TMP/out" 2>&1
   echo $? > "$TMP/rc"
 }
@@ -91,6 +97,8 @@ called "useradd -m -d $DESK_HOME -s /bin/bash -G systemd-journal watcher-desk" &
 cmp -s "$REPO/deploy/desk/CLAUDE.md" "$DESK_HOME/desk/CLAUDE.md" && pass "…desk/CLAUDE.md is deploy/desk/CLAUDE.md" || flunk "CLAUDE.md not installed"
 cmp -s "$REPO/deploy/desk/settings.json" "$DESK_HOME/desk/.claude/settings.json" && pass "…desk/.claude/settings.json is deploy/desk/settings.json" || flunk "settings.json not installed"
 called "install -d -o root -g root -m 755 $DESK_HOME/desk/.claude" && called "install -m 644 -o root -g root $REPO/deploy/desk/settings.json" && pass "…and .claude/ and settings.json are root's, so the desk cannot rewrite its own allow list" || flunk "settings not root-owned" "$(grep install "$CALLS")"
+called "chown root:watcher-desk $DESK_HOME" && called "chmod 1775 $DESK_HOME" && called "install -d -o root -g watcher-desk -m 1775 $DESK_HOME/desk" && called "install -m 644 -o root -g root $REPO/deploy/desk/CLAUDE.md" && pass "…the home and the desk folder are root's, sticky, group-writable (nothing root put there can be renamed away), CLAUDE.md root's" || flunk "home/desk ownership" "$(grep -E 'chown|chmod|install -d' "$CALLS")"
+[ "$(git config --file "$RUNNER_HOME/.gitconfig" --get-all safe.directory 2>/dev/null)" = "$DESK_HOME/desk" ] && pass "…and the desk user's own ~/.gitconfig names the root-owned repo safe (git's dubious-ownership check)" || flunk "safe.directory not set" "$(cat "$RUNNER_HOME/.gitconfig" 2>/dev/null)"
 cmp -s "$REPO/bin/desk.sh" "$DESK_HOME/.desk.sh.installed" && pass "…a copy of the installed desk.sh is kept, to notice a change next deploy" || flunk "no installed desk.sh copy"
 called "install -d -o root -g watcher-desk -m 1775 $DESK_HOME/.claude" && [ "$(cat "$DESK_HOME/.claude/settings.json")" = "{}" ] && called "install -m 644 -o root -g root $DESK_HOME/.claude/settings.json.new $DESK_HOME/.claude/settings.json" && pass "…and the USER-scope ~/.claude/settings.json is root's empty {} in a root-owned sticky folder (no self-widening through the user scope)" || flunk "user-scope settings not pinned" "$(grep -i 'claude' "$CALLS")"
 [ -d "$DESK_HOME/desk/.git" ] && [ "$(git -C "$DESK_HOME/desk" rev-list --count HEAD 2>/dev/null)" = 1 ] && pass "…the desk folder is a git repo with the files committed (Remote Control wants a git root)" || flunk "desk folder is not a committed git repo"
@@ -105,6 +113,7 @@ run
 [ "$(rc)" = 0 ] && pass "second install, nothing changed: exit 0" || flunk "second install exit" "rc=$(rc)"
 not_called "useradd" && pass "…no second useradd" || flunk "useradd again" "$(cat "$CALLS")"
 not_called "install -m 644" && pass "…no file copied" || flunk "copied unchanged files" "$(cat "$CALLS")"
+[ "$(git config --file "$RUNNER_HOME/.gitconfig" --get-all safe.directory | wc -l | tr -d ' ')" = 1 ] && pass "…and safe.directory is not added a second time" || flunk "safe.directory duplicated" "$(cat "$RUNNER_HOME/.gitconfig")"
 not_called "systemctl restart" && not_called "systemctl enable" && pass "…and the desk is left running (no restart, no re-enable)" || flunk "touched the unit" "$(cat "$CALLS")"
 
 # 3. The desk's CLAUDE.md changed on the box (an older deploy's copy): it is replaced,
@@ -137,7 +146,7 @@ called "systemctl restart watcher-desk.service" && cmp -s "$REPO/bin/desk.sh" "$
 echo "# old unit" > "$UNITDIR/watcher-desk.service"
 run
 cmp -s "$REPO/deploy/watcher-desk.service" "$UNITDIR/watcher-desk.service" && called "systemctl daemon-reload" && called "systemctl restart watcher-desk.service" && pass "a changed unit: reinstalled, daemon-reload, restart" || flunk "unit change not applied" "$(cat "$CALLS")"
-not_called "install -m 644 -o watcher-desk" && pass "…and the desk files were not copied again" || flunk "files copied for a unit change" "$(cat "$CALLS")"
+not_called "deploy/desk/CLAUDE.md" && not_called "deploy/desk/settings.json" && pass "…and the desk files were not copied again" || flunk "files copied for a unit change" "$(cat "$CALLS")"
 
 # 5. No systemd-journal group on this box: useradd without -G
 fresh; touch "$TMP/no-journal-group"; run

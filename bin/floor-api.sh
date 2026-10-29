@@ -9,7 +9,7 @@
 #   bin/floor-api.sh /api/state.json
 #   bin/floor-api.sh '/api/tail.json?lane=riffmap'
 #
-# FLOOR_API_CURL and FLOOR_HOST exist for bin/test-desk.sh (a stub curl; no network).
+# bin/test-desk.sh puts a stub `curl` first on PATH; nothing here is overridable.
 set -uo pipefail
 
 [ $# -eq 1 ] || { echo "floor-api.sh: exactly one argument, a floor API path (/api/state.json, /api/tail.json?lane=<lane>, /api/ship.json?project=<name>, /api/card.json?project=<name>&number=<n>)" >&2; exit 2; }
@@ -21,4 +21,4 @@ esac
 case "$path" in
   *[!A-Za-z0-9/?=\&._%-]*) echo "floor-api.sh: unexpected character in $path" >&2; exit 2 ;;
 esac
-exec "${FLOOR_API_CURL:-curl}" -sS --max-time 20 "http://${FLOOR_HOST:-localhost:8787}$path"
+exec curl -sS --max-time 20 "http://localhost:8787$path"
