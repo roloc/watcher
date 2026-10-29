@@ -1,0 +1,42 @@
+# The desk session (card #205): a read-only Remote Control console on the box, always on,
+# that any of the owner's own Claude sessions — Mac, phone, web — can pick or message
+# directly, without ssh: "is the lane idle yet", "what did the tick on #204 do", "run the
+# dry-run and show me the command". One per box, not a lane: it holds no card, runs no
+# tick, and never touches the board or a worktree — see this repo's CLAUDE.md, "The desk
+# session".
+#
+# A dedicated user, never `watcher`'s own: Remote Control refuses the lanes' long-lived
+# CLAUDE_CODE_OAUTH_TOKEN outright ("Long-lived tokens … are limited to inference-only");
+# it needs a full-scope browser login, and that credential must never land where a tick
+# could read it (deploy/install.sh's review of #107 is why /etc/watcher/env — every
+# tick's own environment — never carries a secret a tick has no business reading). So this
+# unit runs as `watcher-desk`, whose own one-time `claude auth login` (docs/owner-cheat-
+# sheet.md, "Pause, resume, logs") puts the credential under /home/watcher-desk/.claude/,
+# readable by no one else. The same rule runs the other way: watcher-desk is never added
+# to the `watcher` group either (review of #205) — /etc/watcher/env, the lanes' own token
+# and webhook secrets, is group-readable, and that is the only thing membership would
+# open. The lanes' state and the deploy history, which its CLAUDE.md does read, are
+# already world-readable, so there is nothing a group grants it there.
+[Unit]
+Description=The desk session: a read-only Remote Control console for the owner's own sessions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=watcher-desk
+Group=watcher-desk
+WorkingDirectory=/opt/watcher
+Environment=HOME=/home/watcher-desk
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# No name passed: the CLI's own default session-name prefix is the box's hostname
+# (`claude --help`), which is already "a session named for the box" — the one thing the
+# card asks the name to do.
+ExecStart=/bin/sh -c 'exec claude --remote-control'
+Restart=always
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

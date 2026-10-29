@@ -240,6 +240,14 @@ to send it to Discord by hand instead of waiting for Monday.
 
 ## Pause, resume, logs
 
+The box also runs a desk session: a Claude session named for the box, in your own
+sessions list on the Mac, the phone and the web (card #205), as soon as its one-time
+login is done (`su - watcher-desk; claude`, once, on the box, to trust the folder and open
+the browser login). Pick it, or message it from another session, and ask in plain words —
+"is riffmap idle yet", "what did the tick on #204 do", "run the dry-run and show me the
+command" — instead of ssh. It is read-only: it never moves a card or touches a tick. The
+commands below are the fallback for when you are on the box yourself.
+
 <details><summary>Commands (on the box)</summary>
 
 ```

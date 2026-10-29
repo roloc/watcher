@@ -108,9 +108,33 @@ hygiene_opts_in() {
        || git -C '$PROJECT_ROOT' cat-file -e origin/main:scripts/hygiene.sh 2>/dev/null"
 }
 
+# install_desk_service: the watcher-desk user and its unit (card #205) — a function, same
+# reason hygiene_opts_in and canary_clone are, so bin/test-install-desk.sh can call it
+# directly with INSTALL_LIB_ONLY=1 and every root-only command (useradd, usermod,
+# systemctl) stubbed on PATH, same trick test-install-hygiene.sh already uses for su.
+# SYSTEMD_UNIT_DIR overrides where the unit file lands — tests only; an ordinary run
+# always means /etc/systemd/system.
+install_desk_service() {
+  local unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+  id watcher-desk >/dev/null 2>&1 || useradd -m -s /bin/bash watcher-desk
+  chmod 700 /home/watcher-desk 2>/dev/null || true
+  # Never in the `watcher` group: /etc/watcher/env (640 root:watcher) is every lane's own
+  # token and webhook secrets, and group membership is the only thing that would ever
+  # open — review of #107, the same direction watcher-desk.service's own header already
+  # guards the other way. What it actually needs to read (the lanes' state, the deploy
+  # history) is already world-readable (reviewer, card #205), so there is nothing a group
+  # would add.
+  install -m 644 "$WATCHER_DIR/deploy/watcher-desk.service" "$unit_dir/watcher-desk.service"
+  systemctl daemon-reload
+  systemctl enable --now watcher-desk.service >/dev/null 2>&1 \
+    && systemctl restart watcher-desk.service \
+    || echo "warning: could not start watcher-desk.service" >&2
+}
+
 # bin/test-deploy.sh sources this file with INSTALL_LIB_ONLY=1 to call canary_clone directly,
 # with no root, no watcher user and no network — stopping here is what makes that possible.
-# bin/test-install-hygiene.sh does the same to call hygiene_opts_in.
+# bin/test-install-hygiene.sh does the same to call hygiene_opts_in, and
+# bin/test-install-desk.sh to call install_desk_service.
 if [ "${INSTALL_LIB_ONLY:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
 id watcher >/dev/null 2>&1 || useradd -m -s /bin/bash watcher
@@ -249,6 +273,11 @@ systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
   && systemctl restart watcher-floor.service \
   || echo "warning: could not start watcher-floor.service" >&2
 
+# The desk session (card #205): one instance per box, same reason and same cadence as the
+# floor page just above — holds no card, so it is restarted on every install rather than
+# drained or paused.
+install_desk_service
+
 NOT_STARTED=()
 for p in "$@"; do
   f="$WATCHER_DIR/projects/$p.env"
@@ -297,6 +326,12 @@ su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su 
 # tick's own call will look.
 su - watcher -c "python3 '$WATCHER_DIR/bin/browse.py' find" >/dev/null 2>&1 || MISSING+=("  Browser:    apt install chromium   (ticks look at pages with bin/browse.py, which needs a
               Chrome or Chromium; without one a tick cannot check a page it changed)")
+# The desk session (card #205): Remote Control refuses the lanes' own long-lived token, so
+# watcher-desk needs its own full-scope browser login — a one-time step only Steve can do.
+# Until it's done, watcher-desk.service just restarts every 10s with nothing to show for
+# it, which is expected and not itself a problem to fix here.
+su - watcher-desk -c 'test -s ~/.claude/.credentials.json' >/dev/null 2>&1 || MISSING+=("  Desk login: su - watcher-desk; claude   (once, in /opt/watcher — trusts the folder and
+              opens the browser login; claude auth login if it doesn't prompt)")
 if [ $# -eq 0 ]; then
   MISSING+=("  Project:    deploy/add-project.sh <name> <owner/repo>, then install.sh <project> clones it; drop its .env.local / private inputs in place.")
   MISSING+=("  Start:      systemctl enable --now watcher@<project>; journalctl -u watcher@<project> -f")
