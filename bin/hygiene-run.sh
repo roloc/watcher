@@ -22,6 +22,17 @@
 # already reaches the board — but isolating the subprocess's environment costs nothing and
 # means a future check gated the same way starts clean here too.
 #
+# Then the watcher's OWN section, appended to the same report (card #206): a project's
+# .claude/agents/reviewer.md or usability.md shadows the installed copy under
+# ~/.claude/agents (install.sh's symlink onto $WATCHER_DIR/agents), so the day the watcher's
+# agents/ changes, a project carrying its own copies keeps running the old review with
+# nothing to say so — no PR in the project can see a change that happened in another repo.
+# Compared with `cmp` against $WATCHER_DIR, the release the lanes actually run under, never
+# against GitHub: no network, and the deployed copy is the one that matters. A project
+# with no copy at all is not a finding (the installed one serves it). The project's own
+# hygiene.sh is optional for this: HYGIENE=1 in projects/<p>.env with no script of its own
+# (azeroth-rewind) runs the watcher's section alone.
+#
 # On a finding (exit 1): dedupe against an already-open card by title and comment the
 # fresh list there, or file a new one straight into Ready. On exit 0: nothing. On exit 2
 # ("could not run") or any setup failure: one clear line to stderr/the journal and exit 2
@@ -78,21 +89,64 @@ SCRIPT=""
 for candidate in bin/hygiene.sh scripts/hygiene.sh; do
   if [ -x "$CHECKOUT/$candidate" ]; then SCRIPT="$CHECKOUT/$candidate"; break; fi
 done
-[ -n "$SCRIPT" ] || { say "no hygiene.sh under $CHECKOUT (checked bin/ and scripts/)"; exit 2; }
+# No script of its own and no HYGIENE=1 is still "nothing to run" (card #206 made the
+# script optional, not the opt-in): deploy/install.sh never enables the timer for such a
+# project, so this can only be a by-hand run, and it says what it looked for.
+if [ -z "$SCRIPT" ] && [ "${HYGIENE:-0}" != 1 ]; then
+  say "no hygiene.sh under $CHECKOUT (checked bin/ and scripts/) and no HYGIENE=1 in $PROJECT_ENV"
+  exit 2
+fi
 
 report="$(mktemp)"; errlog="$(mktemp)"
-# unset, not just "don't export": if BOARD_NUMBER/BOARD_TOKEN are already exported in
-# THIS process's own environment (a by-hand run under a shell that sourced a project env,
-# say), a later plain assignment from sourcing PROJECT_ENV above keeps them exported —
-# bash's export bit is sticky per-variable, not per-assignment.
-( unset BOARD_NUMBER BOARD_TOKEN; cd "$CHECKOUT" && GITHUB_REPOSITORY="$PROJECT_REPO" "$SCRIPT" ) > "$report" 2>"$errlog"
-status=$?
+status=0
+if [ -n "$SCRIPT" ]; then
+  # unset, not just "don't export": if BOARD_NUMBER/BOARD_TOKEN are already exported in
+  # THIS process's own environment (a by-hand run under a shell that sourced a project env,
+  # say), a later plain assignment from sourcing PROJECT_ENV above keeps them exported —
+  # bash's export bit is sticky per-variable, not per-assignment.
+  ( unset BOARD_NUMBER BOARD_TOKEN; cd "$CHECKOUT" && GITHUB_REPOSITORY="$PROJECT_REPO" "$SCRIPT" ) > "$report" 2>"$errlog"
+  status=$?
+  case "$status" in
+    0|1) ;; # clean, or a finding — the watcher's own section comes next either way
+    *) say "hygiene.sh could not run (exit $status): $(cat "$errlog")"; rm -f "$report" "$errlog"; exit 2 ;;
+  esac
+fi
 
-case "$status" in
-  0) say "clean"; rm -f "$report" "$errlog"; exit 0 ;;
-  1) ;; # a finding — handled below
-  *) say "hygiene.sh could not run (exit $status): $(cat "$errlog")"; rm -f "$report" "$errlog"; exit 2 ;;
-esac
+# --- the watcher's own section: agent copies behind the watcher's (card #206) -----------
+# Same shape as hygiene.sh's own sections — a title with the count, the one line saying
+# why it is a weekly finding and not a CI gate, one bullet per file — so a reader of the
+# card tells them apart by nothing but the heading.
+watcher_sha="$(git -C "$WATCHER_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+agent_findings=""
+for name in reviewer usability; do
+  copy="$CHECKOUT/.claude/agents/$name.md"; ours="$WATCHER_DIR/agents/$name.md"
+  [ -f "$copy" ] && [ -f "$ours" ] || continue
+  cmp -s "$copy" "$ours" && continue
+  agent_findings="$agent_findings
+- \`.claude/agents/$name.md\` differs from the watcher's \`agents/$name.md\` (\`$WATCHER_DIR\` at $watcher_sha) — cp it over and open the PR"
+done
+if [ -n "$agent_findings" ]; then
+  n="$(printf '%s\n' "$agent_findings" | grep -c '^- ')"
+  if [ "$status" = 0 ]; then
+    # The project's own sweep was clean (or there was none): its "Clean: nothing to do"
+    # line must not head a card that has a finding in it, so the report starts over with
+    # a header of the watcher's own.
+    {
+      echo "## Hygiene sweep — $(date -u +%Y-%m-%d), the watcher's own checks"
+      echo
+      echo "**$n** finding(s). Done means the section below is empty: each copy matches the watcher's \`agents/\`."
+    } > "$report"
+  fi
+  {
+    echo
+    echo "### Agent copies behind the watcher's — $n"
+    echo "_Not a gate: the watcher's \`agents/\` changes without any PR in this repo, so no check on a PR here can see it. Copy the file in from the watcher and open the PR._"
+    printf '%s\n' "$agent_findings" | sed '/^$/d'
+  } >> "$report"
+  status=1
+fi
+
+if [ "$status" = 0 ]; then say "clean"; rm -f "$report" "$errlog"; exit 0; fi
 
 today="$(date -u +%Y-%m-%d)"
 existing="$(gh issue list -R "$PROJECT_REPO" --state open \
@@ -111,8 +165,10 @@ if [ -n "$existing" ]; then
 fi
 
 cardbody="$(mktemp)"
-cardmd="$(dirname "$SCRIPT")/hygiene-card.md"
-if [ -f "$cardmd" ]; then cat "$cardmd" "$report" > "$cardbody"; else cat "$report" > "$cardbody"; fi
+# The project's own card template, when it ships one next to its hygiene.sh; a project
+# running the watcher's section alone has no script and so no template.
+cardmd=""; [ -n "$SCRIPT" ] && cardmd="$(dirname "$SCRIPT")/hygiene-card.md"
+if [ -n "$cardmd" ] && [ -f "$cardmd" ]; then cat "$cardmd" "$report" > "$cardbody"; else cat "$report" > "$cardbody"; fi
 
 url="$(gh issue create -R "$PROJECT_REPO" --title "Weekly hygiene sweep — $today" --body-file "$cardbody" 2>/dev/null)"
 iss="${url##*/}"
