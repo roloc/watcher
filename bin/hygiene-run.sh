@@ -20,14 +20,24 @@
 # anything to a board-token check hygiene.sh carried briefly and has since dropped (added
 # by #192, reverted by #195) — this box needs no such secret, the bot's own `gh` login
 # already reaches the board — but isolating the subprocess's environment costs nothing and
-# means a future check gated the same way starts clean here too.
+# means a future check gated the same way starts clean here too. A project with HYGIENE=1
+# in its own env and no hygiene.sh of its own (azeroth-rewind) skips this step rather than
+# failing: the watcher's own section, below, still runs.
 #
-# On a finding (exit 1): dedupe against an already-open card by title and comment the
-# fresh list there, or file a new one straight into Ready. On exit 0: nothing. On exit 2
-# ("could not run") or any setup failure: one clear line to stderr/the journal and exit 2
-# — no card, nothing to Discord (CLAUDE.md: a post happens for stuck, broken, or the
-# Monday digest; a sweep that could not run is a `systemctl status`/`journalctl` fact, not
-# a new kind of alert).
+# After the project's own sweep, this script runs its own section (card #206): for each of
+# .claude/agents/reviewer.md and .claude/agents/usability.md that exists in the project's
+# checkout and differs (cmp -s) from this deploy's own agents/<name>.md, one finding line —
+# a project's copy shadows the installed symlink (deploy/install.sh), so a copy that falls
+# behind runs stale with nothing saying so. Compared against $WATCHER_DIR, the release the
+# lanes actually run under, never GitHub: no network, and it is the copy that matters. A
+# project with no copy at all is not a finding — the installed one serves it.
+#
+# On a finding (exit 1, from either the project's own sweep or the section above): dedupe
+# against an already-open card by title and comment the fresh list there, or file a new one
+# straight into Ready. On exit 0: nothing. On exit 2 ("could not run") or any setup failure:
+# one clear line to stderr/the journal and exit 2 — no card, nothing to Discord (CLAUDE.md:
+# a post happens for stuck, broken, or the Monday digest; a sweep that could not run is a
+# `systemctl status`/`journalctl` fact, not a new kind of alert).
 set -uo pipefail
 
 WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
@@ -78,21 +88,56 @@ SCRIPT=""
 for candidate in bin/hygiene.sh scripts/hygiene.sh; do
   if [ -x "$CHECKOUT/$candidate" ]; then SCRIPT="$CHECKOUT/$candidate"; break; fi
 done
-[ -n "$SCRIPT" ] || { say "no hygiene.sh under $CHECKOUT (checked bin/ and scripts/)"; exit 2; }
 
 report="$(mktemp)"; errlog="$(mktemp)"
-# unset, not just "don't export": if BOARD_NUMBER/BOARD_TOKEN are already exported in
-# THIS process's own environment (a by-hand run under a shell that sourced a project env,
-# say), a later plain assignment from sourcing PROJECT_ENV above keeps them exported —
-# bash's export bit is sticky per-variable, not per-assignment.
-( unset BOARD_NUMBER BOARD_TOKEN; cd "$CHECKOUT" && GITHUB_REPOSITORY="$PROJECT_REPO" "$SCRIPT" ) > "$report" 2>"$errlog"
-status=$?
+: > "$report"
+if [ -n "$SCRIPT" ]; then
+  # unset, not just "don't export": if BOARD_NUMBER/BOARD_TOKEN are already exported in
+  # THIS process's own environment (a by-hand run under a shell that sourced a project env,
+  # say), a later plain assignment from sourcing PROJECT_ENV above keeps them exported —
+  # bash's export bit is sticky per-variable, not per-assignment.
+  ( unset BOARD_NUMBER BOARD_TOKEN; cd "$CHECKOUT" && GITHUB_REPOSITORY="$PROJECT_REPO" "$SCRIPT" ) > "$report" 2>"$errlog"
+  status=$?
+elif [ "${HYGIENE:-0}" = 1 ]; then
+  status=0  # opted in with no hygiene.sh of its own — the watcher's own section still runs
+else
+  say "no hygiene.sh under $CHECKOUT (checked bin/ and scripts/)"
+  rm -f "$report" "$errlog"
+  exit 2
+fi
 
 case "$status" in
-  0) say "clean"; rm -f "$report" "$errlog"; exit 0 ;;
-  1) ;; # a finding — handled below
+  0) ;; # clean so far — the watcher's own section below may still turn this into a finding
+  1) ;; # a finding already
   *) say "hygiene.sh could not run (exit $status): $(cat "$errlog")"; rm -f "$report" "$errlog"; exit 2 ;;
 esac
+
+# The watcher's own section (card #206): a project's .claude/agents copy shadows the
+# installed symlink, so it is checked against this deploy's own agents/, not GitHub.
+agent_findings=""
+watcher_sha="$(git -C "$WATCHER_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+for name in reviewer usability; do
+  proj_copy="$CHECKOUT/.claude/agents/$name.md"
+  watcher_copy="$WATCHER_DIR/agents/$name.md"
+  if [ -f "$proj_copy" ] && [ -f "$watcher_copy" ] && ! cmp -s "$proj_copy" "$watcher_copy"; then
+    agent_findings="$agent_findings
+\`.claude/agents/$name.md\` differs from the watcher's agents/$name.md (/opt/watcher at $watcher_sha) — cp it over and open the PR"
+  fi
+done
+agent_findings="$(printf '%s' "$agent_findings" | sed '/^$/d')"
+if [ -n "$agent_findings" ]; then
+  {
+    echo
+    echo "### Watcher agent copies out of step"
+    echo "_Not a gate: the watcher's agents/ can change with no PR in this project, so no PR check here can see it._"
+    printf '%s\n' "$agent_findings" | sed 's/^/- /'
+  } >> "$report"
+  status=1
+fi
+
+if [ "$status" = 0 ]; then
+  say "clean"; rm -f "$report" "$errlog"; exit 0
+fi
 
 today="$(date -u +%Y-%m-%d)"
 existing="$(gh issue list -R "$PROJECT_REPO" --state open \
@@ -111,8 +156,9 @@ if [ -n "$existing" ]; then
 fi
 
 cardbody="$(mktemp)"
-cardmd="$(dirname "$SCRIPT")/hygiene-card.md"
-if [ -f "$cardmd" ]; then cat "$cardmd" "$report" > "$cardbody"; else cat "$report" > "$cardbody"; fi
+cardmd=""
+[ -n "$SCRIPT" ] && [ -f "$(dirname "$SCRIPT")/hygiene-card.md" ] && cardmd="$(dirname "$SCRIPT")/hygiene-card.md"
+if [ -n "$cardmd" ]; then cat "$cardmd" "$report" > "$cardbody"; else cat "$report" > "$cardbody"; fi
 
 url="$(gh issue create -R "$PROJECT_REPO" --title "Weekly hygiene sweep — $today" --body-file "$cardbody" 2>/dev/null)"
 iss="${url##*/}"

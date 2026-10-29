@@ -65,6 +65,14 @@ WDIR="$TMP/opt"
 mkdir -p "$WDIR/projects"
 export WATCHER_DIR="$WDIR"
 
+# The watcher's own agents/, as every lane's deploy actually runs it (card #206's
+# comparison target). $WDIR is not a git repo, so the script's own `git -C "$WATCHER_DIR"
+# rev-parse` falls back to "unknown" for the sha in a finding's text — fine for these
+# cases, which only check the file names and the "differs" wording.
+mkdir -p "$WDIR/agents"
+printf 'WATCHER REVIEWER v1\n' > "$WDIR/agents/reviewer.md"
+printf 'WATCHER USABILITY v1\n' > "$WDIR/agents/usability.md"
+
 cat > "$WDIR/projects/testproj.env" <<EOF
 PROJECT_NAME=testproj
 PROJECT_ROOT=$TMP/project-root
@@ -121,6 +129,25 @@ hygiene_card_md() {
   echo "CARD TEMPLATE" > "$ORIGIN/$dir/hygiene-card.md"
   git -C "$ORIGIN" add "$dir/hygiene-card.md"
   git -C "$ORIGIN" commit -q -m "add $dir/hygiene-card.md" >/dev/null
+  git -C "$TMP/project-root" fetch -q origin main
+  git -C "$TMP/project-root" merge -q --ff-only origin/main
+}
+# agents_file <name> <content> — sets the project's own .claude/agents/<name>.md (card
+# #206's "a project's copy shadows the installed symlink" case) and fetches it into
+# PROJECT_ROOT, same shape as hygiene_fixture above.
+agents_file() {
+  local name="$1" content="$2"
+  mkdir -p "$ORIGIN/.claude/agents"
+  printf '%s\n' "$content" > "$ORIGIN/.claude/agents/$name.md"
+  git -C "$ORIGIN" add .claude
+  git -C "$ORIGIN" commit -q -m "set .claude/agents/$name.md" >/dev/null
+  git -C "$TMP/project-root" fetch -q origin main
+  git -C "$TMP/project-root" merge -q --ff-only origin/main
+}
+no_agents_copy() {
+  rm -rf "$ORIGIN/.claude"
+  git -C "$ORIGIN" add -A
+  git -C "$ORIGIN" commit -q -m "remove .claude/agents" --allow-empty >/dev/null
   git -C "$TMP/project-root" fetch -q origin main
   git -C "$TMP/project-root" merge -q --ff-only origin/main
 }
@@ -282,6 +309,38 @@ if [ "$checkout_head" = "$latest" ]; then
 else
   flunk "throwaway checkout is on the wrong commit" "wanted $latest got $checkout_head"
 fi
+
+# 17. A project's .claude/agents copy has drifted from the watcher's own (card #206): the
+#    sweep's own section files a card naming the file, even though the project's own
+#    hygiene.sh reported clean.
+fresh; hygiene_fixture bin; exitcode 0; agents_file reviewer "PROJECT'S OWN STALE REVIEWER"; next_issue 706
+run
+if [ "$(rc)" = 0 ]; then pass "drifted .claude/agents copy: files a card (exits 0 once filed)"; else flunk "drifted agents copy exit code" "got $(rc)"; fi
+called "gh issue create -R roloc/testproj" && pass "...a card is filed" || flunk "no issue create for drifted agents copy" "$(cat "$CALLS")"
+grep -q "agents/reviewer.md" "$TMP/last-body" && grep -q "differs from the watcher" "$TMP/last-body" \
+  && pass "...the finding names the drifted file" || flunk "finding text missing" "$(cat "$TMP/last-body" 2>/dev/null)"
+no_agents_copy
+
+# 18. Identical copies, and no copy at all, are not findings: the project's own sweep
+#    being clean is the whole story either way.
+fresh; hygiene_fixture bin; exitcode 0; agents_file reviewer "WATCHER REVIEWER v1"
+run
+check18a() { [ "$(rc)" = 0 ] && out_has "clean"; }
+if check18a; then pass "identical .claude/agents copy: still clean"; else flunk "identical agents copy" "$(cat "$TMP/out")"; fi
+no_agents_copy
+fresh; hygiene_fixture bin; exitcode 0
+run
+check18b() { [ "$(rc)" = 0 ] && out_has "clean"; }
+if check18b; then pass "no .claude/agents copy at all: still clean"; else flunk "absent agents copy" "$(cat "$TMP/out")"; fi
+
+# 19. HYGIENE=1 and no hygiene.sh of its own (azeroth-rewind's shape): runs the watcher's
+#    own section alone and exits 0 when clean, instead of today's exit 2.
+fresh; no_hygiene_script
+printf 'HYGIENE=1\n' >> "$WDIR/projects/testproj.env"
+run
+check19() { [ "$(rc)" = 0 ] && out_has "clean"; }
+if check19; then pass "HYGIENE=1, no hygiene.sh of its own: exits 0 clean"; else flunk "HYGIENE=1 no script" "$(cat "$TMP/out")"; fi
+sed -i.bak '/^HYGIENE=1$/d' "$WDIR/projects/testproj.env"; rm -f "$WDIR/projects/testproj.env.bak"
 
 echo
 if [ "$fail" -eq 0 ]; then

@@ -289,6 +289,11 @@ same script runs on riffmap ([roloc/riffmap#711](https://github.com/roloc/riffma
 and riffmap-site ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)) —
 still from each repo's own GitHub Actions workflow and `BOARD_TOKEN`, pending their own
 box-side move; the script itself is one script with each repo's paths either way.
+`bin/hygiene-run.sh` also appends its own section for every project it sweeps (card #206):
+when a project's own `.claude/agents/reviewer.md` or `usability.md` copy — which shadows
+the installed symlink, `deploy/install.sh` — no longer matches the watcher's own `agents/`,
+one finding names the file and the watcher commit it has fallen behind; clearing it is
+mechanical, the same as every other hygiene section.
 
 Three rules keep it cheap:
 
