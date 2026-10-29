@@ -221,6 +221,15 @@ chmod +x "$BIN/board.py"
 # timeout or not).
 cat > "$BIN/claude" <<'STUB'
 #!/usr/bin/env bash
+# Card #204: spawn.sh's guard_plugin_probe asks `claude plugin test --help` once per process
+# (and `--version` on the no-runtime path). Answered BEFORE the log line, so a probe never
+# shows up as a "claude" launch in $TEST_LOG; CLAUDE_NO_MODS=1 stands for a build older
+# than the mod runtime (the box's 2.1.263 on October 29, 2026).
+if [ "$1" = plugin ]; then
+  [ -n "${CLAUDE_NO_MODS:-}" ] && exit 1
+  echo "Run a mod's tests"; exit 0
+fi
+if [ "$1" = --version ]; then echo "2.1.263 (Claude Code)"; exit 0; fi
 echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
 echo "claude-env background-tasks-disabled=${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-unset}" >> "$TEST_LOG"
 echo "claude-env path-head=${PATH%%:*} real=${WATCHER_REAL_CLAUDE:-unset}" >> "$TEST_LOG"
@@ -481,6 +490,7 @@ run() {
   CLAUDE_UNTRUSTED_ALWAYS="${CLAUDE_UNTRUSTED_ALWAYS:-}" \
   CLAUDE_UNTRUSTED_KEY="${CLAUDE_UNTRUSTED_KEY:-}" \
   CLAUDE_PROBE_FAIL_OTHER="${CLAUDE_PROBE_FAIL_OTHER:-}" \
+  CLAUDE_NO_MODS="${CLAUDE_NO_MODS:-}" \
   WORKTREE_NEW_FAIL="${WORKTREE_NEW_FAIL:-0}" \
   GH_PR_LIST_FILE="${GH_PR_LIST_FILE:-}" GH_PR_LIST_FAIL="${GH_PR_LIST_FAIL:-0}" \
   DOCTOR_FAIL="${DOCTOR_FAIL:-0}" DOCTOR_FAIL_REASON="${DOCTOR_FAIL_REASON:-}" \
@@ -2367,6 +2377,56 @@ if [ "$header_vars" != "$scratch_example_vars" ]; then
 else
   flunk "the check missed a var added only to example.env.txt"
 fi
+
+# ============================================================================
+echo "38. card #204: every tick is launched with the guard mod (--plugin-dir …/mods/guard)"
+# The real launch and --dry-run share print_claude_cmd, so the flag read off the dry run is
+# the flag a tick gets. The path is WATCHER_HOME's own mods/guard — a canary lane's
+# WATCHER_HOME is its own checkout, so it loads its own copy.
+fresh_state
+board_list $'12\tP2\tbuilder\t-\tCard twelve (claimable)'
+OUT="$(run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'/mods/guard"'; then
+  pass "the dry-run's claude command carries --plugin-dir <WATCHER_HOME>/mods/guard"
+else
+  flunk "no --plugin-dir …/mods/guard in the launch" "out=[$OUT]"
+fi
+if [ -f "$(dirname "$HERE")/mods/guard/hooks/hooks.json" ] && [ -f "$(dirname "$HERE")/mods/guard/.claude-plugin/plugin.json" ]; then
+  pass "…and the folder it names is a plugin in this checkout (hooks.json, plugin.json)"
+else
+  flunk "mods/guard is not a plugin folder in this checkout"
+fi
+# 38b. The real launch carries the same flag (it is a separate block from print_claude_cmd,
+# for process-group reasons — so this checks the launch itself, not the printer).
+fresh_state
+board_list $'22\tP1\tbuilder\t-\tCard twenty-two'
+board_show '{"number":22,"state":"OPEN","status":"In progress","labels":[]}'
+run --once >/dev/null 2>"$TMP/guard.err"
+if grepped "--plugin-dir $(dirname "$HERE")/mods/guard"; then
+  pass "a real launch carries --plugin-dir <WATCHER_HOME>/mods/guard too"
+else
+  flunk "the real launch has no --plugin-dir" "$(grep 'claude -p' "$TESTLOG")"
+fi
+if ! grep -q "guard mod NOT loaded" "$TMP/guard.err"; then pass "…and nothing in the journal about the guard: the build has the runtime"; else flunk "spurious 'NOT loaded' line" "$(cat "$TMP/guard.err")"; fi
+# 38c. A build without the mod runtime (the box's 2.1.263, October 29, 2026): no flag on
+# the launch or the dry run, one journal line naming the version and the fix, the tick
+# still runs.
+fresh_state
+board_list $'23\tP1\tbuilder\t-\tCard twenty-three'
+board_show '{"number":23,"state":"OPEN","status":"In progress","labels":[]}'
+CLAUDE_NO_MODS=1 run --once >/dev/null 2>"$TMP/guard2.err"; RC=$?
+if [ "$RC" = 0 ] && grepped "/watch 23" && not_grepped "--plugin-dir"; then
+  pass "no mod runtime: the tick is launched without --plugin-dir, and still launched"
+else
+  flunk "no-runtime launch" "rc=$RC $(grep 'claude -p' "$TESTLOG")"
+fi
+if [ "$(grep -c "guard mod NOT loaded" "$TMP/guard2.err")" = 1 ] && grep -q "2.1.263" "$TMP/guard2.err" && grep -q "2.1.312 or later" "$TMP/guard2.err"; then
+  pass "…one journal line names the build it found and the build it needs"
+else
+  flunk "no-runtime journal line" "$(cat "$TMP/guard2.err")"
+fi
+OUT="$(CLAUDE_NO_MODS=1 run --dry-run 2>/dev/null)"
+if ! printf '%s' "$OUT" | grep -q -- '--plugin-dir'; then pass "…and the dry run prints the same launch: no --plugin-dir either"; else flunk "dry run and launch drift: dry run still shows the flag" "$OUT"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

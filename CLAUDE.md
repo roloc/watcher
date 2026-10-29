@@ -86,6 +86,20 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   review that never ran, fails it instead of merging silently. Required alongside `verify`
   in `.github/workflows/ci.yml`'s `review-receipt` job. `bash bin/test-receipt.sh` is its
   offline suite (CI runs it); run it after touching the file.
+- `mods/guard/` — the guard mod (card #204), loaded into every tick by `bin/spawn.sh`'s
+  `--plugin-dir` and into every replay case by `bin/eval.sh`. Function hooks that refuse the
+  hard-rule commands before they run — a force-push, a push to `main`, `gh pr merge --admin`,
+  `systemctl`, the deploy scripts, a write by spelling under `/opt/watcher`, `/etc/watcher`
+  or a lane's state directory — and a `Write`/`Edit`/`NotebookEdit` whose resolved path is
+  outside the worktree, `$TMPDIR` or `~/.claude`. A second wall behind the prose, never the
+  only one; it approves, merges and moves nothing. `claude plugin validate --strict mods/guard`
+  and `claude plugin test mods/guard` are its suites (offline, no login; CI runs both on a
+  pinned build through `npx`) — run them after touching anything under it, and the mod's
+  `register.ts` header is the list of what it refuses and how it decides. The mod API is
+  early access: the box's `claude` must be 2.1.312 or later for the guard to be live —
+  `spawn.sh`'s `guard_plugin_probe` leaves the flag off an older build and says so in the
+  journal, so a merge never depends on the box's version — and a bump of the pinned build
+  in `.github/workflows/ci.yml` is where a moved API shows up first.
 - `templates/` — what a project copies in: `project-CLAUDE.md` (the section its `CLAUDE.md`
   needs for `/watch`) and `board.md` (its `docs/board.md`, blanks for the repo, board
   owner, number and login; `deploy/add-project.sh` prints the `sed` that fills them, and
