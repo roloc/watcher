@@ -23,6 +23,23 @@
 # this script's own arguments on a second attempt, so a flake costs one case, not a full
 # rerun. See the comment next to that logic for the trade this makes.
 #
+# A SECOND RUNNER, BESIDE THIS ONE (card #216): `evals/plugin/<name>/` holds a case for
+# `claude plugin eval` (case.yaml, prompt.md, scaffold.sh) — the same fixture, graded by the
+# command's own tool_used graders instead of case_check(). One is ported so far,
+# owner-comment-redirects-triage; the .sh original stays here and stays the gate. By hand, on
+# a box with bubblewrap and socat (deploy/bootstrap.sh installs both):
+#
+#   claude plugin eval . --eval-dir evals/plugin --scaffold --allow-tools Bash \
+#     --ablation none --trust-plugin --no-publish --runs 1
+#
+# It costs quota like a case here, never runs in CI, and deploy/autodeploy.sh does not call
+# it. What it cannot do yet, and so what parity would take: the command's shell can write only
+# under /tmp (the case's scaffold.sh writes wrappers that copy the fake board there), so a
+# case that needs git state in its worktree (a push, a merge) has nowhere to put it; and its
+# graders see the tick's tool calls and last message, not the board afterward, so a check on
+# the final state (status, labels left on the card) is a pattern over the commands instead.
+# Moving the deployer over needs both closed and every case here ported, not just this one.
+#
 # WHERE THIS RUNS: never CI (`.github/workflows/ci.yml`'s own header explains why — PR code
 # never runs on the box holding credentials) and never as part of an ordinary tick's turns.
 # It runs by hand, and from the deployer (`deploy/autodeploy.sh`, and `deploy/rollout.sh`,

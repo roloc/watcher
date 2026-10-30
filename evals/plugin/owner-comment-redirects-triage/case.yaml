@@ -1,0 +1,51 @@
+schema_version: "1.0"
+name: owner-comment-redirects-triage
+description: >
+  riffmap#778, October 17, 2026. The owner minted the credentials, the live send failed, and
+  his newest comment asks the loop to run the send itself; the body still says only he can.
+  Triage must route on the comment: label the builder lane, say why in an FYI that quotes his
+  sentence, and never move the card or post a second Needs. Ported from
+  evals/cases/owner-comment-redirects-triage.sh (the replay suite's copy stays the gate).
+tags: [triage, fakehub]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: prompt.md
+  max_turns: 40
+  timeout_seconds: 480
+  allowed_tools: [Read, Glob, Grep, Bash]
+runs: 1
+graders:
+  - type: tool_used
+    name: labels-builder
+    tool: Bash
+    input_match: 'add-label[^\n]*agent: builder'
+    min: 1
+  - type: tool_used
+    name: no-board-move
+    tool: Bash
+    input_match: 'board move'
+    min: 0
+    max: 0
+  - type: tool_used
+    name: no-new-needs
+    tool: Bash
+    input_match: 'issue comment[\s\S]*Needs'
+    min: 0
+    max: 0
+  - type: tool_used
+    name: fyi-names-builder
+    tool: Bash
+    input_match: 'issue comment[\s\S]*FYI:[^\n]*builder'
+    min: 1
+  - type: tool_used
+    name: why-quotes-the-owner
+    tool: Bash
+    input_match: 'issue comment[\s\S]*FYI:[\s\S]*Why:[\s\S]{0,300}(535|[Ee]scap)'
+    min: 1
+  - type: tool_used
+    name: why-not-from-the-body
+    tool: Bash
+    input_match: 'issue comment[\s\S]*Why:[^\\]{0,300}only you can'
+    min: 0
+    max: 0

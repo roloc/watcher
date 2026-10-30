@@ -775,6 +775,7 @@ echo "apt-get \$*" >> "$CALLS"
 if [ "\$1" = install ]; then
   pkg="\${!#}"
   case "\$pkg" in
+    bubblewrap) : > "$BBIN/bwrap"; chmod +x "$BBIN/bwrap" ;;
     nodejs) printf '#!/usr/bin/env bash\necho v22.0.0\n' > "$BBIN/node"; chmod +x "$BBIN/node" ;;
     *)      : > "$BBIN/\$pkg"; chmod +x "$BBIN/\$pkg" ;;
   esac
@@ -826,9 +827,9 @@ check "bootstrap: ...and never touches apt at all"         not_called "apt-get"
 bootstrap_run
 check "bootstrap: a fresh box exits clean"                  brc_is 0
 check "bootstrap: installs every missing apt package"       bash -c '
-  for p in git python3 chromium gh; do grep -q "apt-get install -y -qq $p\$" "'"$CALLS"'" || exit 1; done'
+  for p in git python3 chromium bubblewrap socat gh; do grep -q "apt-get install -y -qq $p\$" "'"$CALLS"'" || exit 1; done'
 check "bootstrap: ...and says so, one line per tool"        bash -c '
-  for p in git python3 chromium gh; do grep -q "installed $p\$" "'"$TMP/bout"'" || exit 1; done
+  for p in git python3 chromium bubblewrap socat gh; do grep -q "installed $p\$" "'"$TMP/bout"'" || exit 1; done
   grep -q "already have curl" "'"$TMP/bout"'"'
 check "bootstrap: installs Node 22 via NodeSource, not Debian 12's own archive" \
       bash -c 'grep -q "curl.*deb.nodesource.com/setup_22.x" "'"$CALLS"'" && grep -q "apt-get install -y -qq nodejs" "'"$CALLS"'"'
@@ -848,7 +849,7 @@ check "bootstrap: puts godot4 under the overridden install dir, never /usr/local
 bootstrap_run
 check "bootstrap: a second run on the same box exits clean"  brc_is 0
 check "bootstrap: ...finds every tool already there now"     bash -c '
-  for p in git python3 curl chromium gh xauth; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done
+  for p in git python3 curl chromium bwrap socat gh xauth; do grep -q "already have $p\$" "'"$TMP/bout"'" || exit 1; done
   grep -q "already have godot4" "'"$TMP/bout"'"'
 check "bootstrap: ...and never calls apt-get or npm a second time" bash -c '
   not_called() { ! grep -q -- "$1" "'"$CALLS"'"; }; not_called "apt-get" && not_called "npm i"'
