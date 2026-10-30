@@ -316,6 +316,11 @@ plugin_probe() {
     PLUGIN_ARGV+=(--plugin-dir "$WATCHER_HOME/mods/card-context")
     PLUGIN_ARGS+=" --plugin-dir \"$WATCHER_HOME/mods/card-context\""
   fi
+  # Card #215: the browse mod, bin/browse.py's check, text and shot as one registered tool.
+  if [ -f "$WATCHER_HOME/mods/browse/hooks/hooks.json" ]; then
+    PLUGIN_ARGV+=(--plugin-dir "$WATCHER_HOME/mods/browse")
+    PLUGIN_ARGS+=" --plugin-dir \"$WATCHER_HOME/mods/browse\""
+  fi
   case "$LANE_COMMAND" in /watcher:*) ;; *) LAUNCH_COMMAND="/watcher:${LANE_COMMAND#/}" ;; esac
   if ! "$WATCHER_REAL_CLAUDE" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
     log "guard mod NOT loaded: $WATCHER_REAL_CLAUDE ($("$WATCHER_REAL_CLAUDE" --version 2>/dev/null | head -1)) has no mod runtime — card #204 needs 2.1.312 or later (npm i -g @anthropic-ai/claude-code@latest on the box); ticks run on the prose rules alone"
