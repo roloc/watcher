@@ -3,8 +3,8 @@
 // works its own board". bin/spawn.sh loads it into every tick with
 // `--plugin-dir "$WATCHER_HOME/mods/guard"`, and bin/eval.sh into every replay case, so a
 // tick that is about to run one of the commands below is refused before the command runs:
-// the model reads the one-line reason as the tool's error and goes on. Nothing here ever
-// approves, merges or moves a card — a hook only answers `{ deny }` or hands the call on.
+// the model reads the one-line reason as the tool's error and goes on. Nothing in the guards
+// ever approves, merges or moves a card — a guard only answers `{ deny }` or hands the call on.
 //
 // Every guard is registered with `.catch(... next.called ? next(e) : { deny })`, so a guard
 // that throws or overruns its budget still refuses instead of falling open. There is no
