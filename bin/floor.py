@@ -133,6 +133,7 @@ ALLOWED_FIELDS = {
     # lands at the latest
     "step", "detail", "alive", "running", "since_sec", "next_in_sec", "stale",
     "waiting_for", "launched_at", "deadline_at", "lands_by",
+    "backed_up", "behind", "held_count", "waiting_since", "live_since",
     # the Needs-the-owner strip (card #96): every Stuck card on the board, whichever lane
     # last touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
@@ -420,6 +421,9 @@ DEPLOY_SERVICE_UNIT = "watcher-deploy.service"
 # deploy/watcher-deploy.timer's own OnUnitInactiveSec. A constant, not a live systemd read:
 # the timer's own schedule only changes with a commit to that file, which this mirrors.
 DEPLOY_TIMER_SEC = int(os.environ.get("DEPLOY_TIMER_SEC") or 300)
+# Card #237: minutes the oldest commit may wait on main before the Ship desk says "Backed
+# up". A clean deploy is CI, the replay suite and a 30-minute canary soak, about an hour.
+DEPLOY_BACKED_UP_MIN = int(os.environ.get("DEPLOY_BACKED_UP_MIN") or 240)
 
 
 def deploy_service_running(unit=DEPLOY_SERVICE_UNIT, timeout=5):
@@ -548,11 +552,44 @@ def deploy_status(repo_dir, deploy_state, repo, git=_git, lanes=(), now=None, ru
                 "launched_at": launched.isoformat(), "deadline_at": deadline.isoformat(),
             })
     out["waiting_for"] = waiting
+    out.update(_deploy_backlog(repo_dir, deploy_state, git, now, live, out["state"]))
     out["lands_by"] = (
         (max(datetime.fromisoformat(w["deadline_at"]) for w in waiting)
          + timedelta(seconds=DEPLOY_TIMER_SEC)).isoformat()
         if waiting else None)
     return out
+
+
+def _deploy_backlog(repo_dir, deploy_state, git, now, live, state):
+    """Card #237: how piled up main is behind the live release, from what the deployer
+    already keeps. `behind` is the commits on origin/main the box has not shipped (the
+    deployer's own fetch keeps origin/main current, so no network here); `waiting_since` the
+    oldest one's commit time; `live_since` when the pointer last flipped; `held_count` the
+    held/ files other than the live commit's own (a deploy-anyway keeps that one). One
+    boolean, `backed_up`, for the desk, the Studio and the beacon to share."""
+    try:
+        behind = int(git(repo_dir, "rev-list", "--count", "HEAD..origin/main") or 0)
+    except ValueError:
+        behind = 0
+    waiting_since = None
+    oldest = git(repo_dir, "log", "--format=%ct", "HEAD..origin/main").split("\n")[-1].strip()
+    if oldest.isdigit():
+        waiting_since = datetime.fromtimestamp(int(oldest), tz=timezone.utc)
+    try:
+        live_since = datetime.fromtimestamp(
+            os.path.getmtime(os.path.join(deploy_state, "deployed")), tz=timezone.utc).isoformat()
+    except OSError:
+        live_since = None
+    try:
+        held_count = len([f for f in os.listdir(os.path.join(deploy_state, "held")) if f != live])
+    except OSError:
+        held_count = 0
+    backed_up = state != "live" and (
+        held_count > 1
+        or (waiting_since is not None
+            and (now - waiting_since).total_seconds() > DEPLOY_BACKED_UP_MIN * 60))
+    return {"behind": behind, "waiting_since": waiting_since.isoformat() if waiting_since else None,
+            "live_since": live_since, "held_count": held_count, "backed_up": backed_up}
 
 
 def lane_release(lane):
@@ -2235,7 +2272,8 @@ function dispatcherSVG(pill) {
 // The ship station, after the lanes: CI on main, and for the watcher's own board the box's
 // deployer too. Not a lane — nothing here works a card.
 const SHIP_PILL = {ok: ["working", "All green"], busy: ["paused", "Shipping"],
-                   blocked: ["needs_steve", "Blocked"], unknown: ["idle", "Unknown"]};
+                   blocked: ["needs_steve", "Blocked"], backed_up: ["needs_steve", "Backed up"],
+                   unknown: ["idle", "Unknown"]};
 // laneReleaseLines (card #106) — one line per project naming how many of its lanes have
 // already followed the pointer to the live release, and which have not (still finishing a
 // tick on an older one — never disturbed, just not there yet). `live` is the deployer's
@@ -2254,6 +2292,15 @@ function laneReleaseLines(dep, lanes) {
       : `${esc(name)}: all ${group.length} lane(s) on it`;
   });
 }
+// "Oct 29 19:04 UTC" — the one time the backed-up line names, in UTC like the deployer's
+// own history file (card #237).
+function fmtUtcDay(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const p2 = n => String(n).padStart(2, "0");
+  return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()]
+    + ` ${d.getUTCDate()} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())} UTC`;
+}
 function shipState(ship) {
   const ci = (ship && ship.ci) || {state: "unknown"};
   const dep = ship && ship.deploy;
@@ -2266,14 +2313,20 @@ function shipState(ship) {
                 checking: `checking ${esc(dep.target)}: CI and tests`,
                 testing: `retesting ${esc(dep.target)}`,
                 held: `held: ${esc(dep.target)}` + (dep.card ? ` (#${dep.card.number})` : "")}[dep.state] || "");
+    if (dep.backed_up) {
+      const n = dep.behind || 0;
+      lines.push((dep.live_since ? `nothing shipped since ${esc(fmtUtcDay(dep.live_since))}` : "nothing shipped lately")
+                 + `: ${n} commit${n === 1 ? "" : "s"} waiting, ${dep.held_count || 0} held`);
+    }
     lines.push(...laneReleaseLines(dep, ship.lanes));
   }
-  let pill = "ok", mode = "done";
+  let pill = "ok", mode = "done", crates = 0;
   if ((dep && dep.state === "held") || ci.state === "failing") { pill = "blocked"; mode = "blocked"; }
+  else if (dep && dep.backed_up) { pill = "backed_up"; mode = "backlog"; crates = Math.max(1, Math.min(5, dep.behind || 0)); }
   else if ((dep && dep.state !== "live") || ci.state === "running") { pill = "busy"; mode = "checking"; }
   else if (ci.state === "unknown" && !dep) { pill = "unknown"; mode = "idle"; }
   const link = (dep && dep.card && dep.card.url) || ci.url || "";
-  return {pill, mode, lines, link, deploys: !!dep};
+  return {pill, mode, lines, link, crates, deploys: !!dep};
 }
 function shipSVG(mode, pill) {
   const c = `var(--${{working: "working", paused: "paused", needs_steve: "needs", idle: "idle"}[SHIP_PILL[pill][0]]})`;
@@ -2662,7 +2715,10 @@ function renderDeployDetail(dep) {
       + `(${esc(w.project)}/${esc(w.lane)}) — its watchdog ends it by ${esc(fmtTime(w.deadline_at))}</li>`)
       .join("")}</ul>`);
   }
-  if (dep.state !== "live") {
+  if (dep.backed_up) {
+    parts.push(`<div class="deploy-backed-up">Backed up since ${esc(fmtUtcDay(dep.live_since) || "the last release")}: `
+      + `${dep.behind || 0} commit(s) waiting, ${dep.held_count || 0} held</div>`);
+  } else if (dep.state !== "live") {
     parts.push(`<div class="deploy-lands">${dep.lands_by
       ? `Lands by ${esc(fmtTime(dep.lands_by))} at the latest` : "Landing on the next check"}</div>`);
   }
@@ -3049,7 +3105,7 @@ function deskSVG(lit) {
 // check when main is green, blinking dots while checks run, an hourglass while the deployer
 // waits for idle lanes, a waved flag when blocked, and the truck rolling while a release
 // is being swapped in.
-function shipCharacterSVG(mode, pill, look) {
+function shipCharacterSVG(mode, pill, look, crates) {
   const c = `var(--${{working: "working", paused: "paused", needs_steve: "needs", idle: "idle"}[SHIP_PILL[pill][0]]})`;
   let sign = "";
   if (mode === "done") sign = `<path d="M30 4 l2.5 2.5 l5 -5" style="fill:none;stroke:${c};stroke-width:1.8"/>`;
@@ -3057,7 +3113,17 @@ function shipCharacterSVG(mode, pill, look) {
   if (mode === "waiting") sign = `<path d="M30 0.5 h8 l-4 4.5 l4 4.5 h-8 l4 -4.5 z" style="fill:${c}"/>`;
   if (mode === "blocked") sign = `<g class="character-wave" style="transform-box:fill-box;transform-origin:50% 100%">
     <rect x="29" y="0.5" width="1.5" height="10" style="fill:var(--dim)"/><rect x="30.5" y="0.5" width="7" height="5" style="fill:${c}"/></g>`;
-  return `<svg viewBox="0 0 40 30" aria-hidden="true">
+  // Card #237: backed up, a crate per waiting commit (at most five) piles on the floor
+  // beside the hand truck, in the sign's color.
+  let pile = "", box = 'viewBox="0 0 40 30"';
+  if (mode === "backlog") {
+    const slots = [[40, 25], [45.5, 25], [51, 25], [42.75, 19.5], [48.25, 19.5]];
+    pile = slots.slice(0, Math.max(1, Math.min(5, crates || 1))).map(([x, y]) =>
+      `<rect class="backlog-crate" x="${x}" y="${y}" width="5" height="5" rx=".8" style="fill:${c};opacity:.85"/>`).join("");
+    sign = `<path d="M30 1 l4 7 h-8 z" style="fill:${c}"/>`;
+    box = 'viewBox="0 0 56 30" style="width:56px"';
+  }
+  return `<svg ${box} aria-hidden="true">
     <rect x="3" y="15" width="3" height="7" rx="1" style="fill:${c}"/>
     <rect x="17" y="14" width="8" height="2.6" rx="1" style="fill:${c}"/>
     <rect x="6" y="12" width="14" height="13" rx="4" style="fill:${c}"/>
@@ -3068,7 +3134,7 @@ function shipCharacterSVG(mode, pill, look) {
       <rect x="26" y="19" width="11" height="7" rx="1" style="fill:#a86f3a"/><rect x="26" y="12" width="11" height="7" rx="1" style="fill:#c9915a"/>
       <path d="M28 15.5 h7 M28 22.5 h7" style="stroke:#7a4e24;stroke-width:1"/>
       <circle cx="26" cy="27.5" r="2.2" style="fill:#30363d"/><rect x="24" y="26" width="13" height="1.5" style="fill:var(--dim)"/>
-    </g>${sign}</svg>`;
+    </g>${pile}${sign}</svg>`;
 }
 // The ship shelf the dock hand stands in front of: two shelves of crates, a clipboard.
 function shelfSVG() {
@@ -3596,7 +3662,7 @@ function renderShipDock(ships) {
       shipEls[s.name] = el;
     }
     const st = shipState(s.ship);
-    el.innerHTML = shipCharacterSVG(st.mode, st.pill, laneLook("ship:" + s.name)) + plateHTML("Ship", s.name, s.away);
+    el.innerHTML = shipCharacterSVG(st.mode, st.pill, laneLook("ship:" + s.name), st.crates) + plateHTML("Ship", s.name, s.away);
     moveCharacter(el, s.pos, s.room);
   }
   for (const name of Object.keys(shipEls)) if (!seen.has(name)) { shipEls[name].remove(); delete shipEls[name]; }
@@ -3631,7 +3697,7 @@ function renderBeacon(state) {
     for (const p of state.projects || []) {
       for (const l of p.lanes || [])
         if (l.pill === "paused" || l.pill === "sleeping" || l.plan_late === true) amber = true;
-      if (shipState(p.ship).pill === "blocked") amber = true;
+      if (["blocked", "backed_up"].includes(shipState(p.ship).pill)) amber = true;
     }
     color = amber ? "amber" : "green";
   }
@@ -3951,7 +4017,11 @@ function buildDemoStates() {
                                L("alpha-design", "Design", "idle", {reason: "Nothing to pick up right now."}),
                                L("alpha-triage", "Triage", "idle", {reason: "Nothing to pick up right now."})],
                 "running"),
-                proj("beta", [L("beta", "Build", "working", {card: {number: 2, url: "#"}, stage: "Building", minutes: 12})], "running")],
+                proj("beta", [L("beta", "Build", "working", {card: {number: 2, url: "#"}, stage: "Building", minutes: 12})],
+                     "running", {state: "checking", live: "aaaaaaa", target: "bbbbbbb", alive: null, step: null,
+                                 waiting_for: [], lands_by: null, backed_up: true, behind: 8, held_count: 4,
+                                 live_since: new Date(Date.now() - 25 * 3600000).toISOString(),
+                                 waiting_since: new Date(Date.now() - 24 * 3600000).toISOString()})],
      recent: [], server, wins},
   ];
 }
