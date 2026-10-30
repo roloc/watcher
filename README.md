@@ -399,6 +399,12 @@ worth protecting there, and every road out — the network clients, the interpre
     sudo -u watcher-desk -H claude auth login     # the owner's own account
     sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work
 
+Neither needs a terminal on the box. `claude auth login` prints a link and takes the code
+on stdin. For gh, `sudo -u watcher-desk -H gh auth login --hostname github.com
+--git-protocol https --web --skip-ssh-key < /dev/null` prints the one-time device code (with a
+tty it asks a survey question a pipe cannot answer). The deploy writes gh's `config.yml` in
+its migrated form and `desk.sh` seeds the Remote Control consent, so nothing else is by hand.
+
 Until then `desk.sh` says so once in the journal and checks again every five minutes; the
 desk appears in the sessions list on its own once the login lands. `bin/doctor.sh` adds a
 one-line note when the unit is not running.

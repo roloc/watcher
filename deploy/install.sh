@@ -150,8 +150,11 @@ install_desk() {
       || install -m 644 -o root -g root /dev/null "$home/$f"
   done
   install -d -o root -g watcher-desk -m 1775 "$home/.config" "$home/.config/gh"
-  if ! printf 'git_protocol: https\n' | cmp -s - "$home/.config/gh/config.yml"; then
-    printf 'git_protocol: https\n' > "$home/.config/gh/config.yml.new" \
+  # gh 2.100 rewrites config.yml on every start to add `version: "1"` and fails when it
+  # cannot (the file is root's on purpose). So this is its migrated form; a later gh that
+  # migrates again shows up as the same symptom: "failed to write config after migration".
+  if ! printf 'git_protocol: https\nversion: "1"\n' | cmp -s - "$home/.config/gh/config.yml"; then
+    printf 'git_protocol: https\nversion: "1"\n' > "$home/.config/gh/config.yml.new" \
       && install -m 644 -o root -g root "$home/.config/gh/config.yml.new" "$home/.config/gh/config.yml" \
       && rm -f "$home/.config/gh/config.yml.new"
   fi
