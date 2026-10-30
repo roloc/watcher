@@ -98,7 +98,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `systemctl`, the deploy scripts, a write by spelling under `/opt/watcher`, `/etc/watcher`
   or a lane's state directory — and a `Write`/`Edit`/`NotebookEdit` whose resolved path is
   outside the worktree, `$TMPDIR` or `~/.claude`. A second wall behind the prose, never the
-  only one; it approves, merges and moves nothing. `claude plugin validate --strict mods/guard`
+  only one; it approves and merges nothing. `hooks/receipts.ts` (card #211) is the one part
+  that acts: from the tool's own result it sets the card's Stage (`gh pr create` → PR open,
+  `gh pr merge` → Merging) and posts `reviewer`'s and `usability`'s first line as the PR
+  comment, then reruns the failed CI jobs — the steps `commands/watch.md` §3 still spells out;
+  best effort, one stderr line on a failure. `claude plugin validate --strict mods/guard`
   and `claude plugin test mods/guard` are its suites (offline, no login; CI runs both on a
   pinned build through `npx`) — run them after touching anything under it, and the mod's
   `register.ts` header is the list of what it refuses and how it decides. The mod API is
