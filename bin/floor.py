@@ -3119,7 +3119,7 @@ function shipCharacterSVG(mode, pill, look, crates) {
   if (mode === "backlog") {
     const slots = [[40, 25], [45.5, 25], [51, 25], [42.75, 19.5], [48.25, 19.5]];
     pile = slots.slice(0, Math.max(1, Math.min(5, crates || 1))).map(([x, y]) =>
-      `<rect class="backlog-crate" x="${x}" y="${y}" width="5" height="5" rx=".8" style="fill:${c};opacity:.85"/>`).join("");
+      `<rect class="backlog-crate" x="${x}" y="${y}" width="5" height="5" rx=".8" style="fill:${c};stroke:#fff;stroke-width:.5"/>`).join("");
     sign = `<path d="M30 1 l4 7 h-8 z" style="fill:${c}"/>`;
     box = 'viewBox="0 0 56 30" style="width:56px"';
   }

@@ -859,6 +859,13 @@ try:
         shot(b, "studio-backed-up.png", full_page=False)
         b.resize(390, 844)
         shot(b, "studio-backed-up-phone.png", full_page=False)
+        # The Studio on a phone is the whole office at one third size; a close-up of the
+        # alpha room, enlarged, is the picture that shows the dock hand and its crates.
+        b.eval("""(() => { document.getElementById('room').style.zoom = 6;
+                  document.querySelector('.office-room[data-room="alpha"]').scrollIntoView({inline: 'center', block: 'center'});
+                  const sh = document.querySelector('.character.ship[data-ship="alpha"]'); sh.scrollIntoView({inline: 'center', block: 'center'});
+                  return true; })()""")
+        shot(b, "studio-backed-up-closeup-phone.png", full_page=False)
         b.resize(1280, 900)
         b.click("#floor-btn")
         b.wait_for("!" + STUDIO_OPEN)
