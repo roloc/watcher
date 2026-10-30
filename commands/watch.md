@@ -269,10 +269,17 @@ that merged the trim mockup filed the renderer build card that
 [#460](https://github.com/roloc/riffmap/issues/460) already was; the older one still
 carried the cost caption the owner had just ruled out.)
 
+**File it with `board file`, never a bare `gh issue create`.** `board file -R <owner/repo>
+--title "<title>" --body-file "$scratch/card.md" [--status Backlog]` creates the issue,
+puts it on the board and sets its column, and prints the URL; a bare `gh issue create`
+reaches the board only if the board's Auto-add workflow happens to be on, and a card that
+is not on the board is one no lane will ever see. Exit 3 means the issue exists but is not
+on the board: say so on the card you are working, with the URL.
+
 **A card you file that waits on another one records it, in the same turn you write the
 sentence.** Writing "Depends on #<m>" in the body is half the job: the words are for the
 owner, the *Relationships* field is what the loop reads, and it is what stops the card being
-started before its prerequisite exists. Two commands, right after `item-add`:
+started before its prerequisite exists. Two commands, right after `board file`:
 
 ```
 id="$(gh api repos/{owner}/{repo}/issues/<m> --jq .id)"

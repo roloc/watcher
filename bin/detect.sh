@@ -128,9 +128,12 @@ body="$(mktemp /tmp/watcher-detect-XXXXXX)"
   echo "  \`commands/watch.md\`) and say in one sentence what it now shows."
 } > "$body"
 
-url="$(gh issue create -R "$PROJECT_REPO" \
+# `board file` creates the issue AND puts it on the board in Backlog, so this never relies on
+# the board's Auto-add workflow (card #200). Exit 1: no card; exit 3: card made, not on the board.
+out="$(board file -R "$PROJECT_REPO" \
         --title "🚨 $DETECT_WHAT: $value, avg $avg over $count readings" \
-        --body-file "$body" 2>/dev/null | tail -1)"
+        --body-file "$body" --status Backlog 2>/dev/null)"; filed_rc=$?
+url="$(printf '%s\n' "$out" | tail -1)"
 rm -f "$body"
 iss="${url##*/}"
 if ! [[ "$iss" =~ ^[0-9]+$ ]]; then
@@ -139,8 +142,7 @@ if ! [[ "$iss" =~ ^[0-9]+$ ]]; then
 fi
 echo "$iss" > "$FILED"
 
-if gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" >/dev/null 2>&1 \
-   && board move "$iss" Backlog >/dev/null 2>&1; then
+if [ "$filed_rc" = 0 ]; then
   say "filed $url in Backlog"
   # A large breach is the product broken, which is one of the two things Discord is for.
   # After the card lands, never before, and best-effort: board.py's notify exits 0 whether

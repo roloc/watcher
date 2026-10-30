@@ -70,9 +70,17 @@ backticks. Then one command:
 gh issue create -R <owner/repo> --title "<what ships, in one line>" --body-file card.md
 ```
 
-**The board's Auto-add workflow puts a new issue in Backlog by itself** (filter
-`is:issue is:open`; `bin/doctor.sh` checks it is on). Confirm, because a card that is not
-on the board is invisible to the lane:
+To file a card **and** put it on the board in one step (it lands in Backlog), use
+`board file` instead — it needs no board workflow:
+
+```bash
+board file -R <owner/repo> --title "<what ships, in one line>" --body-file card.md
+```
+
+It prints the card's URL; exit 3 means the issue exists but is not on the board. A bare
+`gh issue create` only reaches the board when the board has an Auto-add workflow on (filter
+`is:issue is:open`; `bin/doctor.sh` warns when it is off), so confirm, because a card that
+is not on the board is invisible to the lane:
 
 ```bash
 gh issue view <n> -R <owner/repo> --json projectItems --jq '.projectItems[].status.name'
@@ -140,7 +148,7 @@ and the one ask when that fails. Delete when every page is public.>
 
 | column | meaning | moved by |
 |---|---|---|
-| **Backlog** | filed, not scheduled | Auto-add lands here |
+| **Backlog** | filed, not scheduled | `board file` lands here |
 | **Ready** | the owner wants it next; with `READY_PULL=1`, the lane pulls from it | the owner |
 | **In progress** | claim me — the lane picks the first row without `in-flight` | the owner (the go signal), or the lane promoting a Ready card |
 | **In review** | PR open, CI running | the tick |

@@ -56,10 +56,24 @@ EOF
 cat > "$BIN/board" <<'EOF'
 #!/usr/bin/env bash
 echo "board $* owner=${BOARD_OWNER:-} number=${BOARD_NUMBER:-}" >> "$CALLS"
-# $TMP/board-fails holds how many more moves fail (the board not caught up yet).
-if [ -s "$TMP/board-fails" ]; then
-  left="$(cat "$TMP/board-fails")"
-  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$TMP/board-fails"; exit 1; fi
+# `board file` (card #200) is create + add + move in one: it prints the card's URL and moves it
+# to the --status given, so the log keeps the "board move <n> <status>" lines the cases read.
+# $TMP/board-fails holds how many more moves fail (the board not caught up yet); the real
+# command retries them itself, so the stub does too, and exits 3 only if all four fail.
+if [ "$1" = file ]; then
+  n="$(cat "$TMP/next-issue" 2>/dev/null || echo 77)"
+  status="${@: -1}"
+  tries=0
+  while [ "$tries" -lt 4 ]; do
+    tries=$((tries + 1))
+    echo "board move $n $status owner=${BOARD_OWNER:-} number=${BOARD_NUMBER:-}" >> "$CALLS"
+    if [ -s "$TMP/board-fails" ] && [ "$(cat "$TMP/board-fails")" -gt 0 ]; then
+      echo $(( $(cat "$TMP/board-fails") - 1 )) > "$TMP/board-fails"
+      continue
+    fi
+    echo "https://github.com/roloc/watcher/issues/$n"; exit 0
+  done
+  echo "https://github.com/roloc/watcher/issues/$n"; exit 3
 fi
 EOF
 printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/flock"
@@ -228,17 +242,17 @@ check "a busy lane: it is never restarted"                    not_called_exact "
 # 6. The suite fails twice: one held card, in Stuck, once
 fresh; touch "$TMP/eval-fails"; T="$(commit commands/watch.md v6)"
 run
-check "first fail: retried later, no card yet"         not_called "issue create"
+check "first fail: retried later, no card yet"         not_called "board file"
 check "first fail: the step file says step 3 (the replay suite)" [ "$(sed -n 1p "$TMP/dstate/step")" = 3 ]
 run
-check "second fail: one card filed"                    [ "$(count 'gh issue create')" = 1 ]
+check "second fail: one card filed"                    [ "$(count 'board file')" = 1 ]
 check "…in the talking-to-the-owner shape (the ask first)" called "Deploy held: ${T:0:7} is not live"
-check "…put on the watcher board"                      called "gh project item-add 2 --owner roloc"
+check "…put on the watcher board"                      called "board file -R roloc/watcher .*owner=roloc number=2"
 check "…and moved to Stuck"                            called "board move 77 Stuck - Needs help owner=roloc number=2"
 check "…and the box did not move"                      [ "$(head_)" != "$T" ]
 check "held: the step file is cleared, not left on the failed step" [ ! -e "$TMP/dstate/step" ]
 run
-check "a third run files no second card"               not_called "issue create"
+check "a third run files no second card"               not_called "board file"
 
 # 7. deploy-anyway ships a held commit
 echo deploy-anyway > "$TMP/labels"; run
@@ -264,7 +278,7 @@ run
 printf 'eval at %s box %s\n  a case   FAIL — it closed the card\n' "$T" "$T" > "$TMP/dstate/evals/$T.log"
 run
 check "attempt 2: no summary line to read, so it reruns everything" called_exact "eval.sh args: (none)"
-check "…and still held, since the suite still fails"   [ "$(count 'gh issue create')" = 1 ]
+check "…and still held, since the suite still fails"   [ "$(count 'board file')" = 1 ]
 rm -f "$TMP/eval-fails" "$TMP/labels"
 
 # 8. Nothing a model reads changed: no suite
@@ -276,7 +290,7 @@ check "…and deploys"                                   [ "$(head_)" = "$T" ]
 # 9. Red check
 fresh; T="$(commit commands/watch.md v9)"; echo "completed failure" > "$TMP/ci"
 run
-check "a red check: held, with one card"               [ "$(count 'gh issue create')" = 1 ]
+check "a red check: held, with one card"               [ "$(count 'board file')" = 1 ]
 check "…and the suite never ran"                       not_called "eval at"
 check "…and the step file is cleared, not left on step 2" [ ! -e "$TMP/dstate/step" ]
 
@@ -448,7 +462,7 @@ mkdir -p "$STATE/watcher/logs"; : > "$STATE/watcher/logs/still-running.json"
 echo 950 > "$STATE/watcher/current"   # tick_running("watcher") now true
 run
 check "canary F: an in-progress tick is not judged"       [ "$(canary_head)" = "$T" ]
-check "canary F: …the commit is not held"                 not_called "issue create"
+check "canary F: …the commit is not held"                 not_called "board file"
 rm -f "$STATE/watcher/current"
 
 # G. A commit already rolled back once is never retried on its own — the flip-flop a died
@@ -461,7 +475,7 @@ run; run   # two more deploy ticks — `run` resets $CALLS each time, so these c
            # NEITHER later tick repeats the swap or files a second card, not a cumulative count
 check "canary G: the canary checkout stays rolled back"   [ "$(canary_head)" = "$OLD" ]
 check "canary G: a later tick never re-swaps onto it"     not_called "systemctl restart"
-check "canary G: …or files a second card"                 not_called "gh issue create"
+check "canary G: …or files a second card"                 not_called "board file"
 
 # H. A canary lane with a tick in flight is paused and waited on, never restarted out from
 # under it — restarting `watcher@<lane>` mid-tick kills the spawner's own exit handling.
@@ -577,7 +591,7 @@ mkdir -p "$STATE/watcher/parked"; : > "$STATE/watcher/parked/971"
 touch -t 202601010000 "$STATE/watcher/parked/971"
 run   # the canary swap
 run
-check "canary J: a card parked before the soak does not hold it"      not_called "issue create"
+check "canary J: a card parked before the soak does not hold it"      not_called "board file"
 check "canary J: …and the canary stays on the commit"                 [ "$(canary_head)" = "$T" ]
 
 # K. What counts as a clean tick is a result json with something in it, and nothing else

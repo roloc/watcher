@@ -9,6 +9,8 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py move <issue> "<status>" [--why "<one line>"]
     python3 scripts/board.py stage <issue> "<stage>"     # "-" empties it
     python3 scripts/board.py sweep-stages           # empty the Stage on closed cards
+    python3 scripts/board.py file -R <owner/repo> --title "<t>" --body-file <f> [--status Backlog]
+                                                    # create a card AND put it on the board; URL on stdout
     python3 scripts/board.py show <issue>
     python3 scripts/board.py unclaim <issue>        # drop a leaked in-flight label
     python3 scripts/board.py notify <issue> released|breach ["<detail>"]
@@ -70,6 +72,7 @@ successful command exits 0. A caller may therefore treat any non-zero exit as "d
 proceed" — in particular `list` exits 1 for a column name the board does not have,
 rather than printing nothing and looking like an empty column.
 """
+import contextlib
 import fcntl
 import json
 import os, re, subprocess, sys, tempfile, time
@@ -934,6 +937,64 @@ def cmd_move(issue, status, *rest):
     return 0
 
 
+def cmd_file(*args):
+    """`file -R <owner/repo> --title "<t>" --body-file <f> [--status <column>]` (card #200).
+    Create the issue, add it to the board, set its Status (default Backlog), and print the
+    issue URL on stdout. This is the one way the watcher files a card, so a card can never
+    be invisible to the lanes because the board's Auto-add workflow was off or mis-filtered.
+    Exit 0: filed and on the board. Exit 1: nothing was filed (no URL line).
+    Exit 3: the issue exists (URL printed) but could not be put on the board or moved; the
+    caller says so and the card needs a hand. A move to Stuck goes through `cmd_move`, so
+    the Discord alert is the same one a tick's own move sends."""
+    opts = {"-R": None, "--title": None, "--body-file": None, "--status": "Backlog"}
+    a = list(args)
+    while a:
+        k = a.pop(0)
+        if k not in opts or not a:
+            sys.exit(f"board.py: file: unexpected argument {k!r}")
+        opts[k] = a.pop(0)
+    if not (opts["-R"] and opts["--title"] and opts["--body-file"]):
+        sys.exit("board.py: file: -R, --title and --body-file are all required")
+    _require_owner()
+    try:
+        r = subprocess.run(["gh", "issue", "create", "-R", opts["-R"], "--title", opts["--title"],
+                            "--body-file", opts["--body-file"]],
+                           capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        sys.exit("board.py: `gh` is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        sys.exit("board.py: file: gh issue create timed out")
+    url = (r.stdout or "").strip().splitlines()[-1] if (r.stdout or "").strip() else ""
+    num = url.rsplit("/", 1)[-1]
+    if r.returncode or not num.isdigit():
+        sys.exit(f"board.py: file: could not create the issue: {(r.stderr or r.stdout).strip()[:300]}")
+    print(url, flush=True)
+    # GitHub's board index lags a just-added item by seconds (autodeploy's September 28,
+    # 2026 held cards), so the add and the move are retried as a pair.
+    err = ""
+    tries = int(os.environ.get("BOARD_FILE_TRIES") or 4)
+    for i in range(tries):
+        if i:
+            time.sleep(float(os.environ.get("BOARD_FILE_RETRY_SEC") or 5))
+        try:
+            add = subprocess.run(["gh", "project", "item-add", str(NUMBER), "--owner", OWNER,
+                                  "--url", url], capture_output=True, text=True, timeout=60)
+            if add.returncode:
+                err = (add.stderr or "").strip()[:200]
+                continue
+            _cache_invalidate(_items_cache_name())
+            # cmd_move prints its "#n → status" line; callers read the URL as stdout's last
+            # line, so that line goes to stderr (an add that is retried is idempotent).
+            with contextlib.redirect_stdout(sys.stderr):
+                cmd_move(num, opts["--status"])
+            return 0
+        except SystemExit as e:
+            err = str(e.code)[:200]
+    print(f"board.py: file: {url} exists but is not on the board in {opts['--status']}: {err}",
+          file=sys.stderr)
+    return 3
+
+
 CLEAR_FIELD = """mutation($p:ID!,$i:ID!,$f:ID!){ clearProjectV2ItemFieldValue(input:{
   projectId:$p,itemId:$i,fieldId:$f}){ projectV2Item{ id } } }"""
 
@@ -1160,12 +1221,13 @@ def cmd_images(issue, *rest):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
+    if not a or a[0] not in ("list", "move", "file", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
                             "dump", "ask", "images", "plan", "ratelimit", "ledger"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
                   "move": lambda: cmd_move(a[1], a[2], *a[3:]),
+                  "file": lambda: cmd_file(*a[1:]),
                   "stage": lambda: cmd_stage(a[1], a[2]),
                   "sweep-stages": lambda: cmd_sweep_stages(),
                   "queue": lambda: cmd_queue(),

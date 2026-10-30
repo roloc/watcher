@@ -55,9 +55,16 @@ backticks. Then one command:
 gh issue create -R roloc/watcher --title "<what ships, in one line>" --body-file card.md
 ```
 
-**This board's Auto-add workflow is on**, so a new issue filed with `gh issue create` alone
-lands in **Backlog** by itself. Confirm, because a card that is not on the board is
-invisible to the lane:
+To file a card **and** put it on the board in one step (it lands in Backlog), use
+`board file` instead — it needs no board workflow:
+
+```bash
+board file -R roloc/watcher --title "<what ships, in one line>" --body-file card.md
+```
+
+It prints the card's URL; exit 3 means the issue exists but is not on the board. A bare
+`gh issue create` only reaches the board because this board's Auto-add workflow happens to
+be on, so confirm, because a card that is not on the board is invisible to the lane:
 
 ```bash
 gh issue view <n> -R roloc/watcher --json projectItems --jq '.projectItems[].status.name'

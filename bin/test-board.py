@@ -42,6 +42,7 @@ class FakeResult:
     def __init__(self, stdout, returncode=0):
         self.stdout = stdout
         self.returncode = returncode
+        self.stderr = ""
 
 
 COMMENTS = {}  # issue number -> list of comment bodies, newest last
@@ -696,6 +697,69 @@ check("a second sweep inside the interval makes no additional call at all",
 del os.environ["STAGE_SWEEP_SEC"]
 
 board.subprocess.run = stub_run  # restore for anything appended after this suite
+
+print("26. card #200: `file` creates the issue AND puts it on the board, so no card depends on "
+      "the board's Auto-add workflow")
+board.OWNER, board.NUMBER = "roloc", 200
+FILE_CALLS, MOVES = [], []
+file_state = {"create_rc": 0, "add_fails": 0}
+real_cmd_move, real_sleep = board.cmd_move, board.time.sleep
+
+
+def file_stub_run(cmd, **kwargs):
+    FILE_CALLS.append(" ".join(cmd))
+    if cmd[:3] == ["gh", "issue", "create"]:
+        if file_state["create_rc"]:
+            return FakeResult("", returncode=1)
+        return FakeResult("https://github.com/roloc/x/issues/321\n")
+    if cmd[:3] == ["gh", "project", "item-add"]:
+        if file_state["add_fails"] > 0:
+            file_state["add_fails"] -= 1
+            return FakeResult("", returncode=1)
+        return FakeResult("")
+    return stub_run(cmd, **kwargs)
+
+
+board.subprocess.run = file_stub_run
+def fake_move(n, status, *r):
+    print(f"#{n} → {status}")  # what the real cmd_move prints on stdout
+    MOVES.append((n, status))
+    return 0
+
+
+board.cmd_move = fake_move
+board.time.sleep = lambda s: None
+args = ("-R", "roloc/x", "--title", "T", "--body-file", "/dev/null")
+import contextlib, io
+captured = io.StringIO()
+with contextlib.redirect_stdout(captured):
+    rc = board.cmd_file(*args)
+check("stdout is the URL and nothing else: callers take its last line as the card (reviewer, #223)",
+      captured.getvalue() == "https://github.com/roloc/x/issues/321\n", captured.getvalue())
+check("exit 0, and the card is moved to Backlog by default", rc == 0 and MOVES == [("321", "Backlog")], (rc, MOVES))
+check("the issue is added to this board by number and owner",
+      any(c == "gh project item-add 200 --owner roloc --url https://github.com/roloc/x/issues/321"
+          for c in FILE_CALLS), FILE_CALLS)
+MOVES.clear()
+file_state["add_fails"] = 2
+rc = board.cmd_file(*args, "--status", "Stuck - Needs help")
+check("an add the board has not caught up with is retried, then the --status given is set",
+      rc == 0 and MOVES == [("321", "Stuck - Needs help")], (rc, MOVES))
+MOVES.clear()
+file_state["add_fails"] = 99
+rc = board.cmd_file(*args)
+check("add failing every try: exit 3 (card exists, not on the board), never a silent 0", rc == 3 and not MOVES, (rc, MOVES))
+file_state.update(add_fails=0, create_rc=1)
+try:
+    board.cmd_file(*args)
+    died = None
+except SystemExit as e:
+    died = e.code
+check("issue creation failing: exits 1 with a message, nothing added to the board",
+      isinstance(died, str) and "could not create" in died
+      and not any("item-add" in c for c in FILE_CALLS[-1:]), died)
+board.cmd_move, board.time.sleep = real_cmd_move, real_sleep
+board.subprocess.run = stub_run
 
 print("25. BOARD_OWNER is required (card #157): a missing one is one clear line, never a "
       "silent query against someone else's board")
