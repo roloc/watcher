@@ -941,7 +941,8 @@ check("live: no step, nobody waited on, no lands-by — only the alive line, so 
                           running_fn=lambda: False)
       == {"live": L[:7], "target": L[:7], "state": "live",
           "alive": {"running": False, "since_sec": 120, "next_in_sec": 180, "stale": False},
-          "step": None, "waiting_for": [], "lands_by": None})
+          "step": None, "waiting_for": [], "lands_by": None, "behind": 0, "waiting_since": None,
+          "live_since": None, "held_count": 0, "backed_up": False})
 # Leave DS exactly as section 17 above left it (held/T="58", evals/T="fail 1") for the
 # `dstate()`/`state17` code below, which this block's own `reset()` and lock/last-run/step
 # files must not disturb.
@@ -949,6 +950,56 @@ reset()
 os.remove(os.path.join(DS, "lock")); os.remove(os.path.join(DS, "last-run")); os.remove(os.path.join(DS, "step"))
 open(os.path.join(DS, "evals", T), "w").write("fail 1")
 open(os.path.join(DS, "held", T), "w").write("58")
+
+# Card #237: "Backed up" — main waiting too long, or too many held, behind the live release.
+# Its own state dir, so nothing above is disturbed. The fixture is a real repo: origin/main
+# N commits ahead of HEAD, each commit stamped with the committer time the case wants.
+print("17a1. card #237: backed_up — the pile behind the live release, not just the newest commit")
+import subprocess
+BU = os.path.join(ROOT, "backed-up"); BUS = os.path.join(BU, "dstate")
+def bu_run(*a, env=None):
+    return subprocess.run(a, cwd=os.path.join(BU, "repo"), check=True, capture_output=True, text=True,
+                          env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", **(env or {})}).stdout.strip()
+def bu_fixture(name, ages_min, held, deployed_age_min):
+    """HEAD is the live commit; origin/main is len(ages_min) commits ahead, oldest first,
+    each committed that many minutes before NOW."""
+    global BU, BUS
+    BU = os.path.join(ROOT, "backed-up-" + name); BUS = os.path.join(BU, "dstate")
+    os.makedirs(os.path.join(BUS, "held")); os.makedirs(os.path.join(BU, "repo"))
+    bu_run("git", "init", "-q", "-b", "main")
+    def commit(msg, age_min):
+        t = str(int((NOW - timedelta(minutes=age_min)).timestamp()))
+        bu_run("git", "commit", "-q", "--allow-empty", "-m", msg, env={"GIT_COMMITTER_DATE": t, "GIT_AUTHOR_DATE": t})
+    commit("live", deployed_age_min + 5)
+    live = bu_run("git", "rev-parse", "HEAD")
+    for i, age in enumerate(ages_min): commit(f"c{i}", age)
+    bu_run("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+    bu_run("git", "reset", "-q", "--hard", live)
+    with open(os.path.join(BUS, "deployed"), "w") as f: f.write(live)
+    ts = (NOW - timedelta(minutes=deployed_age_min)).timestamp(); os.utime(os.path.join(BUS, "deployed"), (ts, ts))
+    for h in held: open(os.path.join(BUS, "held", h), "w").write("225")
+    return live
+live_bu = bu_fixture("old", [26 * 60 - 10, 20 * 60, 3 * 60], ["a" * 40, "b" * 40], 26 * 60)
+bu = floor.deploy_status(os.path.join(BU, "repo"), BUS, "roloc/watcher", now=NOW)
+check("three commits ahead, deployed 26 hours ago, two held: backed up", bu["backed_up"] is True, bu)
+check("...with the pile counted: behind 3, held_count 2", bu["behind"] == 3 and bu["held_count"] == 2, bu)
+check("...and the oldest waiting commit's time and the pointer flip's time",
+      bu["waiting_since"] == (NOW - timedelta(minutes=26 * 60 - 10)).isoformat()
+      and bu["live_since"] == (NOW - timedelta(minutes=26 * 60)).isoformat(), bu)
+open(os.path.join(BUS, "held", live_bu), "w").write("1")
+check("the live commit's own held file (a deploy-anyway) is not part of the pile",
+      floor.deploy_status(os.path.join(BU, "repo"), BUS, "roloc/watcher", now=NOW)["held_count"] == 2)
+bu_fixture("fresh", [20], [], 60)
+bf = floor.deploy_status(os.path.join(BU, "repo"), BUS, "roloc/watcher", now=NOW)
+check("one commit 20 minutes ahead, nothing held: not backed up, behind 1",
+      bf["backed_up"] is False and bf["behind"] == 1 and bf["held_count"] == 0, bf)
+bu_fixture("held2", [10, 5], ["a" * 40, "b" * 40], 60)
+check("two held since the live release backs it up even when nothing is old",
+      floor.deploy_status(os.path.join(BU, "repo"), BUS, "roloc/watcher", now=NOW)["backed_up"] is True)
+bu_fixture("live", [], ["a" * 40], 26 * 60)
+check("on main's newest commit it is live, never backed up",
+      floor.deploy_status(os.path.join(BU, "repo"), BUS, "roloc/watcher", now=NOW)["backed_up"] is False)
 
 # Card #106: a lane's own $WATCHER_STATE/release (bin/spawn.sh writes it at process start)
 # is read for the Ship desk's per-lane view, box-wide — "riffmap" is on the live release,

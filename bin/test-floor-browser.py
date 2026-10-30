@@ -301,7 +301,7 @@ class LiveCache:
                                  # Card #106: alpha is "the board this box deploys" — the
                                  # Ship desk's per-lane view belongs here, box-wide.
                                  deploy_repo="roloc/alpha",
-                                 deploy_fn=lambda: {"state": "live", "live": "aaaaaaa", "target": "aaaaaaa"},
+                                 deploy_fn=lambda: SHIP_DEPLOY,
                                  # Card #165: the same two directories tail_lookup (below)
                                  # already searches for Peek — the desk's own "Waiting"
                                  # line reads the identical session, never a second lookup.
@@ -809,6 +809,75 @@ try:
         SHIP_DEPLOY.clear()
         SHIP_DEPLOY.update({"state": "live", "live": "aaaaaaa", "target": "aaaaaaa", "alive": None,
                             "step": None, "waiting_for": [], "lands_by": None})
+        check("still no errors", b.errors == [], b.errors)
+
+        print("7e. card #237: main piled up behind the live release — the desk, the Peek, the beacon and "
+              "the Studio's dock hand all say Backed up, not Shipping")
+        SHIP_DEPLOY.update({
+            "state": "checking", "target": "bbbbbbb", "backed_up": True, "behind": 8, "held_count": 4,
+            "live_since": "2026-10-29T19:04:00+00:00", "waiting_since": "2026-10-29T20:10:00+00:00",
+        })
+        b.eval("refresh().then(() => true)")
+        SHIP_PILL_TEXT = "document.querySelector('.desk.ship .pill')?.textContent"
+        check("the Ship desk's pill reads Backed up, not Shipping",
+              b.wait_for(SHIP_PILL_TEXT + " === 'Backed up'"), b.eval(SHIP_PILL_TEXT))
+        check("...in the needs-the-owner color", b.eval("document.querySelector('.desk.ship .pill').className") == "pill needs_steve")
+        ship_text = b.eval("document.querySelector('.desk.ship').textContent")
+        check("one line says what is piled up",
+              "nothing shipped since Oct 29 19:04 UTC: 8 commits waiting, 4 held" in ship_text, ship_text)
+        check("the beacon stays red while a held card is in Stuck",
+              b.eval("document.getElementById('beacon').className") == "beacon-red")
+        check("...and goes amber for the backlog alone, with nothing Stuck",
+              b.eval("(() => { const st = JSON.parse(JSON.stringify(lastState)); st.header.needs_steve_total = 0;"
+                     " renderBeacon(st); return document.getElementById('beacon').className; })()") == "beacon-amber")
+        b.eval("renderBeacon(lastState); true")
+        shot(b, "ship-backed-up.png", full_page=False)
+        b.resize(390, 844)
+        check("the same desk fits a phone", b.eval("document.documentElement.scrollWidth <= window.innerWidth"))
+        b.eval("document.querySelector('.desk.ship').scrollIntoView(); true")
+        shot(b, "ship-backed-up-phone.png", full_page=False)
+        b.resize(1280, 900)
+        b.click('.peek-btn[data-peek-ship="alpha"]')
+        check("the Peek's deploy block says Backed up since, in place of 'Landing on the next check'",
+              b.wait_for(PANEL_DEPLOY + ".includes('Backed up since Oct 29 19:04 UTC')")
+              and "Landing on the next check" not in b.eval(PANEL_DEPLOY), b.eval(PANEL_DEPLOY))
+        shot(b, "ship-peek-backed-up.png", full_page=False)
+        b.key("Escape")
+        STUDIO_OPEN = "document.getElementById('studio').classList.contains('open')"
+        b.click("#studio-btn")
+        check("the Studio opens", b.wait_for(STUDIO_OPEN))
+        b.eval("clearInterval(window.__studioWanderTimer); true")
+        b.eval("renderStudio(lastState); true")
+        check("the dock hand's crates pile up on the floor, one per waiting commit up to five",
+              b.eval("document.querySelectorAll('.character.ship .backlog-crate').length") == 5,
+              b.eval("document.querySelectorAll('.character.ship .backlog-crate').length"))
+        settled(b)
+        check("the dock hand is at the dock in its own board's room, not on break",
+              b.eval("""(() => { const e = document.querySelector('.character.ship[data-ship="alpha"]').getBoundingClientRect();
+                      const z = document.querySelector('.office-room[data-room="alpha"]').getBoundingClientRect();
+                      return e.left >= z.left - 1 && e.right <= z.right + 1 && e.bottom <= z.bottom + 1 && e.top >= z.top; })()"""))
+        shot(b, "studio-backed-up.png", full_page=False)
+        b.resize(390, 844)
+        shot(b, "studio-backed-up-phone.png", full_page=False)
+        # The Studio on a phone is the whole office at one third size; a close-up of the
+        # alpha room, enlarged, is the picture that shows the dock hand and its crates.
+        b.eval("""(() => { document.getElementById('room').style.zoom = 6;
+                  document.querySelector('.office-room[data-room="alpha"]').scrollIntoView({inline: 'center', block: 'center'});
+                  const sh = document.querySelector('.character.ship[data-ship="alpha"]'); sh.scrollIntoView({inline: 'center', block: 'center'});
+                  return true; })()""")
+        shot(b, "studio-backed-up-closeup-phone.png", full_page=False)
+        b.resize(1280, 900)
+        b.click("#floor-btn")
+        b.wait_for("!" + STUDIO_OPEN)
+        SHIP_DEPLOY.update({"behind": 3, "backed_up": False, "state": "checking"})
+        b.eval("refresh().then(() => true)")
+        check("when the backlog clears and a commit is in flight, the desk reverts to Shipping",
+              b.wait_for(SHIP_PILL_TEXT + " === 'Shipping'"), b.eval(SHIP_PILL_TEXT))
+        SHIP_DEPLOY.clear()
+        SHIP_DEPLOY.update({"state": "live", "live": "aaaaaaa", "target": "aaaaaaa", "alive": None,
+                            "step": None, "waiting_for": [], "lands_by": None})
+        b.eval("refresh().then(() => true)")
+        check("...and to All green once live", b.wait_for(SHIP_PILL_TEXT + " === 'All green'"), b.eval(SHIP_PILL_TEXT))
         check("still no errors", b.errors == [], b.errors)
 
         print("8. on a phone: nothing runs off the side, and Peek still works")
@@ -1370,6 +1439,10 @@ try:
         b.eval("window.__demoGoto(2)")  # alpha's checks running: dots on the crates
         check("...and while checks run the crates blink dots",
               b.eval("document.querySelectorAll('.character[data-ship=\"alpha\"] .dot').length") == 3)
+        check("card #237: beta's dock hand has main piled up behind the live release: five crates on the floor, "
+              "the pill Backed up",
+              b.eval("document.querySelectorAll('.character[data-ship=\"beta\"] .backlog-crate').length") == 5
+              and b.eval("[...document.querySelectorAll('.desk.ship')].some(d => d.textContent.includes('Backed up'))"))
         b.eval("window.__demoGoto(1)")
         settled(b)
         check("the sleeping lane naps on the break room couch, named for its board too",
