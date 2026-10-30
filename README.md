@@ -57,6 +57,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     mods/card-context/    the card-context mod (card #213): the card's body and comments, newest first,
                           as the last section of every tick's system prompt; `claude plugin test
                           mods/card-context`
+    mods/browse/          the browse mod (card #215): bin/browse.py's check, text and shot as one
+                          registered tool the model calls; `claude plugin test mods/browse`
     mods/owner-pane/      the owner pane (card #214): Stuck cards and lane pills beside the chat in the
                           owner's desktop sessions, plus /stuck, /card, /file-card; `claude plugin test
                           mods/owner-pane`
@@ -208,7 +210,7 @@ your own Claude subscription token, the box, a first project, a first card. Shor
     apt install git
     git clone <your fork's clone URL> /opt/watcher   # or rsync it in
     /opt/watcher/deploy/bootstrap.sh               # idempotent: git, python3, curl, gh,
-                                                    # chromium, node 22, the claude CLI,
+                                                    # chromium, bubblewrap + socat, node 22, the claude CLI,
                                                     # godot 4 + xvfb (engine-run projects)
     /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, `board`
 
@@ -340,6 +342,12 @@ line on `.stderr`. **Measured on claude 2.1.312 under `claude -p`: the engine bu
 startup, so the section is the card as it stood when the tick started; a comment added during the tick is
 seen by the next tick, not the next turn.** Because it changes what every tick reads, a commit touching
 `mods/card-context/` runs the replay suite before it deploys (`deploy/autodeploy.sh`, `EVAL_PATHS`).
+
+`mods/browse/` (card [#215](https://github.com/roloc/watcher/issues/215)) is a third plugin, loaded the same way. It registers one
+tool, `mcp__browse__browse` (`command`: check, text or shot; `url`; `out` for a shot; optional `wait`), whose handler runs
+`python3 "$WATCHER_HOME/bin/browse.py"` and returns what it printed; a failing run comes back as text with its exit
+code. `bin/browse.py` is unchanged and still works from a shell, so a project without the mod loses nothing.
+`commands/watch.md` and `agents/reviewer.md` are not reworded yet.
 
 ## The desk
 

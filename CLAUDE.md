@@ -118,6 +118,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   reads: `deploy/autodeploy.sh`'s `EVAL_PATHS` runs the replay suite for it.
   `claude plugin validate --strict mods/card-context` and `claude plugin test mods/card-context`
   (CI runs both).
+- `mods/browse/` — the browse mod (card #215): `bin/browse.py`'s `check`, `text` and `shot` as one
+  registered tool, `mcp__browse__browse`, a shim that runs `$WATCHER_HOME/bin/browse.py` and returns
+  its output (a failure as text). Its own plugin, a third `--plugin-dir` in `bin/spawn.sh` and
+  `bin/eval.sh`. `claude plugin validate --strict mods/browse` and `claude plugin test mods/browse`
+  (CI runs both).
 - `mods/owner-pane/` — the owner pane (card #214): a pane and `/stuck`, `/card`, `/file-card` for
   the owner's own desktop Claude sessions, read from the floor page's `/api/state.json` and the
   Mac's own `gh` login. Loaded on the Mac (`--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`), never by

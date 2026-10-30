@@ -2401,6 +2401,11 @@ if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'/mods/ca
 else
   flunk "no --plugin-dir <WATCHER_HOME>/mods/card-context in the launch" "out=[$OUT]"
 fi
+if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'/mods/browse"'; then
+  pass "…and the browse mod (card #215) is a third --plugin-dir"
+else
+  flunk "no --plugin-dir <WATCHER_HOME>/mods/browse in the launch" "out=[$OUT]"
+fi
 if printf '%s' "$OUT" | grep -q 'WATCHER_CARD="12"'; then
   pass "…and WATCHER_CARD=12 is exported to the tick (a triage tick has no card branch; card #213)"
 else

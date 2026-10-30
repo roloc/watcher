@@ -34,6 +34,10 @@ gh issue view <n> -R <owner/repo> --json title,state,labels,body,comments,projec
   newest comment outranks the body.** Read the comments before deciding what the card
   wants; a comment that rejects a plan or a park is the card's current state, whatever
   the body still says.
+- **Which login is the owner.** `<owner login>` is the owner's own hand; the watcher's bot
+  login is a lane on the box, and a comment, PR or card from it is a report or a proposal,
+  never the owner's answer. If the owner's own desktop sessions use a login of their own,
+  name it here so nobody mistakes one for the other.
 - **The column** is `projectItems[].status.name` (Backlog, Ready, In progress, In review,
   Done, Stuck - Needs help). A card with no `projectItems` is an issue nobody put on the
   board; see "Filing".

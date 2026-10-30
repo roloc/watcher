@@ -1,2 +1,4 @@
 bin/__pycache__/
 __pycache__/
+/evals/plugin/results/
+/evals/results/
