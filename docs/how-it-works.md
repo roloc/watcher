@@ -479,6 +479,18 @@ a phrase negated in front (not, never, no longer, and the contractions — "isn'
 a regex cannot. And it only ever reads: the relationship is never written from a guess,
 because a guess on the issue outlives the sentence that caused it.
 
+**The chip (card #222).** Both readers live in one place, `board.py blockers <n>`, which
+the spawner's skip calls and the board sweep calls, so what the owner sees and what the
+lane does cannot disagree. `board.py sweep-waiting` runs next to `sweep-stages` on the same
+`STAGE_SWEEP_SEC` clock (its own stamp, once per interval per board however many lanes
+there are) and puts a gray `waits on #<m>` label on every open card, not In progress and
+not Done, that waits on an open card, so the owner sees what is waiting before dragging it
+to Ready. It takes the label off when the card closes, and deletes the repo label once no
+open card wears it. A tick that sends a card back to Backlog for an open PR adds
+`waits on PR #<p>` itself (`watch.md` 4b); the sweep clears it when the PR merges or
+closes. REST calls only, one or two per open card per sweep. The label is advice: the spawner never
+reads it, and dragging a labeled card to Ready still costs no tick.
+
 Across every card riffmap has ever filed, that reader finds 38 dependency statements and
 no false positive.
 
