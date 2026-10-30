@@ -37,6 +37,11 @@
 //         a program that writes a path it computes (python, perl), a heredoc into a script. The
 //         Write/Edit fence is the robust half; the Bash list is the second wall's second wall.
 //
+//   Bash  curl or wget on the floor page (a URL on port 8787): a page is looked at with browse.py,
+//         never fetched (card #212, from #71)
+//         a redirect, tee or --body-file whose target is a fixed name directly under /tmp or
+//         $TMPDIR (not inside a folder mktemp made) — scratch lives under `mktemp -d` (card #212)
+//
 //   Bash  gh issue|pr comment whose body opens with a `Needs @` line and breaks the numbered
 //         rules of docs/talking-to-the-owner.md (hooks/owner-text.ts; card #210). Fails open.
 //
@@ -284,6 +289,13 @@ const MAIN = /^\+?(refs\/heads\/)?main$/
 const WRITERS_ANY = new Set(['rm', 'mkdir', 'touch', 'chmod', 'chown', 'chgrp', 'truncate', 'rmdir', 'unlink', 'shred'])
 const WRITERS_LAST = new Set(['mv', 'cp', 'ln', 'install', 'rsync', 'scp'])
 
+// A target directly under the temp directory with a name no mktemp made. `tmp.XXXXXX` (a file
+// or folder mktemp made) and anything one folder deeper pass; `$scratch/x` is not under /tmp
+// by spelling, so it passes too.
+const FIXED_TMP = /^(?:\/tmp|\$TMPDIR|\$\{TMPDIR(?::?-[^}]*)?\})\/(?!tmp\.)[^/]+$/
+const FLOOR_URL = /^(?:[a-z]+:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[A-Za-z0-9.-]+):8787(?:[/?#]|$)/i
+const scratchReason = (t: string) => `${t} is a fixed name directly under /tmp, shared by every tick on the box — scratch files live under \`mktemp -d\` (watch.md §1: scratch="$(mktemp -d)").`
+
 export function judgeBash(command: string, r: Pick<Roots, 'home' | 'stateRoot'>): string | undefined {
   const segs = segments(command)
   const roots = [...FIXED_ROOTS, r.stateRoot].filter(Boolean)
@@ -323,6 +335,11 @@ export function judgeBash(command: string, r: Pick<Roots, 'home' | 'stateRoot'>)
       if (c > 0 && w[c + 1]) { const inner = judgeBash(w[c + 1], r); if (inner) return inner }
     }
     if (base === 'eval') { const inner = judgeBash(w.slice(1).join(' '), r); if (inner) return inner }
+
+    if (base === 'curl' || base === 'wget') {
+      const hit = w.slice(1).find((x) => FLOOR_URL.test(x.replace(/^--url=/, '')))
+      if (hit) return `${base} on the floor page (${hit}) says what the server sent, not what was drawn — a page is looked at with python3 $WATCHER_HOME/bin/browse.py check <url>, never fetched.`
+    }
 
     if (base === 'systemctl') return `never systemctl from a tick (CLAUDE.md: deploying and the services are the deployer's).`
 
@@ -367,6 +384,19 @@ export function judgeBash(command: string, r: Pick<Roots, 'home' | 'stateRoot'>)
         }
       }
       if (sub && GIT_WRITES.has(sub) && dir && protectedPath(dir)) return `git ${sub} in ${dir} writes to a protected checkout (CLAUDE.md: never write under /opt/watcher, /etc/watcher or a lane's state directory).`
+    }
+
+    // a fixed-name scratch file directly under the temp directory
+    const fixedTmp = (t: string) => FIXED_TMP.test(t)
+    for (let j = 0; j < w.length; j++) {
+      const a = w[j]
+      const t = /^(&?>>?\|?|&>)$/.test(a) || a === '--body-file' || a === '-F' && base === 'gh' ? w[j + 1]
+        : /^--body-file=(.+)$/.exec(a)?.[1] ?? /^(?:>>?|&>)([^>].*)$/.exec(a)?.[1]
+      if (t && fixedTmp(t)) return scratchReason(t)
+    }
+    if (base === 'tee') {
+      const hit = w.slice(1).filter((x) => !x.startsWith('-')).find(fixedTmp)
+      if (hit) return scratchReason(hit)
     }
 
     // writes by spelling under a protected root

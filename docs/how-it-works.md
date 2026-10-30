@@ -690,6 +690,9 @@ same way the deployer closes its own: a small script on a timer, no model, deter
 - Never wait on an external reviewer. There is none. The reviewer runs in the session and
   returns.
 - Remove `in-flight` on every exit. A leaked label strands the card.
+- An incident that is a command adds its deny to the guard mod (`mods/guard/hooks/register.ts`) in the
+  same PR as its replay case, with the one-line lesson as the deny message (`curl` on the floor
+  page and a fixed-name file under `/tmp` are the first two, card #212).
 - A product decision is the owner's. Do not guess it; park the card with the options laid out.
 - **A fact is not a product decision.** What drew, what the value was, whether it
   reproduces — go and look, including at the project's own live data where its `CLAUDE.md`

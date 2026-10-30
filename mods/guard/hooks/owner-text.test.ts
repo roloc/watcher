@@ -103,16 +103,16 @@ function engine(on: Parameters<typeof mock.env>[0], files: Record<string, string
 }
 
 test('a Needs-@ comment that breaks the rules is refused before gh runs; the fixed one, FYIs and other comments pass', async ($, on) => {
-  engine(on, { '/tmp/tmp.old/stuck.md': BEFORE, '/tmp/tmp.new/stuck.md': TEMPLATE, '/tmp/bad.md': 'Needs @alex: what?' })
+  engine(on, { '/tmp/tmp.old/stuck.md': BEFORE, '/tmp/tmp.new/stuck.md': TEMPLATE, '/tmp/tmp.bad/body.md': 'Needs @alex: what?' })
   await $.session.start({ cwd: WORKTREE, surface: null, isInteractive: false })
   const run = (command: string) => $.tool.call({ tool: 'Bash', command })
   // the newest scratch folder's stuck.md is the one read for an unexpanded $scratch
   expect((await run('gh issue comment 9 --body-file "$scratch/stuck.md"')).deny).toBeUndefined()
-  const bad = await run('gh issue comment 9 --body-file /tmp/bad.md')
+  const bad = await run('gh issue comment 9 --body-file /tmp/tmp.bad/body.md')
   expect(bad.deny).toMatch(/guard: this comment breaks docs\/talking-to-the-owner\.md.*rule 1/)
   expect((await run('gh pr comment 9 --body "Needs @alex: just say go"')).deny).toMatch(/rule 1/)
   expect((await run('gh issue comment 9 --body "🤖 **FYI:** plan for this card."')).deny).toBeUndefined()
   expect((await run('gh issue comment 9 --body "Needs input"')).deny).toBeUndefined()
-  expect((await run('gh issue comment 9 --body-file /tmp/missing.md')).deny).toBeUndefined()
+  expect((await run('gh issue comment 9 --body-file /tmp/tmp.bad/missing.md')).deny).toBeUndefined()
   expect((await run('gh issue comment 9 --body-file -')).deny).toBeUndefined()
 })
