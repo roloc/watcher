@@ -843,11 +843,14 @@ W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (33, "OPEN",
                          (36, "CLOSED", "Done", []))
 W["deps"] = {}
 W["issues"] = {36: "open"}
-W["deps"] = {33: [{"number": 36, "state": "open"}]}
 board.cmd_sweep_waiting()
-check("a chip removed from one card while another still wears it keeps the repo label",
-      ["issue", "edit", "32", "-R", REPO, "--remove-label", "waits on #36"] in edits()
-      and not any(c[:2] == ["label", "delete"] for c in W["calls"]), W["calls"])
+check("the blocker open, nothing recorded for it: a tick's own chip stays (not swept as stale)",
+      not edits(), W["calls"])
+W["issues"] = {36: "closed"}
+W["calls"].clear()
+board.cmd_sweep_waiting()
+check("two cards wearing the label, blocker closed: both chips go, then the repo label",
+      len(edits()) == 2 and ["label", "delete", "waits on #36", "--yes", "-R", REPO] in W["calls"], W["calls"])
 
 W["calls"].clear()
 W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on PR #46"]), (33, "OPEN", "Backlog", ["waits on PR #47"]))

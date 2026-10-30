@@ -1595,8 +1595,7 @@ sweep_closed_stages() {
   errfile="$(mktemp)"
   if ! out="$($WATCHER_BOARD sweep-stages 2>"$errfile")"; then
     log "board.py sweep-stages failed; stale Stages stay until the next sweep: $(cat "$errfile" 2>/dev/null)"
-    rm -f "$errfile"
-    return 0
+    out=""
   fi
   rm -f "$errfile"
   while IFS= read -r line; do

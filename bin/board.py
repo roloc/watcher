@@ -1262,8 +1262,8 @@ def _target_open(repo, kind, num):
 
 def cmd_sweep_waiting():
     """Keep the `waits on #<m>` chips true. For every open card not In progress and not
-    Done: add `waits on #<m>` for each open card it waits on, and remove one that is no
-    longer a blocker. `waits on PR #<p>` (put there by a tick that sent a card back for an
+    Done: add `waits on #<m>` for each open card it waits on. A chip is removed when its
+    card is closed `waits on PR #<p>` (put there by a tick that sent a card back for an
     open PR) is removed once the PR is merged or closed. A repo label nobody wears any more
     is deleted, so the list does not grow for ever. A mirror of what the spawner decides on
     pick, never what it reads. Same clock as `sweep-stages` (STAGE_SWEEP_SEC), a stamp of
@@ -1292,12 +1292,12 @@ def cmd_sweep_waiting():
                 continue
             wanted = {f"waits on #{m}" for m in want}
             add = sorted(wanted - set(have), key=lambda l: int(l.rsplit("#", 1)[1]))
-            remove = [l for l in have if not WAITS_RE.match(l).group(1) and l not in wanted]
-            keep = [l for l in have if l not in remove]
-        # a PR chip, or any chip on a card we did not evaluate, goes when its target closes
+        # A chip goes when its target (the card, or the PR) is closed or merged — and only
+        # then: a tick's `waits on #<m>` for a blocker nobody recorded (a gate in the card's
+        # prose) must outlast the next sweep, so "no longer a blocker" is not enough.
         for l in list(keep):
             kind, num = WAITS_RE.match(l).groups()
-            if (kind == "PR" or not eligible) and _target_open(repo, kind, num) is False:
+            if l not in add and _target_open(repo, kind, num) is False:
                 remove.append(l)
                 keep.remove(l)
         for l in keep + add:
