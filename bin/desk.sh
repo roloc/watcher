@@ -37,7 +37,8 @@ say() { printf 'desk: %s\n' "$*"; }
 [ -d "$DESK_DIR/.git" ] || { say "no desk folder at $DESK_DIR (deploy/install.sh makes it, as a git repo — Remote Control needs one)"; exit 1; }
 cd "$DESK_DIR" || exit 1
 
-# 1. trust — merged into whatever ~/.claude.json already holds, never overwritten.
+# 1. trust, and the Remote Control consent (`remoteDialogSeen`: without it the server waits on
+#    an "Enable Remote Control? (y/n)" nobody can answer) — merged into whatever ~/.claude.json already holds, never overwritten.
 python3 - "$HOME/.claude.json" "$DESK_DIR" <<'PY' || say "could not seed trust for $DESK_DIR in $HOME/.claude.json (continuing)"
 import json, os, sys
 path, folder = sys.argv[1], sys.argv[2]
@@ -47,8 +48,14 @@ except (FileNotFoundError, ValueError):
     data = {}
 projects = data.setdefault("projects", {})
 entry = projects.setdefault(folder, {})
+changed = False
 if entry.get("hasTrustDialogAccepted") is not True:
     entry["hasTrustDialogAccepted"] = True
+    changed = True
+if data.get("remoteDialogSeen") is not True:
+    data["remoteDialogSeen"] = True
+    changed = True
+if changed:
     tmp = path + ".tmp"
     with open(tmp, "w") as f: json.dump(data, f, indent=2)
     os.replace(tmp, path)

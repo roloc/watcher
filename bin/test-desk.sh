@@ -86,6 +86,10 @@ python3 - "$HOME_DIR/.claude.json" "$DESK_DIR" <<'PY' && pass "…and ~/.claude.
 import json, sys
 d = json.load(open(sys.argv[1])); sys.exit(0 if d["projects"][sys.argv[2]]["hasTrustDialogAccepted"] is True else 1)
 PY
+python3 - "$HOME_DIR/.claude.json" <<'PY' && pass "…and the Remote Control consent (remoteDialogSeen) is seeded the same way" || flunk "consent not seeded" "$(cat "$HOME_DIR/.claude.json" 2>/dev/null)"
+import json, sys
+sys.exit(0 if json.load(open(sys.argv[1])).get("remoteDialogSeen") is True else 1)
+PY
 out_has "starting Remote Control as 'testbox desk'" && pass "…and says so in the journal" || flunk "no starting line" "$(cat "$TMP/out")"
 out_has "exited after 0s (exit 0); waiting 0s" && pass "…a server that quits at once is followed by a wait before the unit's restart (no 30-second loop)" || flunk "no wait after a quick exit" "$(cat "$TMP/out")"
 
