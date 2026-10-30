@@ -37,10 +37,14 @@
 //         a program that writes a path it computes (python, perl), a heredoc into a script. The
 //         Write/Edit fence is the robust half; the Bash list is the second wall's second wall.
 //
+//   Bash  gh issue|pr comment whose body opens with a `Needs @` line and breaks the numbered
+//         rules of docs/talking-to-the-owner.md (hooks/owner-text.ts; card #210). Fails open.
+//
 // Tests: hooks/guard.test.ts — `claude plugin test mods/guard` (offline; the engine's own
 // kit, `fs.stat` answered from memory). `claude plugin validate mods/guard` reads this file
 // the way the engine will and lists every gating hook with its .catch.
 import type { EngineInterface, Register } from 'claude-code'
+import { commentBody, isOwnerAsk, judgeOwnerText } from './owner-text'
 
 type Engine = EngineInterface
 
@@ -124,6 +128,15 @@ export const register: Register = (on) => {
     return why ? { deny: `${NAME}: ${why}` } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${NAME}: its Bash guard failed, so the command was refused.` }))
 
+  // --- Bash: a Needs-the-owner comment that breaks docs/talking-to-the-owner.md (card #210) ---
+  // Fails OPEN, unlike the guards above: this is a nicety, and a hook that threw must never be
+  // the reason a tick cannot post its Stuck comment.
+
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const why = await judgeOwnerComment($, e.command)
+    return why ? { deny: `${NAME}: ${why}` } : next(e)
+  }).catch(($, e, next) => next(e))
+
   // --- Write / Edit / NotebookEdit: the worktree fence, by where the path lands ------------
 
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
@@ -140,6 +153,49 @@ export const register: Register = (on) => {
     const why = await fence($, e.notebook_path)
     return why ? { deny: `${NAME}: ${why}` } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${NAME}: its write fence failed, so the edit was refused.` }))
+}
+
+// The reason to refuse a `gh issue|pr comment` whose body is a Needs-@ ask that breaks the
+// owner-text rules, or undefined (not such a comment, a body we cannot read, or a clean one).
+async function judgeOwnerComment($: Engine, command: string): Promise<string | undefined> {
+  if (!/Needs @/.test(command) && !/--body-file|-F\b/.test(command)) return undefined
+  for (const words of segments(command)) {
+    const w = program(words)
+    if ((w[0]?.split('/').pop() ?? '') !== 'gh') continue
+    const found = commentBody(w)
+    if (!found) continue
+    const body = 'inline' in found ? found.inline : await readBody($, found.file)
+    if (body === undefined || !isOwnerAsk(body)) continue
+    const broken = judgeOwnerText(body)
+    if (broken.length) return `this comment breaks docs/talking-to-the-owner.md, so it was not posted — fix it and post again. ${broken.join(' ')}`
+  }
+  return undefined
+}
+
+// The text of a --body-file, or undefined. The tick writes `--body-file "$scratch/stuck.md"`
+// and the shell has not expanded `$scratch` when the hook sees it, so a path that still
+// carries a variable is looked for by its file name in the newest `$TMPDIR/tmp.*` folder
+// that holds one.
+async function readBody($: Engine, file: string): Promise<string | undefined> {
+  const home = await $.env.get('HOME')
+  let path = file
+  if (home) path = path.replace(/^~(?=\/|$)/, home).replace(/^\$\{HOME\}|^\$HOME(?![A-Za-z0-9_])/, home)
+  if (/[$`]/.test(path)) {
+    const name = path.slice(path.lastIndexOf('/') + 1)
+    if (!name || /[$`]/.test(name)) return undefined
+    const temp = (await $.env.get('TMPDIR')) || '/tmp'
+    const found: Array<{ p: string; t: number }> = []
+    for (const d of await $.fs.list(temp).catch(() => [])) {
+      if (!d.name.startsWith('tmp.')) continue
+      const p = `${temp.replace(/\/+$/, '')}/${d.name}/${name}`
+      const st = await $.fs.stat(p).catch(() => undefined)
+      if (st) found.push({ p, t: st.mtimeMs })
+    }
+    found.sort((a, b) => b.t - a.t)
+    if (!found.length) return undefined
+    path = found[0].p
+  }
+  return $.fs.read(path).catch(() => undefined)
 }
 
 // --- the Bash judge: pure, so the test can read every verdict off a string ---------------

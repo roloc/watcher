@@ -307,6 +307,15 @@ symlink followed) outside the worktree, `$TMPDIR` or `~/.claude` is refused the 
 Nothing it does approves, merges or moves a card. A refused command is one line in the
 tick's own session, where the floor page's Peek shows it like any other tool result.
 
+One more hook guards the owner's phone rather than the box (card
+[#210](https://github.com/roloc/watcher/issues/210)): a `gh issue comment` or `gh pr comment`
+whose body opens with a `Needs @` line is read against the numbered rules of
+`docs/talking-to-the-owner.md` (bold ask first, at most 8 bullets, exactly one question,
+lettered options with one `(recommended)`, the reply line, no paths or backticks above the
+fold) before it is posted, and refused with the rule's number and the offending line. An
+`FYI:` comment, any other comment, and a body it cannot read pass untouched, and this hook
+fails open: it never keeps a tick from posting. Its checks live in `mods/guard/hooks/owner-text.ts`.
+
 The mod API is early access and moves between releases, so the box's `claude` has to be a
 build that has it (2.1.312 or later; `claude plugin test --help` prints usage on one that
 does). `bin/spawn.sh` asks exactly that once per process and, on an older build, leaves the
