@@ -98,6 +98,8 @@ CLAUDE_BIN="${WATCHER_CLAUDE:-claude}"
 PLUGIN_ARGV=(--plugin-dir "$REPO")
 # Card #213: the card-context mod is its own plugin (a plugin names one hooks module).
 [ -f "$REPO/mods/card-context/hooks/hooks.json" ] && PLUGIN_ARGV+=(--plugin-dir "$REPO/mods/card-context")
+# Card #215: the browse mod, so a case sees the same tool list a real tick does.
+[ -f "$REPO/mods/browse/hooks/hooks.json" ] && PLUGIN_ARGV+=(--plugin-dir "$REPO/mods/browse")
 if ! "$CLAUDE_BIN" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
   echo "eval.sh: guard mod NOT loaded into the cases: $CLAUDE_BIN has no mod runtime (card #204 needs 2.1.312 or later)" >&2
 fi

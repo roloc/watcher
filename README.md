@@ -57,6 +57,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
     mods/card-context/    the card-context mod (card #213): the card's body and comments, newest first,
                           as the last section of every tick's system prompt; `claude plugin test
                           mods/card-context`
+    mods/browse/          the browse mod (card #215): bin/browse.py's check, text and shot as one
+                          registered tool the model calls; `claude plugin test mods/browse`
     bin/desk.sh           the desk: a read-only Remote Control session on the box, in the owner's own
                           Claude sessions list (deploy/watcher-desk.service runs it; deploy/desk/ is its
                           CLAUDE.md and permission lists; see "The desk")
@@ -337,6 +339,12 @@ line on `.stderr`. **Measured on claude 2.1.312 under `claude -p`: the engine bu
 startup, so the section is the card as it stood when the tick started; a comment added during the tick is
 seen by the next tick, not the next turn.** Because it changes what every tick reads, a commit touching
 `mods/card-context/` runs the replay suite before it deploys (`deploy/autodeploy.sh`, `EVAL_PATHS`).
+
+`mods/browse/` (card [#215](https://github.com/roloc/watcher/issues/215)) is a third plugin, loaded the same way. It registers one
+tool, `mcp__browse__browse` (`command`: check, text or shot; `url`; `out` for a shot; optional `wait`), whose handler runs
+`python3 "$WATCHER_HOME/bin/browse.py"` and returns what it printed; a failing run comes back as text with its exit
+code. `bin/browse.py` is unchanged and still works from a shell, so a project without the mod loses nothing.
+`commands/watch.md` and `agents/reviewer.md` are not reworded yet.
 
 ## The desk
 
