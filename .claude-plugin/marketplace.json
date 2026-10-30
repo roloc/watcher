@@ -1,0 +1,12 @@
+{
+  "name": "watcher",
+  "description": "The watcher: a headless loop that turns a GitHub Projects board into merged PRs.",
+  "owner": { "name": "roloc" },
+  "plugins": [
+    {
+      "name": "watcher",
+      "source": "./",
+      "description": "The watcher's /watch and /triage ticks and its reviewer and usability agents."
+    }
+  ]
+}

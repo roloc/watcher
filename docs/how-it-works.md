@@ -736,8 +736,9 @@ The watcher brings the loop: the spawner, `/watch`, the reviewer, the board CLI,
 page the way a person does without the project building or installing anything. A project
 with a screen only says where its pages are and how to serve a branch's version.
 A project keeps its own `CLAUDE.md` (hard rules, the required CI check, standing traps),
-its own `.claude/agents/`, its own CI, and can override `/watch` with its own
-`.claude/commands/watch.md`. The generic `/watch` reads the project's `CLAUDE.md` for the
+its own `.claude/agents/`, its own CI, and and gets `/watch` as the
+`watcher` plugin's `/watcher:watch` (card #209: `--plugin-dir "$WATCHER_HOME"`, so a tick runs its
+own release's commands, agents and guard mod). The generic `/watch` reads the project's `CLAUDE.md` for the
 names it needs (the CI check, the contracts it must not touch, the spend receipt if any).
 `templates/project-CLAUDE.md` (card #39) is that section with a blank for each one, built
 straight from what `/watch`, `/triage` and the reviewer read; `deploy/add-project.sh` and

@@ -289,28 +289,33 @@ DOCTOR_OK=""  # set by run_doctor the first time tick_once gets past a PAUSE (se
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 
-# Card #204: the guard mod (mods/guard) rides into every tick as `--plugin-dir`, but only on
-# a claude build that has the mod runtime — 2.1.312 or later; `claude plugin test --help`
-# prints usage on one that does, and nothing on one that does not. On an older build the
-# flag could refuse the launch, or load nothing, and nobody would know which. So the probe
-# decides once per process (a fresh process follows every deploy, follow_pointer), and a
-# build without it is one journal line: the tick then runs on the prose rules alone, which
-# is the card's own stance for a mod that fails to load. Both the real launch and
-# print_claude_cmd (--dry-run) read the same two variables, so what the dry run prints is
-# what the tick gets. GUARD_PLUGIN_ARGV is the launch's argument list (an array, so a path
-# with a space survives); GUARD_PLUGIN_ARGS the same as printed text.
-GUARD_PLUGIN_ARGV=(); GUARD_PLUGIN_ARGS=""
-guard_plugin_probe() {
-  local dir="$WATCHER_HOME/mods/guard"
-  if [ ! -f "$dir/hooks/hooks.json" ]; then
-    log "guard mod: no $dir in this release; ticks run on the prose rules alone"
-  elif "$WATCHER_REAL_CLAUDE" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
-    GUARD_PLUGIN_ARGV=(--plugin-dir "$dir"); GUARD_PLUGIN_ARGS="--plugin-dir \"$dir\""
-  else
+# Card #209: the watcher is one Claude Code plugin (.claude-plugin/plugin.json at
+# $WATCHER_HOME: commands/, agents/ and the guard mod's hooks), loaded into every tick with
+# `--plugin-dir "$WATCHER_HOME"` and run by its namespaced name, `/watcher:watch <n>` — so a
+# tick runs the copy in its own release folder (card #106, a canary lane's own checkout), and
+# nothing on the box needs a `~/.claude/commands` or `~/.claude/agents` link. A release with
+# no manifest (an old checkout) keeps the bare `/watch`. PLUGIN_ARGV is the launch's argument
+# list (an array, so a path with a space survives); PLUGIN_ARGS the same as printed text;
+# LAUNCH_COMMAND the lane's command as claude is given it.
+#
+# Card #204: the guard mod's hooks ride in the same plugin, but only a claude build that has
+# the mod runtime — 2.1.312 or later; `claude plugin test --help` prints usage on one that
+# does — can run them. The probe decides once per process (a fresh process follows every
+# deploy, follow_pointer), and a build without it is one journal line: the tick then runs on
+# the prose rules alone, which is the card's own stance for a mod that fails to load.
+PLUGIN_ARGV=(); PLUGIN_ARGS=""; LAUNCH_COMMAND="$LANE_COMMAND"
+plugin_probe() {
+  if [ ! -f "$WATCHER_HOME/.claude-plugin/plugin.json" ]; then
+    log "plugin: no $WATCHER_HOME/.claude-plugin/plugin.json in this release; ticks run the bare $LANE_COMMAND"
+    return
+  fi
+  PLUGIN_ARGV=(--plugin-dir "$WATCHER_HOME"); PLUGIN_ARGS="--plugin-dir \"$WATCHER_HOME\""
+  case "$LANE_COMMAND" in /watcher:*) ;; *) LAUNCH_COMMAND="/watcher:${LANE_COMMAND#/}" ;; esac
+  if ! "$WATCHER_REAL_CLAUDE" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
     log "guard mod NOT loaded: $WATCHER_REAL_CLAUDE ($("$WATCHER_REAL_CLAUDE" --version 2>/dev/null | head -1)) has no mod runtime — card #204 needs 2.1.312 or later (npm i -g @anthropic-ai/claude-code@latest on the box); ticks run on the prose rules alone"
   fi
 }
-guard_plugin_probe
+plugin_probe
 
 # Every sleep in the script funnels through here so WATCHER_SLEEP=0 makes a test instant
 # without touching the call sites that decide HOW LONG a real run would wait.
@@ -897,8 +902,9 @@ Reply A, B or C on this card, or say which way you lean, then move it.
 # The exact claude command from section 1 step 5, flags verbatim — shared by the real
 # launch and --dry-run so they can never drift apart.
 #
-# `--plugin-dir "$WATCHER_HOME/mods/guard"` (card #204, $GUARD_PLUGIN_ARGS — guard_plugin_probe
-# decided it once at process start): the guard mod, loaded into every tick. Its hooks
+# `--plugin-dir "$WATCHER_HOME"` (card #209, $PLUGIN_ARGS — plugin_probe decided it once at
+# process start): the watcher plugin, loaded into every tick, with the guard mod (card #204)
+# inside it. The guard's hooks
 # refuse the hard-rule commands (a force-push, a push to main, an admin merge, systemctl,
 # the deploy scripts, a write outside the worktree) before they run — a second wall behind
 # the prose in docs/how-it-works.md, never the only one. WATCHER_HOME, not /opt/watcher: a
@@ -918,8 +924,8 @@ print_claude_cmd() {
   cat <<EOF
 (cd "$dir" && PATH="$WATCHER_SHIM_DIR:\$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \\
   WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" \\
-  "$WATCHER_REAL_CLAUDE" -p "$LANE_COMMAND $n" \\
-  --dangerously-skip-permissions${GUARD_PLUGIN_ARGS:+ $GUARD_PLUGIN_ARGS} \\
+  "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \\
+  --dangerously-skip-permissions${PLUGIN_ARGS:+ $PLUGIN_ARGS} \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
   --output-format json \\
   > "$WATCHER_LOGS/card-$n-$ts.json" 2> "$WATCHER_LOGS/card-$n-$ts.stderr")
@@ -1089,8 +1095,8 @@ launch_tick() {
   local launch_pwd="$PWD"
   cd "$dir"
   PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \
-  "$WATCHER_REAL_CLAUDE" -p "$LANE_COMMAND $n" \
-      --dangerously-skip-permissions ${GUARD_PLUGIN_ARGV[@]+"${GUARD_PLUGIN_ARGV[@]}"} \
+  "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \
+      --dangerously-skip-permissions ${PLUGIN_ARGV[@]+"${PLUGIN_ARGV[@]}"} \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \
       --output-format json \
       > "$out" 2> "$err" &

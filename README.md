@@ -122,7 +122,13 @@ hand. The tick sets it at each
 step with `board stage <n> <value>`; the spawner sets Parked when it parks a card. Status
 says who owns the card, Stage says what is happening to it. A board view grouped by Stage
 is the per-step column view; `board list` prints the stage as its fifth column.
-A project-level `.claude/commands/watch.md` overrides the generic one. The generic one reads
+The watcher is one Claude Code plugin (`.claude-plugin/plugin.json`: `commands/`, `agents/` and the guard
+mod's hooks, card [#209](https://github.com/roloc/watcher/issues/209)). The spawner loads it with
+`--plugin-dir "$WATCHER_HOME"` and runs `/watcher:watch <n>`, so a tick uses its own release's copy and the
+agents are `watcher:reviewer` and `watcher:usability`; a fork installs it with
+`/plugin install watcher --marketplace roloc/watcher`. A project-level `.claude/commands/watch.md` is
+the bare `/watch`, which a tick no longer runs; a project that needs different rules says so in its
+`CLAUDE.md`. The generic one reads
 the project's `CLAUDE.md` for the names it needs (the required CI check, contracts a builder
 must not touch). The spawner exports `WATCHER_HOME` so a tick can read `docs/` from any
 worktree.
@@ -198,7 +204,7 @@ your own Claude subscription token, the box, a first project, a first card. Shor
     /opt/watcher/deploy/bootstrap.sh               # idempotent: git, python3, curl, gh,
                                                     # chromium, node 22, the claude CLI,
                                                     # godot 4 + xvfb (engine-run projects)
-    /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, symlinks, `board`
+    /opt/watcher/deploy/install.sh                 # user, unit, /etc/watcher/env, `board`
 
 Then by hand, once:
 

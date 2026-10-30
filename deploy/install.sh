@@ -238,9 +238,13 @@ grep -q '^SLACK_WEBHOOK_URL=' /etc/watcher/env || echo "SLACK_WEBHOOK_URL=" >> /
 [ -f /etc/watcher/floor.env ] || { printf 'PROXMOX_URL=\nPROXMOX_TOKEN=\nPROXMOX_VERIFY=1\n' > /etc/watcher/floor.env; chown root:watcher /etc/watcher/floor.env; chmod 640 /etc/watcher/floor.env; }
 
 install -d -o watcher -g watcher /home/watcher/.claude /home/watcher/projects
-ln -sfn "$WATCHER_DIR/commands" /home/watcher/.claude/commands
-ln -sfn "$WATCHER_DIR/agents"   /home/watcher/.claude/agents
-chown -h watcher:watcher /home/watcher/.claude/commands /home/watcher/.claude/agents
+# Card #209: the commands and agents are a plugin (.claude-plugin/plugin.json) that bin/spawn.sh
+# loads with `--plugin-dir "$WATCHER_HOME"`, so a tick runs its own release's copy. The two
+# links this used to make are removed, when they are still the links an earlier install made
+# (never a real directory of someone's own).
+for _l in commands agents; do
+  [ -L "/home/watcher/.claude/$_l" ] && rm -f "/home/watcher/.claude/$_l"
+done
 
 # bin/board.py's cache (card #98): one directory every lane AND the floor service can both
 # write to, so a board read inside one poll's TTL is shared instead of re-fetched per
@@ -263,9 +267,9 @@ if grep -qsx 'LANE_CHANNEL=canary' "$WATCHER_DIR"/projects/*.env 2>/dev/null; th
     chmod +x "$WATCHER_CANARY_DIR"/bin/*.sh "$WATCHER_CANARY_DIR"/bin/shim/* "$WATCHER_CANARY_DIR"/deploy/*.sh 2>/dev/null || true
     su - watcher -c "git -C '$WATCHER_CANARY_DIR' config core.fileMode false" 2>/dev/null || true
     install -d -o watcher -g watcher /home/watcher/.claude-canary
-    ln -sfn "$WATCHER_CANARY_DIR/commands" /home/watcher/.claude-canary/commands
-    ln -sfn "$WATCHER_CANARY_DIR/agents"   /home/watcher/.claude-canary/agents
-    chown -h watcher:watcher /home/watcher/.claude-canary/commands /home/watcher/.claude-canary/agents
+    for _l in commands agents; do
+      [ -L "/home/watcher/.claude-canary/$_l" ] && rm -f "/home/watcher/.claude-canary/$_l"
+    done
   fi
 fi
 

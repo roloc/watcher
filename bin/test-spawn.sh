@@ -527,7 +527,7 @@ board_list $'10\tP1\tbuilder\tin-flight\tCard ten' \
            $'12\tP2\tbuilder\t-\tCard twelve (claimable)'
 mkdir -p "$STATE/attempts"; echo 2 > "$STATE/attempts/11"
 OUT="$(run --dry-run)"; RC=$?
-if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q '^pick: #12 ' && printf '%s' "$OUT" | grep -q '/watch 12'; then
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q '^pick: #12 ' && printf '%s' "$OUT" | grep -q '/watcher:watch 12'; then
   pass "dry-run picks #12 (10 is in-flight, 11 has attempts=2), exit 0"
 else
   flunk "dry-run pick" "rc=$RC out=[$OUT]"
@@ -546,7 +546,7 @@ board_show '{"number":20,"state":"OPEN","status":"In progress","labels":[]}'
 CLAUDE_SUBTYPE=success CLAUDE_RC=0 RC=0
 run --once >/dev/null; RC=$?
 if [ "$RC" = 0 ]; then pass "successful tick → spawn.sh --once exits 0"; else flunk "exit code" "got $RC"; fi
-if grepped "worktree.sh new card-20" && grepped "/watch 20"; then pass "worktree created and tick launched for #20"; else flunk "launch" "$(cat "$TESTLOG")"; fi
+if grepped "worktree.sh new card-20" && grepped "/watcher:watch 20"; then pass "worktree created and tick launched for #20"; else flunk "launch" "$(cat "$TESTLOG")"; fi
 if grepped "claude-env background-tasks-disabled=1"; then pass "the tick runs with background tasks disabled (a headless CI wait must block)"; else flunk "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS not passed to the tick" "$(cat "$TESTLOG")"; fi
 if grepped "claude-env path-head=$HERE/shim real=$BIN/claude"; then pass "the tick's shell finds bin/shim/claude first, and the shim knows the real binary (watcher#82)"; else flunk "shim not first on the tick's PATH, or WATCHER_REAL_CLAUDE missing" "$(grep claude-env "$TESTLOG")"; fi
 if not_grepped "board.py unclaim 20"; then pass "no unclaim: in-flight was never on the card"; else flunk "unexpected unclaim"; fi
@@ -962,7 +962,7 @@ run --once >/dev/null 2>"$TMP/sync140.err"
 if grep -qF "synced card-140 to origin/card-140 ($OLD_HEAD..$NEW_HEAD)" "$TMP/sync140.err"; then pass "one commit behind, clean: fast-forwarded and logged"; else flunk "sync log line" "$(cat "$TMP/sync140.err")"; fi
 if not_grepped "worktree.sh new card-140"; then pass "no fresh worktree created: the same directory was fast-forwarded in place"; else flunk "unexpected fresh worktree" "$(cat "$TESTLOG")"; fi
 if [ "$(git -C "$WORKTREE_BASE/card-140" rev-parse HEAD)" = "$NEW_HEAD" ]; then pass "worktree HEAD now matches origin"; else flunk "HEAD not advanced"; fi
-if grepped "/watch 140"; then pass "the tick still launched, on the synced worktree"; else flunk "tick never launched" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 140"; then pass "the tick still launched, on the synced worktree"; else flunk "tick never launched" "$(cat "$TESTLOG")"; fi
 
 echo "12c. …diverged (commits on both sides): set aside with a real worktree move + branch rename, a fresh worktree resumes at origin's own head (card #86 review round 1: a bare mv here left the branch and worktree still claimed at the old path, so the fresh create always failed)"
 fresh_state
@@ -1271,7 +1271,7 @@ comment_count="$(grep -c 'gh issue comment 260' "$TESTLOG" || true)"
 if [ "$comment_count" = 1 ]; then pass "exactly one Stuck comment across 3 polls despite board.py move failing every time"; else flunk "expected exactly 1 comment on #260, got $comment_count" "$(cat "$TESTLOG")"; fi
 if [ -f "$STATE/parked/260" ]; then pass "parked/260 (comment-posted) marker written even though the underlying move failed"; else flunk "expected \$STATE/parked/260 to exist"; fi
 if [ ! -f "$STATE/parked-ok/260" ]; then pass "parked-ok/260 (confirmed) NOT written — the move never actually succeeded"; else flunk "parked-ok/260 should not exist when board.py move always fails"; fi
-if not_grepped "claude -p /watch 260"; then pass "#260 was never relaunched across all 3 polls — a failed move is not a retry signal"; else flunk "expected #260 to stay unpicked" "$(cat "$TESTLOG")"; fi
+if not_grepped "claude -p /watcher:watch 260"; then pass "#260 was never relaunched across all 3 polls — a failed move is not a retry signal"; else flunk "expected #260 to stay unpicked" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "26b. Round 6, B1: a card whose board.py move fails once, then succeeds, gets exactly"
@@ -1305,7 +1305,7 @@ move_attempts="$(grep -c 'board.py move 261 Stuck - Needs help' "$TESTLOG" || tr
 if [ "$move_attempts" = 2 ]; then pass "board.py move attempted exactly twice across 4 polls (fails once, succeeds once, never retried again once parked-ok landed)"; else flunk "expected exactly 2 move attempts" "$(cat "$TESTLOG")"; fi
 comment_count="$(grep -c 'gh issue comment 261' "$TESTLOG" || true)"
 if [ "$comment_count" = 1 ]; then pass "exactly one Stuck comment across 4 polls"; else flunk "expected exactly 1 comment on #261, got $comment_count" "$(cat "$TESTLOG")"; fi
-if not_grepped "claude -p /watch 261"; then pass "#261 was never relaunched across all 4 polls"; else flunk "expected #261 to stay unpicked" "$(cat "$TESTLOG")"; fi
+if not_grepped "claude -p /watcher:watch 261"; then pass "#261 was never relaunched across all 4 polls"; else flunk "expected #261 to stay unpicked" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "27. Round 5, N1: Steve moving a parked card back to In progress by hand clears"
@@ -1326,7 +1326,7 @@ run --once >/dev/null 2>"$TMP/retry27.err"
 if [ ! -f "$STATE/parked-ok/270" ]; then pass "poll 2: parked-ok/270 cleared — Steve's manual retry recognized"; else flunk "expected \$STATE/parked-ok/270 to be removed on poll 2"; fi
 if [ ! -f "$STATE/parked/270" ]; then pass "poll 2: parked/270 (comment-posted) cleared too, so a future park isn't silently guarded by a stale marker"; else flunk "expected \$STATE/parked/270 to be removed on poll 2"; fi
 if grep -q '#270: In progress with a confirmed parked-ok marker on file' "$TMP/retry27.err"; then pass "poll 2 logs the manual-retry reconciliation"; else flunk "expected a log line naming the manual retry" "$(cat "$TMP/retry27.err")"; fi
-if grepped 'claude -p /watch 270'; then pass "poll 2: #270 was picked and launched, not skipped again"; else flunk "expected #270 to be launched on poll 2" "$(cat "$TESTLOG")"; fi
+if grepped 'claude -p /watcher:watch 270'; then pass "poll 2: #270 was picked and launched, not skipped again"; else flunk "expected #270 to be launched on poll 2" "$(cat "$TESTLOG")"; fi
 if [ "$(cat "$STATE/attempts/270" 2>/dev/null)" = 1 ]; then pass "poll 2: attempts/270 = 1 (reset to 0 by the retry, then bumped once by this poll's own launch), not left at the old 2"; else flunk "expected attempts/270 = 1 after poll 2" "$(cat "$STATE/attempts/270" 2>/dev/null)"; fi
 
 # ============================================================================
@@ -1340,14 +1340,14 @@ board_show '{"number":300,"state":"OPEN","labels":[],"status":"In progress"}'
 CLAUDE_SUBTYPE=success CLAUDE_RC=0
 run --once >/dev/null 2>"$TMP/q.err" || true
 if grepped "board.py move 300 In progress"; then pass "queued card moved to In progress before launch"; else flunk "expected board.py move 300 In progress" "$(cat "$TESTLOG")"; fi
-if grepped "/watch 300"; then pass "queued card launched"; else flunk "expected a launch for #300" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 300"; then pass "queued card launched"; else flunk "expected a launch for #300" "$(cat "$TESTLOG")"; fi
 if grep -q "picked #300 (P1) Card three hundred" "$TMP/q.err"; then pass "six-column row parsed: title intact after the stage column"; else flunk "title parse" "$(cat "$TMP/q.err")"; fi
 # a queue row that is in-flight is skipped like any other
 fresh_state
 board_list ""
 printf '301\tP1\tbuilder\tin-flight\tWaiting\tCard three-oh-one\n' > "$BOARD_QUEUE_FILE"
 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 301"; then pass "an in-flight queue row is not launched"; else flunk "in-flight queue row launched"; fi
+if not_grepped "/watcher:watch 301"; then pass "an in-flight queue row is not launched"; else flunk "in-flight queue row launched"; fi
 unset BOARD_QUEUE_FILE
 
 # ============================================================================
@@ -1468,7 +1468,7 @@ if grepped 'board.py move 400 Stuck - Needs help' && not_grepped 'board.py move 
 else
   flunk "cross-lane park" "$(cat "$TESTLOG")"
 fi
-if not_grepped '/watch 401'; then pass "…and never launches the other lane's card either"; else flunk "cross-lane launch" "$(cat "$TESTLOG")"; fi
+if not_grepped '/watcher:watch 401'; then pass "…and never launches the other lane's card either"; else flunk "cross-lane launch" "$(cat "$TESTLOG")"; fi
 
 # Waiting-stage rows go through the same filter.
 fresh_state
@@ -1478,7 +1478,7 @@ printf '410\tP1\tbuilder\t-\tWaiting\tQueued build\n411\tP1\tarchitect\t-\tWaiti
 board_show '{"number":411,"state":"OPEN","labels":[],"status":"In progress"}'
 CLAUDE_SUBTYPE=success CLAUDE_RC=0
 LANE_AGENTS='architect,designer' run --once >/dev/null 2>&1 || true
-if grepped "board.py move 411 In progress" && grepped "/watch 411" && not_grepped "/watch 410"; then
+if grepped "board.py move 411 In progress" && grepped "/watcher:watch 411" && not_grepped "/watcher:watch 410"; then
   pass "a Waiting card is taken by the lane its agent label belongs to, not by the first lane to poll"
 else
   flunk "lane filter on the Waiting queue" "$(cat "$TESTLOG")"
@@ -1494,7 +1494,7 @@ board_list $'400\tP0\tbuilder\t-\tBuild card' \
            $'403\tP2\t-\t-\tUnlabeled card'
 OUT="$(LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --dry-run 2>/dev/null)"
 if printf '%s' "$OUT" | grep -q '^pick: #403 ' && printf '%s' "$OUT" | grep -q '^command: /triage' \
-   && printf '%s' "$OUT" | grep -q '/triage 403' && printf '%s' "$OUT" | grep -q "^workdir: $FAKE_ROOT (no worktree)"; then
+   && printf '%s' "$OUT" | grep -q '/watcher:triage 403' && printf '%s' "$OUT" | grep -q "^workdir: $FAKE_ROOT (no worktree)"; then
   pass "dry-run: names the command, the pick, and the project root as the workdir"
 else
   flunk "triage dry-run" "out=[$OUT]"
@@ -1503,7 +1503,7 @@ fresh_state
 board_list $'403\tP2\t-\t-\tUnlabeled card'
 board_show '{"number":403,"state":"OPEN","status":"In progress","labels":["agent: ui"]}'
 LANE_AGENTS='-' LANE_COMMAND=/triage LANE_WORKDIR=root run --once >/dev/null 2>&1 || true
-if grepped "/triage 403" && grepped "[cwd=$FAKE_ROOT]" && not_grepped "worktree.sh new"; then
+if grepped "/watcher:triage 403" && grepped "[cwd=$FAKE_ROOT]" && not_grepped "worktree.sh new"; then
   pass "--once: the triage command runs in the project root and no worktree is created"
 else
   flunk "triage launch" "$(cat "$TESTLOG")"
@@ -1560,7 +1560,7 @@ if [ "$comments" = 1 ] && [ "$(cat "$STATE/waiting/500" 2>/dev/null)" = "501" ];
 else
   flunk "waiting comment" "count=$comments $(cat "$TESTLOG")"
 fi
-if grepped "/watch 501" && not_grepped "/watch 500"; then pass "#501 launched, #500 never"; else flunk "deps launch" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 501" && not_grepped "/watcher:watch 500"; then pass "#501 launched, #500 never"; else flunk "deps launch" "$(cat "$TESTLOG")"; fi
 # the blocker set changes → one more comment, for the new set
 echo '[{"number":503,"state":"open"}]' > "$GH_DEPS_DIR/500.json"
 run --once >/dev/null 2>&1 || true
@@ -1573,7 +1573,7 @@ fi
 echo '[{"number":503,"state":"closed"}]' > "$GH_DEPS_DIR/500.json"
 board_show '{"number":500,"state":"OPEN","status":"In progress","labels":[]}'
 run --once >/dev/null 2>&1 || true
-if grepped "/watch 500" && [ ! -f "$STATE/waiting/500" ]; then pass "once every blocker is closed the card is picked and its waiting marker is cleared"; else flunk "unblocked pick" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 500" && [ ! -f "$STATE/waiting/500" ]; then pass "once every blocker is closed the card is picked and its waiting marker is cleared"; else flunk "unblocked pick" "$(cat "$TESTLOG")"; fi
 
 fresh_state; deps_board
 OUT="$(GH_API_FAIL=1 run --dry-run 2>"$TMP/deps2.err")"; RC=$?
@@ -1590,7 +1590,7 @@ printf '510\tP0\tbuilder\t-\tWaiting\tQueued, blocked\n511\tP1\tbuilder\t-\tWait
 board_show '{"number":511,"state":"OPEN","status":"In progress","labels":[]}'
 GH_DEPS_DIR="$STATE/deps"; mkdir -p "$GH_DEPS_DIR"; echo '[{"number":511,"state":"open"}]' > "$GH_DEPS_DIR/510.json"
 run --once >/dev/null 2>&1 || true
-if grepped "board.py move 511 In progress" && not_grepped "/watch 510"; then pass "a Waiting-stage card that waits on another is skipped the same way"; else flunk "queue deps" "$(cat "$TESTLOG")"; fi
+if grepped "board.py move 511 In progress" && not_grepped "/watcher:watch 510"; then pass "a Waiting-stage card that waits on another is skipped the same way"; else flunk "queue deps" "$(cat "$TESTLOG")"; fi
 unset BOARD_QUEUE_FILE GH_DEPS_DIR
 
 # ============================================================================
@@ -1632,7 +1632,7 @@ if grepped "gh issue comment 520 --body 🤖 FYI: this card waits on $L521, so I
 else
   flunk "words comment" "$(cat "$TESTLOG")"
 fi
-if grepped "/watch 521" && not_grepped "/watch 520"; then pass "#521 launched, #520 never"; else flunk "words launch" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 521" && not_grepped "/watcher:watch 520"; then pass "#521 launched, #520 never"; else flunk "words launch" "$(cat "$TESTLOG")"; fi
 
 # Context, not order: none of these is a prerequisite (triage.md draws the same line).
 fresh_state; words_board "Part of $L521. See $L521, like $L521 and same as $L521."
@@ -1787,7 +1787,7 @@ board_list $'610\tP2\tbuilder\tawaiting-rebuild\tFix merged, waiting on the rebu
 CLAUDE_SUBTYPE=success CLAUDE_RC=0
 WATCHER_MAX_POLLS=2 run >/dev/null 2>&1 || true
 comments="$(grep -c "gh issue comment 610 --body 🤖 FYI: this card is waiting on a downstream rebuild" "$TESTLOG")"
-if [ "$comments" = 1 ] && [ ! -f "$STATE/attempts/610" ] && not_grepped "/watch 610"; then
+if [ "$comments" = 1 ] && [ ! -f "$STATE/attempts/610" ] && not_grepped "/watcher:watch 610"; then
   pass "two polls: exactly one FYI comment, never launched, no attempt ever counted"
 else
   flunk "awaiting-rebuild wait" "comments=$comments attempts=$(cat "$STATE/attempts/610" 2>/dev/null) $(cat "$TESTLOG")"
@@ -1802,7 +1802,7 @@ fi
 board_list $'610\tP2\tbuilder\t-\tFix merged, waiting on the rebuild'
 board_show '{"number":610,"state":"OPEN","status":"In progress","labels":[]}'
 run --once >/dev/null 2>&1 || true
-if grepped "/watch 610" && [ ! -f "$STATE/awaiting-rebuild/610.since" ] && [ ! -f "$STATE/awaiting-rebuild/610.noted" ]; then
+if grepped "/watcher:watch 610" && [ ! -f "$STATE/awaiting-rebuild/610.since" ] && [ ! -f "$STATE/awaiting-rebuild/610.noted" ]; then
   pass "label dropped → launched on the next poll, its wait markers cleared"
 else
   flunk "post-label-drop pick" "$(cat "$TESTLOG") $(ls "$STATE/awaiting-rebuild" 2>/dev/null)"
@@ -1971,7 +1971,7 @@ echo "Self-pull (READY_PULL): the loop starts a card nobody handed it, under a W
 fresh_state; board_list ""; board_ready $'800\tP1\tbuilder\t-\tReady\tA ready card'
 board_show '{"number":800,"state":"OPEN","labels":[],"status":"In progress"}'
 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 800"; then pass "READY_PULL unset: a Ready card is never pulled"; else flunk "pulled from Ready with READY_PULL off" "$(cat "$TESTLOG")"; fi
+if not_grepped "/watcher:watch 800"; then pass "READY_PULL unset: a Ready card is never pulled"; else flunk "pulled from Ready with READY_PULL off" "$(cat "$TESTLOG")"; fi
 if not_grepped "board.py move 800"; then pass "…and never moved"; else flunk "moved a Ready card with READY_PULL off"; fi
 
 # --- on: nothing elsewhere, so Ready is served ------------------------------------------
@@ -1979,7 +1979,7 @@ fresh_state; board_list ""; board_ready $'800\tP1\tbuilder\t-\tReady\tA ready ca
 board_show '{"number":800,"state":"OPEN","labels":[],"status":"In progress"}'
 READY_PULL=1 run --once >/dev/null 2>"$TMP/ready.err" || true
 if grepped "board.py move 800 In progress"; then pass "READY_PULL=1: the Ready card is moved to In progress before launch"; else flunk "expected board.py move 800 In progress" "$(cat "$TESTLOG")"; fi
-if grepped "/watch 800"; then pass "…and launched"; else flunk "expected a launch for #800" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 800"; then pass "…and launched"; else flunk "expected a launch for #800" "$(cat "$TESTLOG")"; fi
 if grep -q "taken from Ready" "$TMP/ready.err"; then pass "…and the log names Ready, not Waiting"; else flunk "log says the wrong source column" "$(cat "$TMP/ready.err")"; fi
 
 # --- In progress is always served first -------------------------------------------------
@@ -1987,7 +1987,7 @@ fresh_state; board_list $'810\tP1\tbuilder\t-\t-\tHanded over by Steve'
 board_ready $'811\tP0\tbuilder\t-\tReady\tHigher priority, but only Ready'
 board_show '{"number":810,"state":"OPEN","labels":[],"status":"In progress"}'
 READY_PULL=1 run --once >/dev/null 2>&1 || true
-if grepped "/watch 810" && not_grepped "/watch 811"; then pass "a card Steve moved by hand beats a higher-priority Ready card"; else flunk "Ready jumped the queue" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 810" && not_grepped "/watcher:watch 811"; then pass "a card Steve moved by hand beats a higher-priority Ready card"; else flunk "Ready jumped the queue" "$(cat "$TESTLOG")"; fi
 
 # --- Waiting beats Ready ----------------------------------------------------------------
 fresh_state; board_list ""
@@ -1996,7 +1996,7 @@ printf '820\tP1\tbuilder\t-\tWaiting\tDragged to Waiting\n' > "$BOARD_QUEUE_FILE
 board_ready $'821\tP0\tbuilder\t-\tReady\tOnly Ready'
 board_show '{"number":820,"state":"OPEN","labels":[],"status":"In progress"}'
 READY_PULL=1 run --once >/dev/null 2>&1 || true
-if grepped "/watch 820" && not_grepped "/watch 821"; then pass "Waiting is served before Ready"; else flunk "Ready beat Waiting" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 820" && not_grepped "/watcher:watch 821"; then pass "Waiting is served before Ready"; else flunk "Ready beat Waiting" "$(cat "$TESTLOG")"; fi
 unset BOARD_QUEUE_FILE
 
 # --- the WIP cap ------------------------------------------------------------------------
@@ -2006,7 +2006,7 @@ fresh_state; board_list $'830\tP1\tbuilder\tin-flight\t-\tBusy one' $'831\tP1\tb
 board_ready $'832\tP1\tbuilder\t-\tReady\tWants to start'
 board_show '{"number":832,"state":"OPEN","labels":[],"status":"In progress"}'
 READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>"$TMP/wip.err" || true
-if not_grepped "/watch 832"; then pass "WIP_MAX=2 with 2 cards In progress: no promotion"; else flunk "promoted past the WIP cap" "$(cat "$TESTLOG")"; fi
+if not_grepped "/watcher:watch 832"; then pass "WIP_MAX=2 with 2 cards In progress: no promotion"; else flunk "promoted past the WIP cap" "$(cat "$TESTLOG")"; fi
 if grep -q "WIP_MAX=2" "$TMP/wip.err"; then pass "…and the log says why the loop is quiet"; else flunk "no WIP reason logged" "$(cat "$TMP/wip.err")"; fi
 
 # One card in flight, cap of 2 → there is room, so it promotes.
@@ -2014,7 +2014,7 @@ fresh_state; board_list $'830\tP1\tbuilder\tin-flight\t-\tBusy one'
 board_ready $'832\tP1\tbuilder\t-\tReady\tWants to start'
 board_show '{"number":832,"state":"OPEN","labels":[],"status":"In progress"}'
 READY_PULL=1 WIP_MAX=2 run --once >/dev/null 2>&1 || true
-if grepped "/watch 832"; then pass "WIP_MAX=2 with 1 card In progress: room, so it promotes"; else flunk "did not promote with room under the cap" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 832"; then pass "WIP_MAX=2 with 1 card In progress: room, so it promotes"; else flunk "did not promote with room under the cap" "$(cat "$TESTLOG")"; fi
 
 # An empty Ready column plus a full In progress column says nothing: the cap is not what
 # is holding anything back, and that line would repeat once a minute, per lane, forever.
@@ -2027,12 +2027,12 @@ if ! grep -q "not pulling from Ready" "$TMP/quiet.err"; then pass "nothing in Re
 fresh_state; board_list ""; board_ready $'840\tP1\tarchitect\t-\tReady\tDesign work'
 board_show '{"number":840,"state":"OPEN","labels":[],"status":"In progress"}'
 READY_PULL=1 LANE_AGENTS='!architect,designer,-' run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 840"; then pass "a Ready card belonging to another lane is not pulled"; else flunk "build lane pulled a design card from Ready" "$(cat "$TESTLOG")"; fi
+if not_grepped "/watcher:watch 840"; then pass "a Ready card belonging to another lane is not pulled"; else flunk "build lane pulled a design card from Ready" "$(cat "$TESTLOG")"; fi
 
 # an in-flight Ready row is skipped like any other row
 fresh_state; board_list ""; board_ready $'841\tP1\tbuilder\tin-flight\tReady\tAlready owned'
 READY_PULL=1 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 841"; then pass "an in-flight Ready row is not launched"; else flunk "in-flight Ready row launched"; fi
+if not_grepped "/watcher:watch 841"; then pass "an in-flight Ready row is not launched"; else flunk "in-flight Ready row launched"; fi
 
 # --- failures close, never open ----------------------------------------------------------
 # A board with no Ready column: `list Ready` exits 1. That must not fail the poll, and must
@@ -2040,7 +2040,7 @@ if not_grepped "/watch 841"; then pass "an in-flight Ready row is not launched";
 fresh_state; board_list $'850\tP1\tbuilder\t-\t-\tOrdinary card'
 board_show '{"number":850,"state":"CLOSED","status":"Done","labels":[]}'
 READY_PULL=1 BOARD_READY_FAIL=1 run --once >/dev/null 2>"$TMP/noready.err" || true
-if grepped "/watch 850"; then pass "a board with no Ready column still serves In progress"; else flunk "a failed Ready lookup stopped the poll" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 850"; then pass "a board with no Ready column still serves In progress"; else flunk "a failed Ready lookup stopped the poll" "$(cat "$TESTLOG")"; fi
 if grep -q "not pulling from Ready this poll" "$TMP/noready.err"; then pass "…and says so once"; else flunk "no log line for the failed Ready lookup" "$(cat "$TMP/noready.err")"; fi
 
 # The promote itself failing means NOT launching: a claim on a card the board still calls
@@ -2048,7 +2048,7 @@ if grep -q "not pulling from Ready this poll" "$TMP/noready.err"; then pass "…
 fresh_state; board_list ""; board_ready $'860\tP1\tbuilder\t-\tReady\tMove will fail'
 board_show '{"number":860,"state":"OPEN","labels":[],"status":"Ready"}'
 READY_PULL=1 BOARD_MOVE_FAIL=1 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 860"; then pass "a failed promote does not launch the tick"; else flunk "launched despite a failed move" "$(cat "$TESTLOG")"; fi
+if not_grepped "/watcher:watch 860"; then pass "a failed promote does not launch the tick"; else flunk "launched despite a failed move" "$(cat "$TESTLOG")"; fi
 
 # --- dry-run tells the truth and changes nothing -----------------------------------------
 fresh_state; board_list ""; board_ready $'870\tP1\tbuilder\t-\tReady\tDry run me'
@@ -2068,7 +2068,7 @@ if not_grepped "board.py move 870"; then pass "…and moves nothing"; else flunk
 fresh_state; board_list ""; board_ready ""
 board_backlog $'880\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 880" && not_grepped "board.py move 880" && not_grepped "list Backlog"; then
+if not_grepped "/watcher:watch 880" && not_grepped "board.py move 880" && not_grepped "list Backlog"; then
   pass "READY_PULL unset: a Backlog card is never pulled, Backlog is never even read"
 else
   flunk "pulled from Backlog, or read it, with READY_PULL off" "$(cat "$TESTLOG")"
@@ -2077,7 +2077,7 @@ fi
 fresh_state; board_list ""; board_ready ""
 board_backlog $'880\tP1\tbuilder\t-\t-\tWeekly hygiene sweep — 2026-10-26'
 READY_PULL=1 run --once >/dev/null 2>&1 || true
-if not_grepped "/watch 880" && not_grepped "board.py move 880" && not_grepped "list Backlog"; then
+if not_grepped "/watcher:watch 880" && not_grepped "board.py move 880" && not_grepped "list Backlog"; then
   pass "…and READY_PULL=1 does not change that — Backlog has no exception left"
 else
   flunk "pulled from Backlog, or read it, with READY_PULL=1" "$(cat "$TESTLOG")"
@@ -2153,7 +2153,7 @@ BOARD_SWEEP_FILE=""
 fresh_state; board_list $'950\tP1\tbuilder\t-\t-\tOrdinary card'
 board_show '{"number":950,"state":"CLOSED","status":"Done","labels":[]}'
 BOARD_SWEEP_FAIL=1 run --once >/dev/null 2>"$TMP/sweepfail.err" || true
-if grepped "/watch 950"; then pass "a failed sweep does not stop the poll: the card is still picked"; else flunk "a failed sweep stopped the poll" "$(cat "$TESTLOG")"; fi
+if grepped "/watcher:watch 950"; then pass "a failed sweep does not stop the poll: the card is still picked"; else flunk "a failed sweep stopped the poll" "$(cat "$TESTLOG")"; fi
 if grep -q 'sweep-stages failed; stale Stages stay until the next sweep: board.py: transient API error' "$TMP/sweepfail.err"; then pass "…and says so once, with the board's own error"; else flunk "no log line for the failed sweep" "$(cat "$TMP/sweepfail.err")"; fi
 BOARD_SWEEP_FAIL=1 run --once >/dev/null 2>&1 || true
 if [ "$(sweeps)" = 1 ]; then pass "…and is not retried every poll: it waits for its next turn"; else flunk "a failed sweep was retried inside the interval" "$(cat "$TESTLOG")"; fi
@@ -2192,7 +2192,7 @@ if [ "$RC" = 0 ] && [ "$OUT" = "real-claude token=tok-from-file discord=unset ar
 # at startup, never handed to the shim as "the real binary".
 fresh_state; board_list $'36\tP1\tbuilder\t-\tCard thirty-six'
 WATCHER_CLAUDE_OVERRIDE="no-such-claude-binary" run --once >/dev/null 2>"$TMP/noclaude.err"; RC=$?
-if [ "$RC" = 69 ] && grep -q "claude not found: 'no-such-claude-binary'" "$TMP/noclaude.err" && not_grepped "/watch 36"; then pass "a WATCHER_CLAUDE PATH cannot resolve: exit 69 with the name in the journal, nothing launched"; else flunk "unresolvable WATCHER_CLAUDE" "rc=$RC err=[$(cat "$TMP/noclaude.err")]"; fi
+if [ "$RC" = 69 ] && grep -q "claude not found: 'no-such-claude-binary'" "$TMP/noclaude.err" && not_grepped "/watcher:watch 36"; then pass "a WATCHER_CLAUDE PATH cannot resolve: exit 69 with the name in the journal, nothing launched"; else flunk "unresolvable WATCHER_CLAUDE" "rc=$RC err=[$(cat "$TMP/noclaude.err")]"; fi
 
 
 echo "35. card #98: one poll's several board.py reads collapse into far fewer real GraphQL calls, with the real board.py — a fake 'gh' standing only for the network"
@@ -2379,44 +2379,44 @@ else
 fi
 
 # ============================================================================
-echo "38. card #204: every tick is launched with the guard mod (--plugin-dir …/mods/guard)"
+echo "38. card #209: every tick is launched with the watcher plugin (--plugin-dir WATCHER_HOME) and the namespaced command"
 # The real launch and --dry-run share print_claude_cmd, so the flag read off the dry run is
-# the flag a tick gets. The path is WATCHER_HOME's own mods/guard — a canary lane's
-# WATCHER_HOME is its own checkout, so it loads its own copy.
+# the flag a tick gets. The path is WATCHER_HOME itself — a canary lane's WATCHER_HOME is its
+# own checkout, so it loads its own copy — and the command is /watcher:watch, not /watch.
 fresh_state
 board_list $'12\tP2\tbuilder\t-\tCard twelve (claimable)'
 OUT="$(run --dry-run 2>/dev/null)"
-if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'/mods/guard"'; then
-  pass "the dry-run's claude command carries --plugin-dir <WATCHER_HOME>/mods/guard"
+if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'"' && printf '%s' "$OUT" | grep -q -- '-p "/watcher:watch 12"'; then
+  pass "the dry-run's claude command carries --plugin-dir <WATCHER_HOME> and /watcher:watch 12"
 else
-  flunk "no --plugin-dir …/mods/guard in the launch" "out=[$OUT]"
+  flunk "no --plugin-dir <WATCHER_HOME> and /watcher:watch in the launch" "out=[$OUT]"
 fi
-if [ -f "$(dirname "$HERE")/mods/guard/hooks/hooks.json" ] && [ -f "$(dirname "$HERE")/mods/guard/.claude-plugin/plugin.json" ]; then
-  pass "…and the folder it names is a plugin in this checkout (hooks.json, plugin.json)"
+if [ -f "$(dirname "$HERE")/.claude-plugin/plugin.json" ] && [ -f "$(dirname "$HERE")/mods/guard/hooks/hooks.json" ]; then
+  pass "…and WATCHER_HOME is a plugin in this checkout (plugin.json, with the guard's hooks.json inside)"
 else
-  flunk "mods/guard is not a plugin folder in this checkout"
+  flunk "this checkout has no .claude-plugin/plugin.json or mods/guard/hooks/hooks.json"
 fi
-# 38b. The real launch carries the same flag (it is a separate block from print_claude_cmd,
-# for process-group reasons — so this checks the launch itself, not the printer).
+# 38b. The real launch carries the same flag and command (a separate block from
+# print_claude_cmd, for process-group reasons — so this checks the launch itself).
 fresh_state
 board_list $'22\tP1\tbuilder\t-\tCard twenty-two'
 board_show '{"number":22,"state":"OPEN","status":"In progress","labels":[]}'
 run --once >/dev/null 2>"$TMP/guard.err"
-if grepped "--plugin-dir $(dirname "$HERE")/mods/guard"; then
-  pass "a real launch carries --plugin-dir <WATCHER_HOME>/mods/guard too"
+if grepped "--plugin-dir $(dirname "$HERE")" && grepped "/watcher:watch 22"; then
+  pass "a real launch carries --plugin-dir <WATCHER_HOME> and /watcher:watch too"
 else
-  flunk "the real launch has no --plugin-dir" "$(grep 'claude -p' "$TESTLOG")"
+  flunk "the real launch has no --plugin-dir or namespaced command" "$(grep 'claude -p' "$TESTLOG")"
 fi
 if ! grep -q "guard mod NOT loaded" "$TMP/guard.err"; then pass "…and nothing in the journal about the guard: the build has the runtime"; else flunk "spurious 'NOT loaded' line" "$(cat "$TMP/guard.err")"; fi
-# 38c. A build without the mod runtime (the box's 2.1.263, October 29, 2026): no flag on
-# the launch or the dry run, one journal line naming the version and the fix, the tick
-# still runs.
+# 38c. A build without the mod runtime (the box's 2.1.263, October 29, 2026): the plugin and
+# command are the same, one journal line says the guard is off with the version and the fix,
+# and the tick still runs.
 fresh_state
 board_list $'23\tP1\tbuilder\t-\tCard twenty-three'
 board_show '{"number":23,"state":"OPEN","status":"In progress","labels":[]}'
 CLAUDE_NO_MODS=1 run --once >/dev/null 2>"$TMP/guard2.err"; RC=$?
-if [ "$RC" = 0 ] && grepped "/watch 23" && not_grepped "--plugin-dir"; then
-  pass "no mod runtime: the tick is launched without --plugin-dir, and still launched"
+if [ "$RC" = 0 ] && grepped "/watcher:watch 23" && grepped "--plugin-dir"; then
+  pass "no mod runtime: the tick is still launched, with the plugin"
 else
   flunk "no-runtime launch" "rc=$RC $(grep 'claude -p' "$TESTLOG")"
 fi
@@ -2425,8 +2425,11 @@ if [ "$(grep -c "guard mod NOT loaded" "$TMP/guard2.err")" = 1 ] && grep -q "2.1
 else
   flunk "no-runtime journal line" "$(cat "$TMP/guard2.err")"
 fi
-OUT="$(CLAUDE_NO_MODS=1 run --dry-run 2>/dev/null)"
-if ! printf '%s' "$OUT" | grep -q -- '--plugin-dir'; then pass "…and the dry run prints the same launch: no --plugin-dir either"; else flunk "dry run and launch drift: dry run still shows the flag" "$OUT"; fi
+# 38d. A triage lane gets /watcher:triage.
+fresh_state
+board_list $'24\tP2\tbuilder\t-\tCard twenty-four'
+OUT="$(LANE_COMMAND=/triage run --dry-run 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q -- '-p "/watcher:triage 24"'; then pass "a /triage lane is launched as /watcher:triage"; else flunk "triage lane command" "$OUT"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail
