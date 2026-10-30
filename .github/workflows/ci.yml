@@ -127,6 +127,10 @@ jobs:
           # Card #209: the watcher as one plugin (commands, agents, the guard's hooks). Not --strict:
           # its one warning is this repo's own root CLAUDE.md, which a plugin does not load.
           npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate .
+          # Card #213: the card-context mod, which puts the card and the owner's newest comment in
+          # every tick's system prompt.
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate --strict mods/card-context
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin test mods/card-context
 
       - name: The lane-tail suite
         run: bash bin/test-tail.sh

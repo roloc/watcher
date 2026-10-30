@@ -110,6 +110,14 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   `spawn.sh`'s `guard_plugin_probe` leaves the flag off an older build and says so in the
   journal, so a merge never depends on the box's version — and a bump of the pinned build
   in `.github/workflows/ci.yml` is where a moved API shows up first.
+- `mods/card-context/` — the card-context mod (card #213): the card's title, comments newest
+  first and body as the last section of every tick's system prompt. Its own plugin (one hooks
+  module per plugin), loaded by a second `--plugin-dir` in `bin/spawn.sh` and `bin/eval.sh`.
+  The engine builds the prompt once at startup under `claude -p` (measured on 2.1.312), so it
+  is the card as of tick start, not re-read per turn. A change to it changes what every tick
+  reads: `deploy/autodeploy.sh`'s `EVAL_PATHS` runs the replay suite for it.
+  `claude plugin validate --strict mods/card-context` and `claude plugin test mods/card-context`
+  (CI runs both).
 - `bin/desk.sh`, `deploy/watcher-desk.service`, `deploy/desk/` — the desk (card #205): a
   read-only Remote Control session on the box, in the owner's own Claude sessions list, run
   as its own user `watcher-desk` (its login is the owner's own browser login, never

@@ -96,6 +96,8 @@ CLAUDE_BIN="${WATCHER_CLAUDE:-claude}"
 # the namespaced command, /watcher:watch. Nothing is copied into the case's worktree or a
 # user-level config dir: the plugin is the only copy of the prompts under test.
 PLUGIN_ARGV=(--plugin-dir "$REPO")
+# Card #213: the card-context mod is its own plugin (a plugin names one hooks module).
+[ -f "$REPO/mods/card-context/hooks/hooks.json" ] && PLUGIN_ARGV+=(--plugin-dir "$REPO/mods/card-context")
 if ! "$CLAUDE_BIN" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
   echo "eval.sh: guard mod NOT loaded into the cases: $CLAUDE_BIN has no mod runtime (card #204 needs 2.1.312 or later)" >&2
 fi

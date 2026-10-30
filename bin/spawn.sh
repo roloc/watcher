@@ -310,6 +310,12 @@ plugin_probe() {
     return
   fi
   PLUGIN_ARGV=(--plugin-dir "$WATCHER_HOME"); PLUGIN_ARGS="--plugin-dir \"$WATCHER_HOME\""
+  # Card #213: a plugin names one hooks module, so the card-context mod (the card and the owner's
+  # newest comment in the system prompt) is a second --plugin-dir beside the watcher plugin.
+  if [ -f "$WATCHER_HOME/mods/card-context/hooks/hooks.json" ]; then
+    PLUGIN_ARGV+=(--plugin-dir "$WATCHER_HOME/mods/card-context")
+    PLUGIN_ARGS+=" --plugin-dir \"$WATCHER_HOME/mods/card-context\""
+  fi
   case "$LANE_COMMAND" in /watcher:*) ;; *) LAUNCH_COMMAND="/watcher:${LANE_COMMAND#/}" ;; esac
   if ! "$WATCHER_REAL_CLAUDE" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
     log "guard mod NOT loaded: $WATCHER_REAL_CLAUDE ($("$WATCHER_REAL_CLAUDE" --version 2>/dev/null | head -1)) has no mod runtime — card #204 needs 2.1.312 or later (npm i -g @anthropic-ai/claude-code@latest on the box); ticks run on the prose rules alone"
@@ -923,7 +929,7 @@ print_claude_cmd() {
   local n="$1" dir="$2" ts="$3"
   cat <<EOF
 (cd "$dir" && PATH="$WATCHER_SHIM_DIR:\$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \\
-  WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" \\
+  WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" WATCHER_CARD="$n" \\
   "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \\
   --dangerously-skip-permissions${PLUGIN_ARGS:+ $PLUGIN_ARGS} \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
@@ -1094,7 +1100,7 @@ launch_tick() {
   set -m
   local launch_pwd="$PWD"
   cd "$dir"
-  PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \
+  PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" WATCHER_CARD="$n" \
   "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \
       --dangerously-skip-permissions ${PLUGIN_ARGV[@]+"${PLUGIN_ARGV[@]}"} \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \
