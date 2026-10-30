@@ -721,10 +721,21 @@ def file_stub_run(cmd, **kwargs):
 
 
 board.subprocess.run = file_stub_run
-board.cmd_move = lambda n, status, *r: MOVES.append((n, status)) or 0
+def fake_move(n, status, *r):
+    print(f"#{n} → {status}")  # what the real cmd_move prints on stdout
+    MOVES.append((n, status))
+    return 0
+
+
+board.cmd_move = fake_move
 board.time.sleep = lambda s: None
 args = ("-R", "roloc/x", "--title", "T", "--body-file", "/dev/null")
-rc = board.cmd_file(*args)
+import contextlib, io
+captured = io.StringIO()
+with contextlib.redirect_stdout(captured):
+    rc = board.cmd_file(*args)
+check("stdout is the URL and nothing else: callers take its last line as the card (reviewer, #223)",
+      captured.getvalue() == "https://github.com/roloc/x/issues/321\n", captured.getvalue())
 check("exit 0, and the card is moved to Backlog by default", rc == 0 and MOVES == [("321", "Backlog")], (rc, MOVES))
 check("the issue is added to this board by number and owner",
       any(c == "gh project item-add 200 --owner roloc --url https://github.com/roloc/x/issues/321"

@@ -72,6 +72,7 @@ successful command exits 0. A caller may therefore treat any non-zero exit as "d
 proceed" — in particular `list` exits 1 for a column name the board does not have,
 rather than printing nothing and looking like an empty column.
 """
+import contextlib
 import fcntl
 import json
 import os, re, subprocess, sys, tempfile, time
@@ -982,7 +983,10 @@ def cmd_file(*args):
                 err = (add.stderr or "").strip()[:200]
                 continue
             _cache_invalidate(_items_cache_name())
-            cmd_move(num, opts["--status"])
+            # cmd_move prints its "#n → status" line; callers read the URL as stdout's last
+            # line, so that line goes to stderr (an add that is retried is idempotent).
+            with contextlib.redirect_stdout(sys.stderr):
+                cmd_move(num, opts["--status"])
             return 0
         except SystemExit as e:
             err = str(e.code)[:200]
