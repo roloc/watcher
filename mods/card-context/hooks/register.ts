@@ -6,7 +6,7 @@
 //
 //   prompt.submit    `/watch 213` or `/triage 213` (also `/watcher:watch`): remember the card number.
 //   prompt.compose   every time the engine renders the system prompt (card number: the one
-//                    remembered, else the worktree's branch `card-<n>` — a `claude -p` tick renders
+//                    remembered, else $WATCHER_CARD, else the worktree's branch `card-<n>` — a `claude -p` tick renders
 //                    its prompt before its first prompt is submitted): `gh issue view <n> --json
 //                    title,body,comments` (REST, one call per render, nothing against the GraphQL
 //                    budget of card #114), appended as ONE `session` section, last: the title, the
@@ -65,8 +65,13 @@ export function cardSection(n: string, issue: Issue): string {
 const warn = (why: unknown) =>
   console.error(`${NAME}: could not read card ${card}: ${why instanceof Error ? why.message : String(why)}`)
 
+// The card number, in the order it is known: remembered from a prompt, WATCHER_CARD (bin/spawn.sh
+// exports it to every tick — the one source a triage tick has, which runs in the project root on
+// main, not in a card worktree), then the worktree's branch.
 async function cardNumber($: Engine): Promise<string | undefined> {
   if (card) return card
+  const fromEnv = (await $.env.get('WATCHER_CARD'))?.trim()
+  if (fromEnv && /^\d+$/.test(fromEnv)) return fromEnv
   const r = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: RUN_MS })
   return r.exitCode === 0 ? /^card-(\d+)$/.exec(r.stdout.trim())?.[1] : undefined
 }
@@ -76,7 +81,6 @@ async function read($: Engine, n: string): Promise<Issue> {
   if (r.exitCode !== 0) throw new Error(`gh issue view exited ${r.exitCode}`)
   return JSON.parse(r.stdout) as Issue
 }
-
 
 export const register: Register = (on) => {
   on('prompt.submit', async ($, e, next) => {

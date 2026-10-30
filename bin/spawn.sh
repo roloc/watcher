@@ -929,7 +929,7 @@ print_claude_cmd() {
   local n="$1" dir="$2" ts="$3"
   cat <<EOF
 (cd "$dir" && PATH="$WATCHER_SHIM_DIR:\$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \\
-  WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" \\
+  WATCHER_LEDGER_CALLER="tick:$PROJECT_NAME:$n" WATCHER_CARD="$n" \\
   "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \\
   --dangerously-skip-permissions${PLUGIN_ARGS:+ $PLUGIN_ARGS} \\
   --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \\
@@ -1100,7 +1100,7 @@ launch_tick() {
   set -m
   local launch_pwd="$PWD"
   cd "$dir"
-  PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" \
+  PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" WATCHER_CARD="$n" \
   "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \
       --dangerously-skip-permissions ${PLUGIN_ARGV[@]+"${PLUGIN_ARGV[@]}"} \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \

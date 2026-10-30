@@ -18,7 +18,8 @@ const ISSUE = {
 
 const INPUT = { model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] }
 
-function engine(on: On, run: (cmd: string) => { exitCode: number; stdout: string }, branch = 'card-213') {
+function engine(on: On, run: (cmd: string) => { exitCode: number; stdout: string }, branch = 'card-213', env: Record<string, string> = {}) {
+  mock.env(on, env)
   const ran: string[] = []
   on('process.run', (_, e) => {
     const cmd = e.argv.join(' ')
@@ -79,4 +80,11 @@ test('no prompt and no card branch: nothing is added and gh is not asked', async
   const { sections } = await $.prompt.compose(INPUT)
   expect(ran).toEqual([])
   expect(sections.map((s) => s.id)).toEqual(['core'])
+})
+
+test('a triage tick (project root, branch main) gets its card from WATCHER_CARD', async ($, on) => {
+  const ran = engine(on, () => ({ exitCode: 0, stdout: JSON.stringify(ISSUE) }), 'main', { WATCHER_CARD: '778' })
+  const { sections } = await $.prompt.compose(INPUT)
+  expect(ran).toEqual(['gh issue view 778 --json title,body,comments'])
+  expect(sections.map((s) => s.id)).toEqual(['core', 'card-context:card'])
 })

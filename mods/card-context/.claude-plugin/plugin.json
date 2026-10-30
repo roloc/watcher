@@ -1,7 +1,7 @@
 {
   "name": "card-context",
   "version": "0.1.0",
-  "description": "Puts the tick's card and the owner's newest comment at the end of the system prompt, re-read on every turn.",
+  "description": "Puts the tick's card and the owner's newest comment at the end of the system prompt, as of the render (once per `claude -p` tick).",
   "author": {
     "name": "roloc/watcher"
   }
