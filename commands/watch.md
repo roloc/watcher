@@ -878,8 +878,17 @@ it back to **Backlog**:
 ```
 gh issue comment <n> --body-file "$scratch/declined.md"
 board move <n> Backlog
+board stage <n> -
 board unclaim <n>
 ```
+
+`board stage <n> -` empties the Stage, so the card does not sit in Backlog reading `Claimed`.
+When the reason is an **open card or PR** the card waits on, add a fourth command, the
+label the board shows as a chip: `gh issue edit <n> --add-label "waits on #<m>"` (or
+`"waits on PR #<p>"`). The label's name carries the number and nothing else; create it if
+the repo has none yet (`gh label create "waits on #<m>" --color 6e7781 --force`). The
+board's sweep clears it when the card closes or the PR merges — you never remove it, and
+the spawner never reads it.
 
 **Why Backlog specifically, and why this matters:** the spawner reads a card left
 **In progress** with this lane's label as *no progress*, bumps its attempt count, and

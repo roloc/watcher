@@ -772,5 +772,169 @@ check("one clear line naming BOARD_OWNER, on stderr",
       "BOARD_OWNER is required" in real.stderr, real.stderr)
 check("never queries any board — nothing at all on stdout", real.stdout == "", real.stdout)
 
+print("27. the waits-on chips (card #222): sweep-waiting adds, removes and deletes, and runs "
+      "once per interval")
+REPO = "o/r"
+W = {"issues": {}, "bodies": {}, "deps": {}, "prs": {}, "calls": [], "board": []}
+
+
+def waits_run(cmd, **kwargs):
+    # stands in for `gh`: api (REST reads), label create/delete, issue edit
+    W["calls"].append(cmd[1:])
+    if cmd[1] == "api":
+        path = cmd[2]
+        parts = path.split("/")
+        if path.endswith("/dependencies/blocked_by"):
+            return FakeResult(json.dumps(W["deps"].get(int(parts[4]), [])))
+        if parts[3] == "pulls":
+            st = W["prs"].get(int(parts[4]))
+            return FakeResult(st or "", returncode=0 if st else 1)
+        if "--jq" in cmd and cmd[-1] == ".state":
+            st = W["issues"].get(int(parts[4]))
+            return FakeResult(st or "", returncode=0 if st else 1)
+        return FakeResult(W["bodies"].get(int(parts[4]), ""))
+    return FakeResult("")
+
+
+def waits_cards(*rows):
+    return [{"item": f"I{n}", "number": n, "title": "t", "url": f"https://github.com/{REPO}/issues/{n}",
+             "state": st, "labels": labels, "status": status, "priority": None, "stage": None}
+            for n, st, status, labels in rows]
+
+
+def edits():
+    return [c for c in W["calls"] if c[:2] == ["issue", "edit"]]
+
+
+board.subprocess.run = waits_run
+board.OWNER, board.NUMBER = "roloc", 222
+os.environ["STAGE_SWEEP_SEC"] = "0"
+os.environ["WATCHER_GH"] = "gh"
+board.items = lambda fresh=False: W["board"]
+board._cache_invalidate = lambda name: None
+
+W["issues"] = {36: "open"}
+W["deps"] = {32: [{"number": 36, "state": "open"}]}
+W["board"] = waits_cards((32, "OPEN", "Backlog", []), (36, "OPEN", "Backlog", []))
+board.cmd_sweep_waiting()
+check("a card blocked by an open issue gains `waits on #36`; the repo label is created first",
+      ["issue", "edit", "32", "-R", REPO, "--add-label", "waits on #36"] in edits()
+      and any(c[:2] == ["label", "create"] and c[2] == "waits on #36" for c in W["calls"]),
+      W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "OPEN", "Backlog", []))
+board.cmd_sweep_waiting()
+check("a card already wearing the right chip is left alone (no edit, no label call)",
+      not edits() and not any(c[0] == "label" for c in W["calls"]), W["calls"])
+
+W["calls"].clear()
+W["deps"] = {32: []}
+W["issues"] = {36: "closed"}
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "CLOSED", "Done", []))
+board.cmd_sweep_waiting()
+check("the blocker closes: the next sweep removes the chip",
+      ["issue", "edit", "32", "-R", REPO, "--remove-label", "waits on #36"] in edits(), W["calls"])
+check("…and deletes the repo label, since nobody wears it",
+      ["label", "delete", "waits on #36", "--yes", "-R", REPO] in W["calls"], W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (33, "OPEN", "Backlog", ["waits on #36"]),
+                         (36, "CLOSED", "Done", []))
+W["deps"] = {}
+W["issues"] = {36: "open"}
+W["deps"] = {33: [{"number": 36, "state": "open"}]}
+board.cmd_sweep_waiting()
+check("a chip removed from one card while another still wears it keeps the repo label",
+      ["issue", "edit", "32", "-R", REPO, "--remove-label", "waits on #36"] in edits()
+      and not any(c[:2] == ["label", "delete"] for c in W["calls"]), W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on PR #46"]), (33, "OPEN", "Backlog", ["waits on PR #47"]))
+W["prs"] = {46: "closed", 47: "open"}  # a merged PR reads `closed` through the REST state
+W["deps"] = {}
+board.cmd_sweep_waiting()
+check("a `waits on PR #46` chip is removed once the PR is merged or closed",
+      ["issue", "edit", "32", "-R", REPO, "--remove-label", "waits on PR #46"] in edits(), W["calls"])
+check("…and a chip for a PR that is still open stays",
+      not any(c[:3] == ["issue", "edit", "33"] for c in W["calls"]), W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "In progress", []), (34, "OPEN", "Done", []))
+W["deps"] = {32: [{"number": 36, "state": "open"}], 34: [{"number": 36, "state": "open"}]}
+board.cmd_sweep_waiting()
+check("a card In progress or Done is never given a chip", not edits(), W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", []))
+W["deps"] = {}
+W["bodies"] = {32: "Depends on #36."}
+W["issues"] = {36: "open"}
+board.cmd_sweep_waiting()
+check("nothing recorded: the card's own words earn the chip too (the spawner's second reader)",
+      ["issue", "edit", "32", "-R", REPO, "--add-label", "waits on #36"] in edits(), W["calls"])
+
+W["calls"].clear()
+board.subprocess.run = lambda cmd, **kw: FakeResult("", returncode=1)
+board.cmd_sweep_waiting()
+check("a lookup that fails fails closed: no label touched", not edits(), W["calls"])
+board.subprocess.run = waits_run
+
+# the stamp: nine lanes, one sweep per interval
+os.environ["STAGE_SWEEP_SEC"] = "300"
+board._cache_invalidate = lambda name: None
+board.OWNER, board.NUMBER = "roloc", 2220
+board._cache_dir_override = None
+stamp = board._cache_path(board._waiting_stamp_name())
+try:
+    os.unlink(stamp)
+except OSError:
+    pass
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", []))
+for _ in range(9):
+    board.cmd_sweep_waiting()
+check("nine lanes inside the interval sweep once between them (the stamp)",
+      len([c for c in W["calls"] if c[0] == "api" and c[1].endswith("/dependencies/blocked_by")]) == 1,
+      W["calls"])
+del os.environ["STAGE_SWEEP_SEC"]
+
+print("28. `board.py blockers`: Relationships first, the words only when nothing is recorded, "
+      "and a lookup that fails exits 1 with nothing on stdout")
+os.environ["PROJECT_REPO"] = REPO
+W["bodies"] = {50: "Depends on #36."}
+W["deps"] = {50: [{"number": 41, "state": "open"}, {"number": 42, "state": "closed"}]}
+import io, contextlib  # noqa: E401
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    board.cmd_blockers("50")
+check("a recorded relationship is believed on its own; closed ones are dropped",
+      buf.getvalue() == "relationships\t41\n", buf.getvalue())
+W["deps"] = {50: []}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    board.cmd_blockers("50")
+check("nothing recorded: the body's `Depends on #36` is read, and says it came from the body",
+      buf.getvalue() == "body\t36\n", buf.getvalue())
+W["issues"] = {36: "closed"}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    board.cmd_blockers("50")
+check("…a closed prerequisite blocks nothing: no output", buf.getvalue() == "", buf.getvalue())
+board.subprocess.run = lambda cmd, **kw: FakeResult("", returncode=1)
+try:
+    board.cmd_blockers("50")
+    died = None
+except SystemExit as e:
+    died = e.code
+check("a failed lookup exits non-zero (fail closed)", isinstance(died, str), died)
+board.subprocess.run = waits_run
+check("body_refs: 'after #12' and a negated phrase are not matched; a list is read whole",
+      board.body_refs("Blocked by #14, #15 and #16. After #12 comes more prose here, so it is not blocked by #13.", REPO, 1)
+      == ["14", "15", "16"])
+del os.environ["PROJECT_REPO"]
+del os.environ["WATCHER_GH"]
+board.subprocess.run = stub_run
+
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES ABOVE'}")
 sys.exit(fails)

@@ -472,122 +472,28 @@ lane_takes() {
   [ "$listed" != "$negate" ]
 }
 
-# open_blockers <n> — the numbers of the OPEN issues GitHub says #n is blocked by (the
-# issue's "Relationships" field; /triage records them from a card's own words), space-
-# separated, on stdout. Fails closed: if the lookup itself fails, prints nothing and
-# returns 1, and the caller skips the card for this poll rather than launching a card
-# that may be waiting on another — a transient outage costs one minute, a wrong launch
-# costs a tick. No lookup at all (returns 0, prints nothing) when PROJECT_REPO is unknown.
-open_blockers() {
-  local n="$1" out
+# card_blockers <n> — the OPEN issues #n waits on, as `<source>\t<n> <n>` on stdout (source
+# is `relationships` or `body`), nothing when it waits on none. The reader itself moved to
+# `board.py blockers` (card #222), so the `waits on #<m>` chip the board sweep puts on a card
+# and the skip below can never disagree: the Relationships field (what /triage records from
+# a card's words) is asked first and believed on its own; the card's own words — only the
+# explicit ordering phrases (depends on, blocked by, waits on) naming a card of THIS repo,
+# the net under the cards nothing ever recorded, riffmap #447 — are read ONLY when nothing
+# is recorded, and never written back. Fails closed: if any lookup fails, prints nothing and
+# returns 1, and the caller skips the card for this poll rather than launching a card that
+# may be waiting on another — a transient outage costs one minute, a wrong launch costs a
+# tick. A reference to an issue that does not exist (404) is dropped, not an outage. No
+# lookup at all (returns 0, prints nothing) when PROJECT_REPO is unknown.
+card_blockers() {
   [ -n "${PROJECT_REPO:-}" ] || return 0
-  out="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$n/dependencies/blocked_by" 2>/dev/null)" || return 1
-  python3 -c '
-import json, sys
-try:
-    items = json.loads(sys.argv[1] or "[]")
-except Exception:
-    sys.exit(1)
-print(" ".join(str(i["number"]) for i in items if isinstance(i, dict) and i.get("state") != "closed" and "number" in i))
-' "$out" || return 1
-}
-
-# body_blockers <n> — the OPEN issues #n's own BODY names as prerequisites, space-separated,
-# on stdout. The net under open_blockers, for the cards nothing ever recorded a Relationship
-# for: `/triage` is the only thing that turns a card's words into one, and it only ever sees
-# a card with NO `agent:` label — so a batch spun off together by one design tick, each card
-# carrying "Depends on #<m>" in its body and a label from birth, was launched in whatever
-# order the board returned it. riffmap #447 (September 20, 2026) spent a whole tick
-# rediscovering by hand what its own Depends-on line already said, and #448 was one poll
-# from doing it again.
-#
-# It reads the words and never writes the relationship. A regex is a guess; a guess recorded
-# on the issue outlives the sentence that caused it, and only a human would ever take it
-# off. The card is skipped and gets the same FYI comment a recorded blocker earns, so a
-# wrong guess costs one comment and is undone by editing the card.
-#
-# Only the explicit ordering phrases count — depends on, depend on, blocked by, blocked on,
-# waits on, waiting on — before the reference, with nothing between them but whitespace and
-# the markdown that dresses them up (`**Depends on** [#12](…)` is the shape board.md itself
-# prints), and only references to THIS repo (`#12`, `[#12](https://github.com/<repo>/issues/12)`,
-# or that URL bare). "Part of #12", "refs", "see", "like #12" are context, not order;
-# triage.md draws the same line. A false positive stalls a card nobody is watching, so
-# precision beats recall here: "after #12", "once #12 lands" and "needs #12 first" are NOT
-# matched, even though /triage records them — a model reading the sentence can tell those
-# from prose, a regex over a card body cannot. A phrase negated in the 24 characters before
-# it (not, never, no longer, and the contractions — "this card is not blocked by #12" and
-# "it doesn't depend on #12" mean the same thing) is skipped for the same reason.
-#
-# Fails closed exactly like open_blockers: any failed lookup — the body, or any one
-# reference's state — returns 1 with nothing printed, and the caller skips the card for this
-# poll rather than launch it on what it could not read. More than ten references is a body
-# this was not built to read, and fails closed too rather than answering from the first ten.
-#
-# The ONE thing that does not fail closed is a reference to an issue that does not exist
-# (404): a typo can block nothing, and a permanent 404 handled like a transient outage would
-# skip the card silently on every poll for ever. It is dropped, with a line in the journal.
-body_blockers() {
-  local n="$1" body refs m state errfile out=""
-  [ -n "${PROJECT_REPO:-}" ] || return 0
-  body="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$n" --jq '.body // ""' 2>/dev/null)" || return 1
-  [ -n "$body" ] || return 0
-  refs="$(python3 -c '
-import re, sys
-body, repo, self_n = sys.argv[1], sys.argv[2], sys.argv[3]
-PHRASE = re.compile(r"(?:depends?\s+on|blocked\s+(?:by|on)|wait(?:s|ing)\s+on)[*_\x60\s]*:?[*_\x60\s]*", re.I)
-REF = re.compile(r"\[?#(\d+)\]?(?:\(([^)\s]*)\))?|https?://github\.com/([^/\s]+/[^/\s]+)/issues/(\d+)\b", re.I)
-SEP = re.compile(r"\s*(?:,|;|and|&)\s*", re.I)
-NEG = re.compile(r"\b(?:not|never|no longer)\b|n[\x27’]t\b", re.I)
-found = []
-for m in PHRASE.finditer(body):
-    if NEG.search(body[max(0, m.start() - 24):m.start()]):
-        continue
-    pos = m.end()
-    while True:
-        r = REF.match(body, pos)
-        if not r:
-            break
-        if r.group(4):
-            if r.group(3).lower() != repo.lower():
-                break
-            num = r.group(4)
-        else:
-            num = r.group(1)
-            url = r.group(2)
-            if url and not re.search(r"github\.com/" + re.escape(repo) + r"/issues/" + num + r"\b", url, re.I):
-                break
-        if num != self_n and num not in found:
-            found.append(num)
-        pos = r.end()
-        s = SEP.match(body, pos)
-        if not s:
-            break
-        pos = s.end()
-if len(found) > 10:
-    sys.exit(3)
-print(" ".join(sorted(found, key=int)))
-' "$body" "$PROJECT_REPO" "$n")" || return 1
-  [ -n "$refs" ] || return 0
+  local out errfile rc line
   errfile="$(mktemp)"
-  for m in $refs; do
-    if ! state="$($WATCHER_GH api "repos/$PROJECT_REPO/issues/$m" --jq .state 2>"$errfile")"; then
-      # A 404 is not an outage, and the two must not share an answer. A number that names
-      # no issue in this repo — a typo in a card body — can block nothing, so it is dropped
-      # with a line in the journal; treating it like a failed lookup would skip the card on
-      # every poll forever, with no comment, no park and no attempt ever counted.
-      if grep -q '404\|Not Found' "$errfile" 2>/dev/null; then
-        log "#$n names #$m as a prerequisite, but there is no such issue in $PROJECT_REPO; ignoring it"
-        continue
-      fi
-      rm -f "$errfile"; return 1
-    fi
-    case "$state" in
-      open|OPEN) out="${out:+$out }$m" ;;
-      closed|CLOSED) ;;
-      *) rm -f "$errfile"; return 1 ;;
-    esac
-  done
+  out="$(PROJECT_REPO="$PROJECT_REPO" $WATCHER_BOARD blockers "$1" 2>"$errfile")"; rc=$?
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then log "#$1 blockers: $line"; fi
+  done < "$errfile"
   rm -f "$errfile"
+  [ "$rc" = 0 ] || return 1
   printf '%s' "$out"
 }
 
@@ -766,17 +672,16 @@ pick_card() {
     # own words (body_blockers) are consulted ONLY when nothing is recorded, which keeps
     # the extra API calls off the common path and keeps a human-set relationship — the
     # deliberate one — from ever being second-guessed by a regex.
-    local blockers blockers_src=relationships
-    if ! blockers="$(open_blockers "$r_issue")"; then
+    local blockers blockers_src=relationships found
+    if ! found="$(card_blockers "$r_issue")"; then
       log "#$r_issue skipped: could not read what it is blocked by (gh api failed); trying again next poll"
       continue
     fi
-    if [ -z "$blockers" ]; then
-      if ! blockers="$(body_blockers "$r_issue")"; then
-        log "#$r_issue skipped: could not read the card's own words (gh api failed); trying again next poll"
-        continue
-      fi
-      [ -z "$blockers" ] || blockers_src=body
+    if [ -n "$found" ]; then
+      blockers_src="${found%%$'\t'*}"
+      blockers="${found#*$'\t'}"
+    else
+      blockers=""
     fi
     if [ -n "$blockers" ]; then
       case "$blockers_src" in
@@ -1697,6 +1602,17 @@ sweep_closed_stages() {
   while IFS= read -r line; do
     if [ -n "$line" ]; then log "closed card, stale Stage emptied: $line"; fi
   done <<< "$out"
+  # The `waits on #<m>` chips (card #222) ride the same clock: board.py keeps its own stamp,
+  # so nine lanes still sweep once per interval per board. Best effort, like the sweep above.
+  errfile="$(mktemp)"
+  if out="$($WATCHER_BOARD sweep-waiting 2>"$errfile")"; then
+    while IFS= read -r line; do
+      if [ -n "$line" ]; then log "waits-on chips: $line"; fi
+    done <<< "$out"
+  else
+    log "board.py sweep-waiting failed; chips stay until the next sweep: $(cat "$errfile" 2>/dev/null)"
+  fi
+  rm -f "$errfile"
   return 0
 }
 

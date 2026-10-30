@@ -26,6 +26,7 @@ unset GH_REPO BOARD_OWNER BOARD_NUMBER WATCHER_HOME WATCHER_PROJECT LANE_AGENTS 
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPAWN="$HERE/spawn.sh"
+export BOARD_REAL="$HERE/board.py"
 # Card #115: spawn.sh now cd's into WATCHER_HOME at process start — dirname($HERE), the
 # repo root — so any assertion that greps a stub's logged cwd needs this to compare against.
 REPO_ROOT="$(dirname "$HERE")"
@@ -135,6 +136,11 @@ case "$1" in
   queue)
     cat "${BOARD_QUEUE_FILE:-/dev/null}"
     ;;
+  blockers)
+    # The dependency reader (card #222) is board.py's own: run the real one against the gh
+    # stub below (WATCHER_GH), so the skip path and the body-reader cases test the real code.
+    exec python3 "$BOARD_REAL" "$@"
+    ;;
   show)
     if [ "${BOARD_SHOW_FAIL:-0}" = 1 ]; then
       echo "board.py: transient API error" >&2
@@ -180,6 +186,9 @@ d["status"] = "Stuck - Needs help"
 json.dump(d, open(path, "w"))
 ' "$BOARD_SHOW_FILE" 2>/dev/null || true
     fi
+    ;;
+  sweep-waiting)
+    # Card #222: the `waits on #<m>` chip sweep; the real one is in test-board.py.
     ;;
   sweep-stages)
     if [ "${BOARD_SWEEP_FAIL:-0}" = 1 ]; then echo "board.py: transient API error" >&2; exit 1; fi
@@ -1703,8 +1712,8 @@ OUT="$(GH_BODY_FAIL=1 run --dry-run 2>"$TMP/words5.err")"; RC=$?
 # The outage is the API, not one card: every row's body lookup fails, so the whole poll
 # comes up empty rather than guessing at any of them. One quiet minute, no wrong launch.
 if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'nothing claimable' \
-   && grep -q "#520 skipped: could not read the card's own words" "$TMP/words5.err" \
-   && grep -q "#521 skipped: could not read the card's own words" "$TMP/words5.err"; then
+   && grep -q "#520 skipped: could not read what it is blocked by" "$TMP/words5.err" \
+   && grep -q "#521 skipped: could not read what it is blocked by" "$TMP/words5.err"; then
   pass "a failed body lookup skips the card for this poll (fail closed), never launches it"
 else
   flunk "body lookup failure" "rc=$RC out=[$OUT] err=[$(cat "$TMP/words5.err")]"
@@ -1712,7 +1721,7 @@ fi
 
 fresh_state; words_board "Depends on $L521."
 OUT="$(GH_STATE_FAIL=1 run --dry-run 2>"$TMP/words6.err")"; RC=$?
-if [ "$RC" = 0 ] && grep -q "#520 skipped: could not read the card's own words" "$TMP/words6.err"; then
+if [ "$RC" = 0 ] && grep -q "#520 skipped: could not read what it is blocked by" "$TMP/words6.err"; then
   pass "a failed state lookup on a referenced card fails closed the same way"
 else
   flunk "state lookup failure" "rc=$RC out=[$OUT] err=[$(cat "$TMP/words6.err")]"
@@ -1738,7 +1747,7 @@ fresh_state; words_board "Depends on #601, #602, #603, #604, #605, #606, #607, #
 OUT="$(run --dry-run 2>"$TMP/words11.err")"
 # Unlike an API outage, this refusal is about ONE body: #521, whose own body says nothing,
 # is still claimable. Nothing is answered from the first ten references.
-if printf '%s' "$OUT" | grep -q '^pick: #521 ' && grep -q "#520 skipped: could not read the card's own words" "$TMP/words11.err"; then
+if printf '%s' "$OUT" | grep -q '^pick: #521 ' && grep -q "#520 skipped: could not read what it is blocked by" "$TMP/words11.err"; then
   pass "more than ten references is a body this cannot read: it fails closed, not on the first ten"
 else
   flunk "ref cap" "out=[$OUT] err=[$(cat "$TMP/words11.err")]"
@@ -2136,6 +2145,8 @@ run --once >/dev/null 2>"$TMP/sweep1.err" || true
 if [ "$(sweeps)" = 1 ]; then pass "a poll with nothing to pick still sweeps closed cards' Stages"; else flunk "expected one sweep-stages call" "$(cat "$TESTLOG")"; fi
 if grep -q 'closed card, stale Stage emptied: #35 stage Parked' "$TMP/sweep1.err"; then pass "…and the journal names each card it emptied"; else flunk "no journal line for the emptied card" "$(cat "$TMP/sweep1.err")"; fi
 if not_grepped "board.py notify"; then pass "…with no Discord post (a stale Stage is not an event)"; else flunk "the sweep posted to Discord" "$(cat "$TESTLOG")"; fi
+
+if [ "$(grep -c '^board.py sweep-waiting$' "$TESTLOG" || true)" = 1 ]; then pass "…and the waits-on chips (card #222) are swept on the same clock, once"; else flunk "expected one sweep-waiting call" "$(cat "$TESTLOG")"; fi
 
 run --once >/dev/null 2>&1 || true
 if [ "$(sweeps)" = 1 ]; then pass "the next poll, inside STAGE_SWEEP_SEC, does not read the board again for it"; else flunk "swept twice inside the interval" "$(cat "$TESTLOG")"; fi

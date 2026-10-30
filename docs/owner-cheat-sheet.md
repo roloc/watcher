@@ -116,6 +116,8 @@ look.
   saying what it waits on. The minute the last one closes, it starts.
 - A card that already has an agent label is not read by the triage bot, so its
   dependencies are yours to set on the issue.
+- A `waits on #n` chip means the lane will not start this until #n closes; drag it anyway and
+  the lane skips it and tells you.
 
 ## When a card lands in Stuck
 

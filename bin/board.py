@@ -9,6 +9,8 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py move <issue> "<status>" [--why "<one line>"]
     python3 scripts/board.py stage <issue> "<stage>"     # "-" empties it
     python3 scripts/board.py sweep-stages           # empty the Stage on closed cards
+    python3 scripts/board.py sweep-waiting          # keep the `waits on #n` labels true (card #222)
+    python3 scripts/board.py blockers <issue>       # open cards <issue> waits on: "<relationships|body>\t<n> <n>", or nothing
     python3 scripts/board.py file -R <owner/repo> --title "<t>" --body-file <f> [--status Backlog]
                                                     # create a card AND put it on the board; URL on stdout
     python3 scripts/board.py show <issue>
@@ -1038,6 +1040,30 @@ def _sweep_stamp_name():
     return f"sweep-{OWNER}-{NUMBER}.stamp"
 
 
+def _waiting_stamp_name():
+    return f"sweep-waiting-{OWNER}-{NUMBER}.stamp"
+
+
+def _sweep_gate(stamp_name):
+    """True when this call should do the sweep; False when another lane's call landed
+    inside the interval. Touches the stamp when it runs. Interval 0: always."""
+    interval = _sweep_interval_sec()
+    if interval <= 0:
+        return True
+    stamp = _cache_path(stamp_name)
+    try:
+        if time.time() - os.stat(stamp).st_mtime < interval:
+            return False
+    except OSError:
+        pass
+    try:
+        open(stamp, "a").close()
+        os.utime(stamp, None)
+    except OSError:
+        pass
+    return True
+
+
 def cmd_sweep_stages():
     """Empty the Stage on every CLOSED card that still has one. `clear_stage` only runs
     for the card a tick was holding when it closed; a card that closes with no tick on it
@@ -1056,19 +1082,8 @@ def cmd_sweep_stages():
     has very likely already paid for a read this can just reuse."""
     _require_owner()  # before the stamp touch below: a missing OWNER must never leave a
                        # fresh "sweep-None-N.stamp" that a later call reads as "just ran".
-    interval = _sweep_interval_sec()
-    stamp = _cache_path(_sweep_stamp_name()) if interval > 0 else None
-    if stamp:
-        try:
-            if time.time() - os.stat(stamp).st_mtime < interval:
-                return 0
-        except OSError:
-            pass
-        try:
-            open(stamp, "a").close()
-            os.utime(stamp, None)
-        except OSError:
-            pass
+    if not _sweep_gate(_sweep_stamp_name()):
+        return 0
     stale = [i for i in items() if i["state"] == "CLOSED" and i.get("stage")]
     if not stale:
         return 0
@@ -1083,6 +1098,242 @@ def cmd_sweep_stages():
     # cmd_move/cmd_stage/cmd_unclaim): closes the window where a concurrent reader could
     # re-warm the cache with a snapshot this sweep is about to make stale.
     _cache_invalidate(_items_cache_name())
+    return 0
+
+
+# --- what a card waits on (card #222) ----------------------------------------------------
+# One reader for "which open cards does #n wait on", shared by the spawner's skip
+# (`blockers <n>`) and the board's `waits on #<m>` label (`sweep-waiting`), so the chip the
+# owner sees and the skip the lane does can never disagree. It moved here from
+# bin/spawn.sh's open_blockers/body_blockers, unchanged in what it decides:
+# the Relationships field first, believed on its own; the card's own words only when that
+# is empty; fail closed (BlockersError) on any lookup that told us nothing.
+WAITS_RE = re.compile(r"^waits on (?:(PR) )?#(\d+)$")
+WAITS_COLOR = "6e7781"  # gray
+
+
+class BlockersError(Exception):
+    pass
+
+
+def _gh_bin():
+    """`WATCHER_GH` names the binary the way spawn.sh's does, so offline suites can stand in."""
+    return os.environ.get("WATCHER_GH") or "gh"
+
+
+def _run_gh(*args):
+    try:
+        return subprocess.run([_gh_bin(), *args], capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        sys.exit("board.py: `gh` is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, 1, "", "gh timed out")
+
+
+def _rest(*args):
+    """One `gh api` REST call (never GraphQL: nothing against the budget card #114 blew).
+    Returns (returncode, stdout, stderr)."""
+    r = _run_gh("api", *args)
+    return r.returncode, r.stdout, r.stderr
+
+
+def open_blockers(repo, n):
+    """The numbers of the OPEN issues GitHub says #n is blocked by (its Relationships)."""
+    rc, out, _ = _rest(f"repos/{repo}/issues/{n}/dependencies/blocked_by")
+    if rc:
+        raise BlockersError(f"could not read what #{n} is blocked by")
+    try:
+        found = json.loads(out or "[]")
+    except ValueError:
+        raise BlockersError(f"could not read what #{n} is blocked by")
+    return [str(i["number"]) for i in found
+            if isinstance(i, dict) and i.get("state") != "closed" and "number" in i]
+
+
+_PHRASE = re.compile(r"(?:depends?\s+on|blocked\s+(?:by|on)|wait(?:s|ing)\s+on)[*_`\s]*:?[*_`\s]*", re.I)
+_REF = re.compile(r"\[?#(\d+)\]?(?:\(([^)\s]*)\))?|https?://github\.com/([^/\s]+/[^/\s]+)/issues/(\d+)\b", re.I)
+_SEP = re.compile(r"\s*(?:,|;|and|&)\s*", re.I)
+_NEG = re.compile(r"\b(?:not|never|no longer)\b|n['’]t\b", re.I)
+
+
+def body_refs(body, repo, self_n):
+    """Issue numbers (strings, ascending) a card body names as prerequisites. Only the
+    explicit ordering phrases count — depends on, blocked by/on, waits/waiting on — before
+    the reference, and only references to THIS repo (riffmap #447's shapes). A regex is a
+    guess, so precision beats recall: "after #12" and "needs #12 first" are not matched,
+    and a phrase negated in the 24 characters before it is skipped. More than ten
+    references fails closed."""
+    found = []
+    for m in _PHRASE.finditer(body):
+        if _NEG.search(body[max(0, m.start() - 24):m.start()]):
+            continue
+        pos = m.end()
+        while True:
+            r = _REF.match(body, pos)
+            if not r:
+                break
+            if r.group(4):
+                if r.group(3).lower() != repo.lower():
+                    break
+                num = r.group(4)
+            else:
+                num = r.group(1)
+                url = r.group(2)
+                if url and not re.search(r"github\.com/" + re.escape(repo) + r"/issues/" + num + r"\b", url, re.I):
+                    break
+            if num != str(self_n) and num not in found:
+                found.append(num)
+            pos = r.end()
+            s = _SEP.match(body, pos)
+            if not s:
+                break
+            pos = s.end()
+    if len(found) > 10:
+        raise BlockersError("the body names more than ten cards; not reading it")
+    return sorted(found, key=int)
+
+
+def body_blockers(repo, n):
+    """The OPEN issues #n's own body names as prerequisites. Reads the words, never writes
+    a relationship. A reference to an issue that does not exist (404) is dropped with a
+    line on stderr: a typo can block nothing, and a permanent 404 handled like an outage
+    would skip the card on every poll for ever. Any other failed lookup fails closed."""
+    rc, body, _ = _rest(f"repos/{repo}/issues/{n}", "--jq", '.body // ""')
+    if rc:
+        raise BlockersError(f"could not read #{n}")
+    body = body.rstrip("\n")
+    if not body:
+        return []
+    out = []
+    for m in body_refs(body, repo, n):
+        rc, state, err = _rest(f"repos/{repo}/issues/{m}", "--jq", ".state")
+        if rc:
+            if "404" in err or "Not Found" in err:
+                print(f"board.py: #{n} names #{m} as a prerequisite, but there is no such "
+                      f"issue in {repo}; ignoring it", file=sys.stderr)
+                continue
+            raise BlockersError(f"could not read #{m}")
+        state = state.strip().lower()
+        if state == "open":
+            out.append(m)
+        elif state != "closed":
+            raise BlockersError(f"#{m} has state {state!r}")
+    return out
+
+
+def blockers_of(repo, n):
+    """(source, [open blocker numbers]) — Relationships first, the card's words only when
+    nothing is recorded. Raises BlockersError; the caller skips the card."""
+    got = open_blockers(repo, n)
+    if got:
+        return "relationships", got
+    got = body_blockers(repo, n)
+    return ("body" if got else "relationships"), got
+
+
+def cmd_blockers(issue):
+    """For bin/spawn.sh: prints `<source>\t<n> <n>` when #issue waits on open cards, nothing
+    when it does not; exits 1 with nothing on stdout when a lookup failed (fail closed)."""
+    repo = os.environ.get("PROJECT_REPO") or os.environ.get("GH_REPO")
+    if not repo:
+        return 0  # no repo known: no lookup, as spawn.sh always did
+    try:
+        src, got = blockers_of(repo, issue_num(issue))
+    except BlockersError as e:
+        sys.exit(f"board.py: {e}")
+    if got:
+        print(f"{src}\t{' '.join(got)}")
+    return 0
+
+
+def _repo_of(url):
+    m = re.match(r"https?://github\.com/([^/]+/[^/]+)/(?:issues|pull)/\d+", url or "")
+    return m.group(1) if m else None
+
+
+def _target_open(repo, kind, num):
+    """True/False for an open/closed (or merged) target, None when the lookup told us nothing."""
+    path = f"repos/{repo}/pulls/{num}" if kind == "PR" else f"repos/{repo}/issues/{num}"
+    rc, out, _ = _rest(path, "--jq", ".state")
+    if rc:
+        return None
+    return out.strip().lower() == "open"
+
+
+def cmd_sweep_waiting():
+    """Keep the `waits on #<m>` chips true. For every open card not In progress and not
+    Done: add `waits on #<m>` for each open card it waits on, and remove one that is no
+    longer a blocker. `waits on PR #<p>` (put there by a tick that sent a card back for an
+    open PR) is removed once the PR is merged or closed. A repo label nobody wears any more
+    is deleted, so the list does not grow for ever. A mirror of what the spawner decides on
+    pick, never what it reads. Same clock as `sweep-stages` (STAGE_SWEEP_SEC), a stamp of
+    its own so the two do not eat each other's turn. Quiet unless it changes something."""
+    _require_owner()
+    if not _sweep_gate(_waiting_stamp_name()):
+        return 0
+    wearers = {}  # (repo, label) -> card numbers wearing it once this sweep is done
+    removed_from = set()
+    todo = []  # (card, repo, labels to add, labels to remove)
+    for it in items():
+        repo = _repo_of(it["url"])
+        if it["state"] != "OPEN" or not repo:
+            continue
+        have = [l for l in it["labels"] if WAITS_RE.match(l)]
+        eligible = it.get("status") not in ("In progress", "Done")
+        add, remove = [], []
+        keep = list(have)
+        if eligible:
+            try:
+                _, want = blockers_of(repo, it["number"])
+            except BlockersError as e:
+                print(f"board.py: sweep-waiting: skipped #{it['number']}: {e}", file=sys.stderr)
+                for l in have:
+                    wearers.setdefault((repo, l), set()).add(it["number"])
+                continue
+            wanted = {f"waits on #{m}" for m in want}
+            add = sorted(wanted - set(have), key=lambda l: int(l.rsplit("#", 1)[1]))
+            remove = [l for l in have if not WAITS_RE.match(l).group(1) and l not in wanted]
+            keep = [l for l in have if l not in remove]
+        # a PR chip, or any chip on a card we did not evaluate, goes when its target closes
+        for l in list(keep):
+            kind, num = WAITS_RE.match(l).groups()
+            if (kind == "PR" or not eligible) and _target_open(repo, kind, num) is False:
+                remove.append(l)
+                keep.remove(l)
+        for l in keep + add:
+            wearers.setdefault((repo, l), set()).add(it["number"])
+        if add or remove:
+            todo.append((it, repo, add, remove))
+    changed = False
+    created = set()
+    for it, repo, add, remove in todo[:SWEEP_MAX]:
+        for l in add:
+            if (repo, l) not in created:
+                _run_gh("label", "create", l, "--color", WAITS_COLOR, "--force", "-R", repo,
+                        "--description", "Cannot be started until that card closes")
+                created.add((repo, l))
+        cmd = ["issue", "edit", str(it["number"]), "-R", repo]
+        for l in add:
+            cmd += ["--add-label", l]
+        for l in remove:
+            cmd += ["--remove-label", l]
+        r = _run_gh(*cmd)
+        if r.returncode:
+            print(f"board.py: sweep-waiting: #{it['number']}: {r.stderr.strip()[:200]}", file=sys.stderr)
+            for l in add:
+                wearers.get((repo, l), set()).discard(it["number"])
+            for l in remove:
+                wearers.setdefault((repo, l), set()).add(it["number"])
+            continue
+        changed = True
+        removed_from.update((repo, l) for l in remove)
+        print(f"#{it['number']} labels +{add} -{remove}")
+    for repo, l in sorted(removed_from):
+        if not wearers.get((repo, l)):
+            _run_gh("label", "delete", l, "--yes", "-R", repo)
+            print(f"label {l!r} deleted from {repo}: nobody wears it")
+    if changed:
+        _cache_invalidate(_items_cache_name())
     return 0
 
 
@@ -1221,7 +1472,7 @@ def cmd_images(issue, *rest):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "file", "show", "unclaim", "stage", "sweep-stages", "queue", "notify",
+    if not a or a[0] not in ("list", "move", "file", "show", "unclaim", "stage", "sweep-stages", "sweep-waiting", "blockers", "queue", "notify",
                             "dump", "ask", "images", "plan", "ratelimit", "ledger"):
         sys.exit(__doc__)
     try:
@@ -1230,6 +1481,8 @@ if __name__ == "__main__":
                   "file": lambda: cmd_file(*a[1:]),
                   "stage": lambda: cmd_stage(a[1], a[2]),
                   "sweep-stages": lambda: cmd_sweep_stages(),
+                  "sweep-waiting": lambda: cmd_sweep_waiting(),
+                  "blockers": lambda: cmd_blockers(a[1]),
                   "queue": lambda: cmd_queue(),
                   "show": lambda: cmd_show(a[1]),
                   "notify": lambda: cmd_notify(a[1], a[2], *a[3:4]),

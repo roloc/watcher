@@ -120,6 +120,7 @@ verified. A 422 means it is already recorded. Never remove one somebody else set
 | `blocked` | straight to Stuck |
 | `awaiting-rebuild` | fix merged, waiting on a known downstream rebuild; set by a tick, never by hand |
 | `in-flight` | a tick holds the card right now — the lane's own, never set by hand |
+| `waits on #<n>` / `waits on PR #<n>` | gray chip: the card cannot be started until that card closes (or that PR merges). Put on and taken off by the watcher itself within five minutes (`board.py sweep-waiting`); a mirror of what the spawner decides, never what it reads. Never set by hand |
 
 Priority is the board's **Priority** field (P0–P2), not a label.
 
