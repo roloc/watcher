@@ -40,11 +40,15 @@
 //   Bash  gh issue|pr comment whose body opens with a `Needs @` line and breaks the numbered
 //         rules of docs/talking-to-the-owner.md (hooks/owner-text.ts; card #210). Fails open.
 //
+//   Not a guard: hooks/receipts.ts (card #211) is registered from here — one hooks module per
+//   plugin — and sets the card's Stage and posts the review receipts from the tool's result.
+//
 // Tests: hooks/guard.test.ts — `claude plugin test mods/guard` (offline; the engine's own
 // kit, `fs.stat` answered from memory). `claude plugin validate mods/guard` reads this file
 // the way the engine will and lists every gating hook with its .catch.
 import type { EngineInterface, Register } from 'claude-code'
 import { commentBody, isOwnerAsk, judgeOwnerText } from './owner-text'
+import { forgetSession, register as registerReceipts } from './receipts'
 
 type Engine = EngineInterface
 
@@ -116,6 +120,7 @@ async function fence($: Engine, path: string): Promise<string | undefined> {
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     roots = undefined
+    forgetSession()
     await loadRoots($, e.cwd).catch(() => undefined)
     return next(e)
   })
@@ -153,6 +158,10 @@ export const register: Register = (on) => {
     const why = await fence($, e.notebook_path)
     return why ? { deny: `${NAME}: ${why}` } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${NAME}: its write fence failed, so the edit was refused.` }))
+
+  // --- Receipts: the Stage and the review comments, set from the tool's result (card #211) ---
+  // Registered last so every guard above sits above it and has already answered.
+  registerReceipts(on)
 }
 
 // The reason to refuse a `gh issue|pr comment` whose body is a Needs-@ ask that breaks the
