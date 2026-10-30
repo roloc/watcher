@@ -9,7 +9,8 @@
 #   deploy/bootstrap.sh
 #
 # Installs: git, python3, curl, gh (GitHub's own apt repo — Debian's own archive does not
-# carry it), chromium (the browser bin/browse.py and every tick's reviewer pass need), Node
+# carry it), bubblewrap and socat (the sandbox `claude plugin eval` needs for a case with a
+# shell, card #216), chromium (the browser bin/browse.py and every tick's reviewer pass need), Node
 # 22 (NodeSource's setup script — Debian 12's own archive ships Node 18),
 # `@anthropic-ai/claude-code` (npm -g, the CLI every tick runs as), and the pinned Godot 4
 # plus Xvfb and the engine's shared libraries (for projects like nulltrader whose tests and
@@ -49,6 +50,19 @@ ensure_transport_deps() {
 for pkg in git python3 curl chromium; do
   if have "$pkg"; then
     say "already have $pkg"
+  else
+    apt_update_once
+    apt-get install -y -qq "$pkg"
+    say "installed $pkg"
+  fi
+done
+
+# --- the sandbox `claude plugin eval` needs to run a case that uses a shell (card #216) -----
+# bwrap is bubblewrap's binary; the eval command refuses Bash without both.
+for pair in bwrap:bubblewrap socat:socat; do
+  bin="${pair%%:*}"; pkg="${pair##*:}"
+  if have "$bin"; then
+    say "already have $bin"
   else
     apt_update_once
     apt-get install -y -qq "$pkg"
