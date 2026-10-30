@@ -7,5 +7,5 @@
   "license": "MIT",
   "commands": "./commands",
   "agents": ["./agents/reviewer.md", "./agents/usability.md"],
-  "hooks": ["./mods/guard/hooks/hooks.json", "./mods/card-context/hooks/hooks.json"]
+  "hooks": "./mods/guard/hooks/hooks.json"
 }

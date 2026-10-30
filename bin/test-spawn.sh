@@ -2396,6 +2396,11 @@ if [ -f "$(dirname "$HERE")/.claude-plugin/plugin.json" ] && [ -f "$(dirname "$H
 else
   flunk "this checkout has no .claude-plugin/plugin.json or mods/guard/hooks/hooks.json"
 fi
+if printf '%s' "$OUT" | grep -q -- '--plugin-dir "'"$(dirname "$HERE")"'/mods/card-context"'; then
+  pass "…and the card-context mod (card #213) is a second --plugin-dir"
+else
+  flunk "no --plugin-dir <WATCHER_HOME>/mods/card-context in the launch" "out=[$OUT]"
+fi
 # 38b. The real launch carries the same flag and command (a separate block from
 # print_claude_cmd, for process-group reasons — so this checks the launch itself).
 fresh_state

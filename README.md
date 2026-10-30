@@ -329,8 +329,8 @@ cases. A mod that fails to load on a build that has the runtime is one line on t
 and its fail-closed handler; `claude plugin test mods/guard` runs its tests offline, no
 login needed, and CI runs both on a pinned build through `npx`.
 
-`mods/card-context/` (card [#213](https://github.com/roloc/watcher/issues/213)) is loaded the same way, by
-the same plugin, and adds one section at the end of the tick's system prompt: the card's title, then its
+`mods/card-context/` (card [#213](https://github.com/roloc/watcher/issues/213)) is its own plugin (a plugin names one hooks module), loaded beside the watcher's by a second
+`--plugin-dir` in `bin/spawn.sh` and `bin/eval.sh`, and adds one section at the end of the tick's system prompt: the card's title, then its
 comments newest first, then its body, headed "The card as it stands now; the owner's newest comment is the
 ask." It reads the card with `gh issue view` (REST) and a failed read leaves the prompt as it was, with one
 line on `.stderr`. **Measured on claude 2.1.312 under `claude -p`: the engine builds the system prompt once, at
