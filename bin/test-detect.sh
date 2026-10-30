@@ -45,8 +45,18 @@ esac
 EOF
 cat > "$BIN/board" <<'EOF'
 #!/usr/bin/env bash
-echo "board $*" >> "$CALLS"
-[ "$1" = move ] && [ -f "$TMP/board-move-fails" ] && exit 1
+echo "board $* owner=${BOARD_OWNER:-} number=${BOARD_NUMBER:-}" >> "$CALLS"
+# `board file` (card #200) stands in for create + add + move: it saves the --body-file, prints
+# the card's URL, and exits 3 (made, not on the board) when a case asks for the add or move to fail.
+if [ "$1" = file ]; then
+  args=("$@")
+  for ((i=0; i<${#args[@]}; i++)); do
+    [ "${args[$i]}" = "--body-file" ] && cp "${args[$i+1]}" "$TMP/last-body" 2>/dev/null
+  done
+  echo "https://github.com/roloc/testproj/issues/$(cat "$TMP/next-issue" 2>/dev/null || echo 501)"
+  if [ -f "$TMP/board-move-fails" ] || [ -f "$TMP/item-add-fails" ]; then exit 3; fi
+  exit 0
+fi
 exit 0
 EOF
 # timeout: detect.sh caps the metric command with coreutils' `timeout`, which a stock Mac
@@ -109,7 +119,7 @@ count()      { grep -c -- "$1" "$CALLS"; }
 # into Backlog — Discord repeats a card that landed, it never runs ahead of the board.
 discord_after_move() {
   local move post
-  move="$(grep -n -- "board move $1 Backlog" "$CALLS" | head -1 | cut -d: -f1)"
+  move="$(grep -n -- "board file .*--status Backlog" "$CALLS" | head -1 | cut -d: -f1)"
   post="$(grep -n -- "board notify $1 breach" "$CALLS" | head -1 | cut -d: -f1)"
   [ -n "$move" ] && [ -n "$post" ] && [ "$post" -gt "$move" ]
 }
@@ -133,7 +143,7 @@ check "no config: no state directory created"           [ ! -d "$STATE/testproj/
 fresh; conf 5 3 0.3 0.6; metric 1
 run
 check "warming up: says so"                             out_has "warming up"
-check "warming up: no card even though the value is bad" not_called "issue create"
+check "warming up: no card even though the value is bad" not_called "board file"
 
 # 3. The metric command produces no number
 fresh; conf 5 1 0.3 0.6; metric "banana"
@@ -146,18 +156,18 @@ check "non-numeric metric: exits 0, not an error"        [ "$(rc)" = 0 ]
 fresh; conf 5 1 0.3 0.6; metric 0.4
 run
 check "small breach: logs a line"                       out_has "SMALL BREACH"
-check "small breach: nothing else — no card"            not_called "issue create"
-check "small breach: not even added to the board"        not_called "project item-add"
+check "small breach: nothing else — no card"            not_called "board file"
+check "small breach: not even added to the board"        not_called "board file"
 check "small breach: nothing to Discord"                 not_called "board notify"
 
 # 5. Large breach: files one card, on the board, in Backlog
 fresh; conf 5 1 0.3 0.6 "https://example.test/look"; metric 1; next_issue 701
 run
 check "large breach: logs it"                           out_has "LARGE BREACH"
-check "large breach: files a card"                      called "gh issue create -R roloc/testproj"
+check "large breach: files a card"                      called "board file -R roloc/testproj"
 check "large breach: title names the metric and value"  called "the test metric: 1"
-check "large breach: put on the right board"            called "gh project item-add 9 --owner roloc"
-check "large breach: moved into Backlog"                 called "board move 701 Backlog"
+check "large breach: put on the right board"            called "board file .*owner=roloc number=9"
+check "large breach: moved into Backlog"                 called "board file .*--status Backlog"
 check "large breach: told to Discord, after the card landed" discord_after_move 701
 check "large breach: the Discord line has the reading and the Look url" called "board notify 701 breach the test metric: now 1, averaging .* Look: https://example.test/look"
 check "large breach: the card names the Look url"       grep -q "https://example.test/look" "$TMP/last-body"
@@ -165,7 +175,7 @@ check "large breach: the card names the Look url"       grep -q "https://example
 # 5b. The board move fails after the card is filed: says so, does not lie about Backlog
 fresh; conf 5 1 0.3 0.6; metric 1; next_issue 801; touch "$TMP/board-move-fails"
 run
-check "board move fails: the card still exists"         called "gh issue create -R roloc/testproj"
+check "board move fails: the card still exists"         called "board file -R roloc/testproj"
 check "board move fails: does not claim it landed"      out_lacks "filed .* in Backlog"
 check "board move fails: says to check by hand"         out_has "could not put it on the board"
 check "board move fails: nothing to Discord (the card did not land)" not_called "board notify"
@@ -174,18 +184,18 @@ check "board move fails: nothing to Discord (the card did not land)" not_called 
 fresh; conf 5 1 0.3 0.6 "https://example.test/look"; metric 1; next_issue 701; run
 issue_state OPEN
 run
-check "still open: no second card"                      [ "$(count 'issue create')" = 0 ]
+check "still open: no second card"                      [ "$(count 'board file')" = 0 ]
 check "still open: says so"                              out_has "already filed #701"
 
 # 7. The filed card closed; breaching again: a fresh card
 issue_state CLOSED; next_issue 702
 run
-check "old card closed: a new one is filed"              called "gh issue create -R roloc/testproj"
-check "old card closed: it is the next number"           called "board move 702 Backlog"
+check "old card closed: a new one is filed"              called "board file -R roloc/testproj"
+check "old card closed: it is the next number"           called "board notify 702 breach"
 
 # 8. A `gh issue view` lookup failure fails closed — never risks a duplicate
 rm -f "$TMP/issue-state"; run
-check "lookup failure: no new card is risked"            not_called "issue create"
+check "lookup failure: no new card is risked"            not_called "board file"
 check "lookup failure: says why"                          out_has "could not check #702"
 
 # 9. Back under the bands: quiet, no breach line

@@ -105,11 +105,12 @@ From **your own machine**, never the box, authenticated as **yourself**:
 BOT_LOGIN=<the bot's login from step 2> deploy/add-project.sh <name> <owner/repo>
 ```
 
-It builds the board, then stops once and prints two things GitHub gives no API for —
-granting the bot access to the new board, and turning on the board's Auto-add workflow —
-and asks you to confirm you did both. Do them, answer yes, and it goes on to the labels,
+It builds the board, then stops once and prints the one thing GitHub gives no API for —
+granting the bot access to the new board — and asks you to confirm you did it. (The
+board's Auto-add workflow is optional now: every card the watcher files puts itself on the
+board.) Do it, answer yes, and it goes on to the labels,
 `main`'s branch protection and `projects/<name>.env`. Answering no, or piping it
-non-interactively, stops the script there; re-run the same command once both are done —
+non-interactively, stops the script there; re-run the same command once it is done —
 everything it already built is left alone the second time.
 
 ```

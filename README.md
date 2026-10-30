@@ -484,11 +484,11 @@ flight` / `blocked` / `owner-decision` labels, sets `main`'s branch protection (
 check required, PR required, 0 approvals, admins not enforced), and writes
 `projects/<name>.env`. Two things it cannot do for you — GitHub gives no API for either —
 it prints as an ask-first checklist and waits for a yes: granting the bot account
-(`BOT_LOGIN`) access to the new board, and turning on the board's **Auto-add to project**
-workflow with the filter
-`is:issue is:open` (`gh project copy` does not carry that workflow across at all, and a
-board whose filter is still GitHub's own `label:bug` example silently adds no cards — both
-found by failing, card #39, September 28, 2026).
+(`BOT_LOGIN`) access to the new board. The board's **Auto-add to project** workflow is no
+longer asked for (card #200): every card the watcher files goes through `board file`,
+which creates the issue, puts it on the board and sets its column. Auto-add stays worth
+turning on (filter `is:issue is:open`) only for cards a person files from the GitHub UI;
+`bin/doctor.sh` warns, and never refuses a lane, when it is off.
 
 Then commit and push `projects/<name>.env` (the script writes it but does not push it), and
 paste `templates/project-CLAUDE.md`'s section into the project's own `CLAUDE.md` — it is
@@ -499,12 +499,11 @@ the board's owner and its number — so a session told "file a card" or "take a 
 has the commands and the body shape in front of it instead of working them out from other
 cards. Finally: `deploy/install.sh <name>` (clones the repo,
 runs `bin/doctor.sh` — the same read-only check, confirming the board reads, Status/Stage/
-Priority are there, the labels exist, Auto-add is on, and the project's `CLAUDE.md` names a
+Priority are there, the labels exist, and the project's `CLAUDE.md` names a
 required check that `main` actually requires — and tells you if something above is still
 missing before you start the service), then `systemctl enable --now watcher@<name>`.
 `bin/spawn.sh` runs the same `doctor.sh` itself, once, before a lane's first tick ever
-launches — so a project that drifts out of shape after setup (a label deleted, Auto-add
-turned off) is refused, not silently worked wrong, the next time the service restarts.
+launches — so a project that drifts out of shape after setup (a label deleted) is refused, not silently worked wrong, the next time the service restarts.
 
 Nothing here is riffmap-shaped, but two settings are worth knowing before the first run:
 

@@ -210,19 +210,20 @@ $WATCHER_GH project link "$BOARD_NUMBER" --owner "$BOARD_OWNER" --repo "$REPO" >
 echo "  linked to $REPO"
 
 # --- ask first, part 2: only checkable now that the board exists --------------------------
-# Neither of these has an API: board collaborator access is the same undocumented gap as
-# above, and the GraphQL `workflows` field exposes only a workflow's name and whether it is
-# on — never its filter (bin/doctor.sh's own header, and card #39's "Details": the Auto-add
-# workflow does not survive `gh project copy` at all, so this is never a no-op).
-say "ask first — board access and Auto-add"
+# Board collaborator access has no API (the same undocumented gap as above). The board's
+# Auto-add workflow used to be a second ask here and is not any more (card #200): every card
+# the watcher files goes on the board through `board file`, so nothing the loop does depends
+# on that workflow. It stays worth turning on for cards a person files from the GitHub UI.
+say "ask first — board access"
 cat <<EOF
-  1. Board access: $BOARD_OWNER/#$BOARD_NUMBER → ⋯ menu → Settings → Manage access → add
-     $BOT_LOGIN with Write.
-  2. Auto-add: same board → ⋯ menu → Workflows → Auto-add to project → turn it on, filter
-     "is:issue is:open" (NOT GitHub's own "is:issue,pr is:open label:bug" example — a board
-     copy carries no cards across silently on that default; card #39, September 28, 2026).
+  Board access: $BOARD_OWNER/#$BOARD_NUMBER → ⋯ menu → Settings → Manage access → add
+  $BOT_LOGIN with Write.
+
+  Optional, not asked: the board's Auto-add workflow (⋯ menu → Workflows → Auto-add to
+  project, filter "is:issue is:open", NOT GitHub's "label:bug" example) puts a card you file
+  from the GitHub UI on the board by itself. Cards the watcher files never need it.
 EOF
-confirm "Both of those done?" || { echo "add-project.sh: stopping here — re-run once they are" >&2; exit 1; }
+confirm "Board access done?" || { echo "add-project.sh: stopping here — re-run once they are" >&2; exit 1; }
 
 # --- labels on the repo ---------------------------------------------------------------------
 say "labels"

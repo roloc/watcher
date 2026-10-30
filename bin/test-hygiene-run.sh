@@ -54,8 +54,18 @@ esac
 EOF
 cat > "$BIN/board" <<'EOF'
 #!/usr/bin/env bash
-echo "board $*" >> "$CALLS"
-[ "$1" = move ] && [ -f "$TMP/board-move-fails" ] && exit 1
+echo "board $* owner=${BOARD_OWNER:-} number=${BOARD_NUMBER:-}" >> "$CALLS"
+# `board file` (card #200) stands in for create + add + move: it saves the --body-file, prints
+# the card's URL, and exits 3 (made, not on the board) when a case asks for the add or move to fail.
+if [ "$1" = file ]; then
+  args=("$@")
+  for ((i=0; i<${#args[@]}; i++)); do
+    [ "${args[$i]}" = "--body-file" ] && cp "${args[$i+1]}" "$TMP/last-body" 2>/dev/null
+  done
+  echo "https://github.com/roloc/testproj/issues/$(cat "$TMP/next-issue" 2>/dev/null || echo 701)"
+  if [ -f "$TMP/board-move-fails" ] || [ -f "$TMP/item-add-fails" ]; then exit 3; fi
+  exit 0
+fi
 exit 0
 EOF
 chmod +x "$BIN"/*
@@ -228,10 +238,10 @@ not_called "gh" && pass "…and no gh calls" || flunk "gh called when hygiene.sh
 fresh; hygiene_fixture bin; exitcode 1; report "- stale branch card-9-old"; next_issue 701
 run
 if [ "$(rc)" = 0 ]; then pass "a finding: exits 0 once filed"; else flunk "a finding exit code" "got $(rc)"; fi
-called "gh issue create -R roloc/testproj" && pass "a finding: files a card" || flunk "no issue create" "$(cat "$CALLS")"
+called "board file -R roloc/testproj" && pass "a finding: files a card" || flunk "no issue create" "$(cat "$CALLS")"
 called "Weekly hygiene sweep" && pass "…titled 'Weekly hygiene sweep — <date>'" || flunk "wrong title" "$(cat "$CALLS")"
-called "gh project item-add 9 --owner roloc" && pass "…put on board 9, owner roloc" || flunk "no item-add" "$(cat "$CALLS")"
-called "board move 701 Ready" && pass "…and moved straight to Ready, never Backlog" || flunk "not moved to Ready" "$(cat "$CALLS")"
+called "board file .*owner=roloc number=9" && pass "…put on board 9, owner roloc" || flunk "no item-add" "$(cat "$CALLS")"
+called "board file .*--status Ready" && pass "…and moved straight to Ready, never Backlog" || flunk "not moved to Ready" "$(cat "$CALLS")"
 grep -q "stale branch card-9-old" "$TMP/last-body" && pass "…the card body carries the report" || flunk "report missing from card body" "$(cat "$TMP/last-body" 2>/dev/null)"
 
 # 9. hygiene.sh's own environment never sees BOARD_NUMBER — only this script's later
@@ -251,24 +261,23 @@ grep -q "CARD TEMPLATE" "$TMP/last-body" && pass "hygiene-card.md is prepended t
 fresh; hygiene_fixture bin; exitcode 1; report "fresh finding"; existing 650
 run
 if [ "$(rc)" = 0 ]; then pass "existing open card: exits 0"; else flunk "existing card exit code" "got $(rc)"; fi
-not_called "issue create" && pass "…no new card filed" || flunk "filed a second card" "$(cat "$CALLS")"
+not_called "board file" && pass "…no new card filed" || flunk "filed a second card" "$(cat "$CALLS")"
 called "issue comment 650" && pass "…comments the open card instead" || flunk "no comment on the open card" "$(cat "$CALLS")"
-not_called "project item-add" && pass "…never touches the board (already there)" || flunk "touched the board for an existing card" "$(cat "$CALLS")"
-not_called "board move" && pass "…never moves it" || flunk "moved an existing card" "$(cat "$CALLS")"
+not_called "board file" && pass "…never touches the board (already there)" || flunk "touched the board for an existing card" "$(cat "$CALLS")"
+not_called "board file" && pass "…never moves it" || flunk "moved an existing card" "$(cat "$CALLS")"
 grep -q "fresh finding" "$TMP/last-comment" && pass "…the comment carries this week's list" || flunk "comment missing the report" "$(cat "$TMP/last-comment" 2>/dev/null)"
 
 # 12. The board placement fails after the card is filed: says so, does not pretend it landed
 fresh; hygiene_fixture bin; exitcode 1; report "finding"; next_issue 704; touch "$TMP/board-move-fails"
 run
-called "gh issue create -R roloc/testproj" && pass "board move fails: the card still gets filed" || flunk "card not filed" "$(cat "$CALLS")"
+called "board file -R roloc/testproj" && pass "board move fails: the card still gets filed" || flunk "card not filed" "$(cat "$CALLS")"
 out_has "could not put it on the board" && pass "…and says to check by hand" || flunk "no warning for the failed move" "$(cat "$TMP/out")"
 
 # 12b. Same, when it's the item-add step that fails rather than the move
 fresh; hygiene_fixture bin; exitcode 1; report "finding"; next_issue 705; touch "$TMP/item-add-fails"
 run
-called "gh issue create -R roloc/testproj" && pass "item-add fails: the card still gets filed" || flunk "card not filed" "$(cat "$CALLS")"
+called "board file -R roloc/testproj" && pass "item-add fails: the card still gets filed" || flunk "card not filed" "$(cat "$CALLS")"
 out_has "could not put it on the board" && pass "…and says to check by hand" || flunk "no warning for the failed item-add" "$(cat "$TMP/out")"
-not_called "board move" && pass "…and never calls board move at all" || flunk "moved a card never added to the board" "$(cat "$CALLS")"
 
 # 13. The throwaway checkout never touches PROJECT_ROOT's own working tree
 fresh; hygiene_fixture bin; exitcode 0
@@ -321,13 +330,13 @@ fresh; hygiene_fixture bin; exitcode 0
 agent_copy reviewer "reviewer v0 — a September fork"; agent_copy usability "usability v1"
 next_issue 706
 run
-if [ "$(rc)" = 0 ] && called "gh issue create -R roloc/testproj"; then pass "a drifted reviewer.md copy: a card is filed"; else flunk "drifted copy filed nothing" "rc=$(rc) $(cat "$CALLS")"; fi
+if [ "$(rc)" = 0 ] && called "board file -R roloc/testproj"; then pass "a drifted reviewer.md copy: a card is filed"; else flunk "drifted copy filed nothing" "rc=$(rc) $(cat "$CALLS")"; fi
 grep -q '`.claude/agents/reviewer.md` differs from the watcher'"'"'s `agents/reviewer.md`' "$TMP/last-body" \
   && pass "…the body names the file" || flunk "body does not name reviewer.md" "$(cat "$TMP/last-body" 2>/dev/null)"
 grep -q "at $WATCHER_SHA" "$TMP/last-body" && pass "…and the watcher commit it differs from" || flunk "body does not name the watcher commit" "$(cat "$TMP/last-body" 2>/dev/null)"
 ! grep -q 'usability.md` differs' "$TMP/last-body" && pass "…a matching usability.md copy is not listed" || flunk "listed a copy that matches" "$(cat "$TMP/last-body")"
 ! grep -q "Clean: nothing to do" "$TMP/last-body" && pass "…and the project's own 'clean' line does not head a card with a finding" || flunk "'clean' line left in the body" "$(cat "$TMP/last-body")"
-called "board move 706 Ready" && pass "…filed straight into Ready like any other finding" || flunk "not moved to Ready" "$(cat "$CALLS")"
+called "board file .*--status Ready" && pass "…filed straight into Ready like any other finding" || flunk "not moved to Ready" "$(cat "$CALLS")"
 
 # 17b. The project's own finding and the watcher's land in the one card body
 fresh; hygiene_fixture bin; exitcode 1; report "- stale branch card-9-old"; next_issue 707
@@ -359,7 +368,7 @@ if [ "$(rc)" = 0 ] && out_has "clean"; then pass "HYGIENE=1, no hygiene.sh: the 
 not_called "gh" && pass "…and no gh calls" || flunk "gh called on a clean watcher-only sweep" "$(cat "$CALLS")"
 fresh; agent_copy usability "usability v0 — drifted"; next_issue 708
 run
-if [ "$(rc)" = 0 ] && called "gh issue create -R roloc/testproj"; then pass "HYGIENE=1, no hygiene.sh, a drifted copy: a card is filed"; else flunk "watcher-only sweep filed nothing" "rc=$(rc) $(cat "$TMP/out")"; fi
+if [ "$(rc)" = 0 ] && called "board file -R roloc/testproj"; then pass "HYGIENE=1, no hygiene.sh, a drifted copy: a card is filed"; else flunk "watcher-only sweep filed nothing" "rc=$(rc) $(cat "$TMP/out")"; fi
 grep -q 'usability.md` differs' "$TMP/last-body" && pass "…naming the file" || flunk "body does not name usability.md" "$(cat "$TMP/last-body" 2>/dev/null)"
 grep -q "the watcher's own checks" "$TMP/last-body" && pass "…under the watcher's own header" || flunk "no header on a watcher-only body" "$(cat "$TMP/last-body" 2>/dev/null)"
 

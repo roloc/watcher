@@ -272,7 +272,14 @@ $details
 Posted by \`deploy/autodeploy.sh\` on the agents box. It reads this card's labels on every run.
 </details>
 EOF
-  url="$(as_user "$(q gh issue create -R "$repo" --title "Deploy held: $short is not live, because $why" --body-file "$body")" 2>/dev/null | tail -1)"
+  # `board file` creates the card, puts it on the board and moves it to Stuck (the move is what
+  # posts the Discord alert, after the change lands), retrying the add and move as a pair:
+  # GitHub's board index lags a just-added item by seconds, and on September 28, 2026 all four
+  # held cards were filed and never reached Stuck. It never relies on Auto-add (card #200).
+  # Exit 3 = filed but not on the board in Stuck.
+  local filed_rc out
+  out="$(as_user "$(q env BOARD_OWNER="$owner" BOARD_NUMBER="$board" BOARD_FILE_RETRY_SEC="${DEPLOY_MOVE_RETRY_SEC:-10}" board file -R "$repo" --title "Deploy held: $short is not live, because $why" --body-file "$body" --status 'Stuck - Needs help')" 2>/dev/null)"; filed_rc=$?
+  url="$(printf '%s\n' "$out" | tail -1)"
   rm -f "$body"
   n="${url##*/}"
   if ! [[ "$n" =~ ^[0-9]+$ ]]; then
@@ -280,19 +287,11 @@ EOF
     return 0
   fi
   echo "$n" > "$DSTATE/held/$sha"
-  # Onto the board by hand (auto-add is not relied on), then Stuck — board.py's move is what
-  # posts the Discord alert, after the change lands. The move is retried: GitHub's board
-  # index lags a just-added item by seconds, and on September 28, 2026 all four held cards
-  # were filed and never reached Stuck, so nobody heard about six hours of held deploys.
-  as_user "$(q gh project item-add "$board" --owner "$owner" --url "$url") >/dev/null 2>&1"
-  local try
-  for try in 1 2 3 4; do
-    sleep "${DEPLOY_MOVE_RETRY_SEC:-10}"
-    if as_user "$(q env BOARD_OWNER="$owner" BOARD_NUMBER="$board" board move "$n" 'Stuck - Needs help') >/dev/null 2>&1"; then
-      say "filed $url in Stuck"; return 0
-    fi
-  done
-  say "filed $url but could not move it to Stuck after 4 tries"
+  if [ "$filed_rc" = 0 ]; then
+    say "filed $url in Stuck"
+  else
+    say "filed $url but could not move it to Stuck after 4 tries"
+  fi
 }
 
 # close_held_except <sha>: a deployed commit supersedes every older held card.

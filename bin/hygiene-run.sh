@@ -170,7 +170,12 @@ cardbody="$(mktemp)"
 cardmd=""; [ -n "$SCRIPT" ] && cardmd="$(dirname "$SCRIPT")/hygiene-card.md"
 if [ -n "$cardmd" ] && [ -f "$cardmd" ]; then cat "$cardmd" "$report" > "$cardbody"; else cat "$report" > "$cardbody"; fi
 
-url="$(gh issue create -R "$PROJECT_REPO" --title "Weekly hygiene sweep — $today" --body-file "$cardbody" 2>/dev/null)"
+# Exported before the filing so `board file` (bin/board.py) can reach the board; it creates the
+# issue, adds it and moves it to Ready in one go, never relying on Auto-add (card #200). The
+# sweep itself is done by now, so the board variables never reach it.
+export BOARD_OWNER BOARD_NUMBER
+out="$(board file -R "$PROJECT_REPO" --title "Weekly hygiene sweep — $today" --body-file "$cardbody" --status Ready 2>/dev/null)"; filed_rc=$?
+url="$(printf '%s\n' "$out" | tail -1)"
 iss="${url##*/}"
 rm -f "$report" "$errlog" "$cardbody"
 if ! [[ "$iss" =~ ^[0-9]+$ ]]; then
@@ -178,11 +183,7 @@ if ! [[ "$iss" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-# Exported only now that hygiene.sh is done running, so board/gh use them for the move
-# below without ever handing them to the sweep itself.
-export BOARD_OWNER BOARD_NUMBER
-if gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" --url "$url" >/dev/null 2>&1 \
-   && board move "$iss" Ready >/dev/null 2>&1; then
+if [ "$filed_rc" = 0 ]; then
   say "filed $url straight into Ready"
 else
   say "filed $url but could not put it on the board in Ready (it still exists — check it by hand)"
