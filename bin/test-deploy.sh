@@ -222,6 +222,16 @@ check "a deploy that landed clears the step file"      [ ! -e "$TMP/dstate/step"
 # the floor page reads it, never the lock (which only ever says when THIS run started).
 check "a landed deploy also touches last-run on exit"  [ -f "$TMP/dstate/last-run" ]
 
+# 3a. Card #213: the card-context mod changes what every tick's system prompt carries, so a
+# commit touching only it runs the replay suite. A commit touching only the guard mod
+# (nothing a model reads) still does not.
+fresh; T="$(commit mods/card-context/hooks/register.ts v1)"
+run
+check "card-context only: the replay suite runs on the target" called "eval at $T"
+fresh; T="$(commit mods/guard/hooks/register.ts v1)"
+run
+check "guard mod only: the suite is still skipped"             not_called "eval at"
+
 # 4. Steve's own PAUSE is never touched by a deploy — nothing here writes or removes a
 # PAUSE file for a stable lane any more, hand-made or not.
 fresh; : > "$STATE/riffmap-design/PAUSE"; T="$(commit commands/watch.md v4)"

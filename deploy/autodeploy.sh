@@ -82,7 +82,7 @@ CHECK="${DEPLOY_CHECK:-verify}"
 SELF_PROJECT="${DEPLOY_PROJECT:-watcher}"
 EVALS="${DEPLOY_EVALS:-1}"                     # 0 skips the replay suite entirely
 # What a model reads: a commit range touching none of these skips the suite.
-EVAL_PATHS="${DEPLOY_EVAL_PATHS:-commands agents docs evals bin/eval.sh CLAUDE.md}"
+EVAL_PATHS="${DEPLOY_EVAL_PATHS:-commands agents docs evals bin/eval.sh CLAUDE.md mods/card-context}"
 # Card #140: the replay suite's own ledger — one line per case per run, pass/fail, turns and
 # quota, next to the per-commit logs already under $DSTATE/evals (mkdir -p below makes the
 # directory). Nothing else should need to override this.

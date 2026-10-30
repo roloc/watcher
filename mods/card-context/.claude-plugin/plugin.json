@@ -1,0 +1,8 @@
+{
+  "name": "card-context",
+  "version": "0.1.0",
+  "description": "Puts the tick's card and the owner's newest comment at the end of the system prompt, re-read on every turn.",
+  "author": {
+    "name": "roloc/watcher"
+  }
+}

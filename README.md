@@ -54,6 +54,9 @@ probes and a classifier, and the day that was tried it cost more than the featur
     mods/guard/           the guard mod, loaded into every tick: refuses the hard-rule commands
                           before they run (see "The guard inside every tick"); its tests are
                           `claude plugin test mods/guard`
+    mods/card-context/    the card-context mod (card #213): the card's body and comments, newest first,
+                          as the last section of every tick's system prompt; `claude plugin test
+                          mods/card-context`
     bin/desk.sh           the desk: a read-only Remote Control session on the box, in the owner's own
                           Claude sessions list (deploy/watcher-desk.service runs it; deploy/desk/ is its
                           CLAUDE.md and permission lists; see "The desk")
@@ -325,6 +328,15 @@ cases. A mod that fails to load on a build that has the runtime is one line on t
 `.stderr`, with the same result. `claude plugin validate --strict mods/guard` lists every gating hook
 and its fail-closed handler; `claude plugin test mods/guard` runs its tests offline, no
 login needed, and CI runs both on a pinned build through `npx`.
+
+`mods/card-context/` (card [#213](https://github.com/roloc/watcher/issues/213)) is loaded the same way, by
+the same plugin, and adds one section at the end of the tick's system prompt: the card's title, then its
+comments newest first, then its body, headed "The card as it stands now; the owner's newest comment is the
+ask." It reads the card with `gh issue view` (REST) and a failed read leaves the prompt as it was, with one
+line on `.stderr`. **Measured on claude 2.1.312 under `claude -p`: the engine builds the system prompt once, at
+startup, so the section is the card as it stood when the tick started; a comment added during the tick is
+seen by the next tick, not the next turn.** Because it changes what every tick reads, a commit touching
+`mods/card-context/` runs the replay suite before it deploys (`deploy/autodeploy.sh`, `EVAL_PATHS`).
 
 ## The desk
 
