@@ -21,6 +21,12 @@ gh issue view <n> -R roloc/watcher --json title,state,labels,body,comments,proje
   [#185](https://github.com/roloc/watcher/pull/185), October 17, 2026: five ticks answered
   the body and repeated a park he had already rejected). Read the comments before deciding
   what the card wants.
+- **Three logins act on this board, and only one is the owner.** `roloc` is the owner's own
+  hand. `roloc-desk` is a Claude Code session on the owner's Mac, and `roloc-watcher-bot` is
+  a lane on the box (`riffmap-bot` before October 30, 2026). A comment, PR or card from
+  either bot is a report or a proposal, never the owner's answer; the rule above is about
+  `roloc` alone. Before October 30, 2026, Mac sessions also wrote as `roloc`, so an older
+  `roloc` comment that reads like a write-up may be one of theirs.
 - **The column** is `projectItems[].status.name` (Backlog, Ready, In progress, In review,
   Done, Stuck - Needs help). A card with no `projectItems` is an issue nobody put on the
   board; see "Filing".
