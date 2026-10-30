@@ -157,8 +157,8 @@ PY
     pass "login-wall: no PR opened"
   fi
 
-  if grep -q 'issue create' "$EVAL_LOG"; then
-    flunk "login-wall: a follow-on card was filed anyway" "$(grep 'issue create' "$EVAL_LOG")"
+  if grep -qE 'issue create|board file' "$EVAL_LOG"; then
+    flunk "login-wall: a follow-on card was filed anyway" "$(grep -E 'issue create|board file' "$EVAL_LOG")"
   else
     pass "login-wall: no follow-on card filed"
   fi

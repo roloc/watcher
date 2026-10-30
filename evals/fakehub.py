@@ -605,6 +605,22 @@ def board_show(argv):
     }, indent=2))
 
 
+def board_file(argv):
+    """`board file -R <repo> --title T --body-file F [--status S]` (card #200): create the
+    issue and put it on the board in one step, the same as gh_issue_create plus a status."""
+    pos, flags = parse_flags(argv)
+    d = load()
+    n = d["next_issue"]
+    d["next_issue"] += 1
+    d["issues"][str(n)] = {
+        "number": n, "title": flags.get("title", ""), "body": body_of(flags),
+        "state": "OPEN", "labels": [], "status": flags.get("status", "Backlog"),
+        "stage": "-", "priority": "-", "comments": [],
+    }
+    save(d)
+    print(f"file://{ORIGIN}/issues/{n}")
+
+
 def board_move(argv):
     n = argv[0]
     status = argv[1]
@@ -638,7 +654,7 @@ def board_notify(argv):
 
 
 BOARD_DISPATCH = {
-    "list": board_list, "show": board_show, "move": board_move,
+    "list": board_list, "show": board_show, "move": board_move, "file": board_file,
     "stage": board_stage, "unclaim": board_unclaim, "notify": board_notify,
     "queue": lambda argv: None,
 }
