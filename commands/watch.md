@@ -542,7 +542,9 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
   shell lines, or `verify: none — <reason>`. Run it from the worktree root in one Bash
   call, capturing its output, and paste the block and the output (trimmed to the last 40
   lines) under `## Verify` in the PR body (write the updated body to a file first, then
-  `gh pr edit <pr> --body-file <that file>`). **Non-zero exit: never merge.** That is
+  `gh pr edit <pr> --body-file <that file>`). **Do this whatever the exit code, before
+  anything else: a red block's output belongs under `## Verify` too — it is the evidence the
+  card parks on.** **Non-zero exit: never merge.** That is
   **Stuck** (§4) — describe the failing check in plain words above the fold, same as a red CI
   twice, and put the block and its output under `<details>` same as any other exact error
   — and never edit the block to make it pass; a block that is wrong is a question for
