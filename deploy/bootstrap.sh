@@ -10,8 +10,8 @@
 #
 # Installs: git, python3, curl, gh (GitHub's own apt repo — Debian's own archive does not
 # carry it), bubblewrap and socat (the sandbox `claude plugin eval` needs for a case with a
-# shell, card #216), chromium (the browser bin/browse.py and every tick's reviewer pass need), Node
-# 22 (NodeSource's setup script — Debian 12's own archive ships Node 18),
+# shell, card #216), chromium (the browser bin/browse.py and every tick's reviewer pass need),
+# Node 22 (NodeSource's setup script — Debian 12's own archive ships Node 18),
 # `@anthropic-ai/claude-code` (npm -g, the CLI every tick runs as), and the pinned Godot 4
 # plus Xvfb and the engine's shared libraries (for projects like nulltrader whose tests and
 # screenshots run the engine headless). Card #160.

@@ -61,8 +61,8 @@ git -C "$here" checkout -q -b card-100 origin/main
 # EVAL_* names), so the tick's shell gets its PATH and variables from the sandbox home's
 # profile, which this script runs with. If it is not read, bare `gh` finds no repository
 # (origin is a local path and GH_REPO is unset), so nothing can reach a real one.
-# The repository itself is not visible to the tick's shell, so fakehub.py and the two wrappers
-# live in the workspace and the profile points there.
+# The repository's evals/ folder was not on the tick's PATH in testing, so fakehub.py and the
+# two wrappers live in the workspace and the profile points there.
 src="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 repo="$(cd "$src/.." && pwd)"
 mkdir -p "$fh/stub-bin"
@@ -86,6 +86,11 @@ WRAP
   chmod +x "$fh/stub-bin/$tool"
 done
 stubs="$fh/stub-bin"
+# Never write a profile that is not the sandbox's own: the scaffold runs as the operator.
+if [ "$HOME" != "$(dirname "$here")" ]; then
+  echo "scaffold.sh: HOME=$HOME is not the eval sandbox's home ($(dirname "$here")); not writing profiles" >&2
+  exit 1
+fi
 for rc in .bashrc .bash_profile .profile .zshrc; do
   cat > "$HOME/$rc" <<RC
 export PATH="$stubs:\$PATH"
