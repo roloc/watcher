@@ -12,6 +12,12 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   to `main` (`.github/workflows/ci.yml`, job `verify`), so that rule is now checked rather
   than remembered — but a red CI run you could have seen locally in four seconds is a wasted
   round trip, so still run it here first.
+- `.claude-plugin/` — the watcher as one installable plugin (card #209): `plugin.json` names
+  `commands/`, `agents/` and the guard mod's hooks; `marketplace.json` makes
+  `/plugin install watcher --marketplace roloc/watcher` work. `bin/spawn.sh` and `bin/eval.sh`
+  load it with `--plugin-dir "$WATCHER_HOME"` and run `/watcher:watch` and `/watcher:triage`; its
+  agents are `watcher:reviewer` and `watcher:usability`. `claude plugin validate .` checks it
+  (its one warning, the root `CLAUDE.md`, is this repo's own file and is expected).
 - `commands/watch.md` — the `/watch` contract, one tick of the loop. Generic: it must work
   for any project on the box. Project-specific names (the CI check, contracts, spend
   receipts) come from the project's own `CLAUDE.md`, never hard-coded here.
@@ -163,7 +169,7 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   options, how to answer. A test in `test-spawn.sh` checks the spawner's park comment keeps
   that shape.
 - Keep `watch.md` and `reviewer.md` generic. If a rule only makes sense for one project, it
-  belongs in that project's `CLAUDE.md` or its `.claude/commands/watch.md` override.
+  belongs in that project's `CLAUDE.md`.
 - `spawn.sh` and `--dry-run` share `print_claude_cmd`; never let the real launch and the
   dry-run drift apart.
 - Comment bodies passed to `gh issue comment --body` may be multi-line. The test stub logs

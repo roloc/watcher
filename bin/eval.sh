@@ -91,14 +91,12 @@ fi
 
 CASE_TIMEOUT="${EVAL_CASE_TIMEOUT_SEC:-480}"
 CLAUDE_BIN="${WATCHER_CLAUDE:-claude}"
-# Card #204: a case's tick runs under the same guard mod a real tick does — on a claude
-# build that has the mod runtime (2.1.312+; `claude plugin test --help` prints usage there),
-# the same probe bin/spawn.sh makes. On an older build the flag is left off and one line
-# says so, rather than every case failing at launch for a reason no check would name.
-GUARD_PLUGIN_ARGV=()
-if [ -f "$REPO/mods/guard/hooks/hooks.json" ] && "$CLAUDE_BIN" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
-  GUARD_PLUGIN_ARGV=(--plugin-dir "$REPO/mods/guard")
-elif [ -f "$REPO/mods/guard/hooks/hooks.json" ]; then
+# Card #209: a case's tick loads the watcher the way a real tick does — as one plugin
+# (`--plugin-dir "$REPO"`: commands, agents and the guard mod's hooks, card #204) and runs
+# the namespaced command, /watcher:watch. Nothing is copied into the case's worktree or a
+# user-level config dir: the plugin is the only copy of the prompts under test.
+PLUGIN_ARGV=(--plugin-dir "$REPO")
+if ! "$CLAUDE_BIN" plugin test --help 2>/dev/null | grep -q "Run a mod's tests"; then
   echo "eval.sh: guard mod NOT loaded into the cases: $CLAUDE_BIN has no mod runtime (card #204 needs 2.1.312 or later)" >&2
 fi
 MAX_TURNS="${EVAL_MAX_TURNS:-60}"
@@ -282,18 +280,11 @@ run_case() {
     return
   fi
 
-  mkdir -p "$WORKTREE/.claude/commands" "$WORKTREE/.claude/agents"
-  cp "$REPO"/commands/*.md "$WORKTREE/.claude/commands/"
-  cp "$REPO"/agents/*.md "$WORKTREE/.claude/agents/"
-  # The USER-level commands and agents too. On the box the watcher user's ~/.claude links to
-  # /opt/watcher — the prompts every lane is running now — and a personal /watch can win
-  # over a project one of the same name. A config dir of the case's own, pointing at this
-  # checkout, makes both levels the prompts under test, so precedence cannot matter. The
+  # A config dir of the case's own, so the box's ~/.claude (its commands, agents and
+  # settings) cannot add a copy of the prompts under test or change how they resolve. The
   # login still comes from CLAUDE_CODE_OAUTH_TOKEN, which never lived in that directory.
   local cfg="$TMP/claude-config"
   mkdir -p "$cfg"
-  ln -s "$REPO/commands" "$cfg/commands"
-  ln -s "$REPO/agents" "$cfg/agents"
 
   # A case may set CASE_MAX_TURNS / CASE_MAX_BUDGET_USD / CASE_TIMEOUT_SEC in case_setup to
   # run under its own ceilings. Tighter (riffmap#378: proving a tick parks in Stuck rather
@@ -322,8 +313,8 @@ run_case() {
     WATCHER_HOME="$REPO" \
     GH_REPO="$EVAL_GH_REPO" \
     OWNER_LOGIN="$EVAL_OWNER_LOGIN" \
-    timeout "$secs" "$CLAUDE_BIN" -p "$CASE_COMMAND" \
-      --dangerously-skip-permissions ${GUARD_PLUGIN_ARGV[@]+"${GUARD_PLUGIN_ARGV[@]}"} \
+    timeout "$secs" "$CLAUDE_BIN" -p "/watcher:${CASE_COMMAND#/}" \
+      --dangerously-skip-permissions ${PLUGIN_ARGV[@]+"${PLUGIN_ARGV[@]}"} \
       --max-turns "$turns" --max-budget-usd "$budget" \
       --output-format json \
     > "$out" 2> "$err" )

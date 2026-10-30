@@ -124,6 +124,9 @@ jobs:
         run: |
           npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate --strict mods/guard
           npx --yes @anthropic-ai/claude-code@2.1.312 plugin test mods/guard
+          # Card #209: the watcher as one plugin (commands, agents, the guard's hooks). Not --strict:
+          # its one warning is this repo's own root CLAUDE.md, which a plugin does not load.
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate .
 
       - name: The lane-tail suite
         run: bash bin/test-tail.sh

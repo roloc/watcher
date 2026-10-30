@@ -78,7 +78,9 @@ tick died holding it. Say so and run `board unclaim <n>` rather than skipping it
 You are in the card's worktree already (`git rev-parse --show-toplevel`); never create
 another. Read the card, read the project's `CLAUDE.md`, then do the work yourself — a
 decision card gets a written decision in `docs/`, an implementation card gets code and
-tests. Use the project's own subagents (`.claude/agents/`) when the card's `agent:` label
+tests. (You are loaded from the `watcher` plugin: its two agents are `watcher:reviewer` and
+`watcher:usability`, and everywhere below `reviewer` and `usability` mean those.) Use the project's
+own subagents (`.claude/agents/`) when the card's `agent:` label
 names one; otherwise you are the builder.
 
 **Write the plan before the first edit.** Before you touch a file, write down: what the

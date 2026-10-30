@@ -1,0 +1,11 @@
+{
+  "name": "watcher",
+  "version": "0.1.0",
+  "description": "A headless loop that turns a GitHub Projects board into merged PRs: the /watch and /triage ticks, the reviewer and usability agents, and the guard mod.",
+  "author": { "name": "roloc/watcher" },
+  "repository": "https://github.com/roloc/watcher",
+  "license": "MIT",
+  "commands": "./commands",
+  "agents": ["./agents/reviewer.md", "./agents/usability.md"],
+  "hooks": "./mods/guard/hooks/hooks.json"
+}
