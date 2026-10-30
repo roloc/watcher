@@ -28,6 +28,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify/dump/ask (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord or Slack: posts through a webhook (DISCORD_WEBHOOK_URL and/or SLACK_WEBHOOK_URL) when a card is stuck or something broke; bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
+    bin/board-export.py   every open board one account owns, as status.json + STATUS.md, for a reader
+                          with no board access; .github/workflows/board-status.yml commits it hourly to
+                          the board-status branch of a PRIVATE repository (it refuses a public one);
+                          bin/test-board-export.py checks it offline
     bin/doctor.sh         read-only sanity check that a project is wired up; deploy/install.sh and
                           bin/spawn.sh both run it before a lane's first tick (see "Add a project")
     bin/hygiene.sh        the weekly debt sweep: stale branches, old TODOs, orphan scripts, dead doc

@@ -28,6 +28,14 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   the mockups and screenshots under a Stuck comment's `Look:` section, which `bin/floor.py`
   shows inline instead of making the owner click through to the card, card #91). `python3 bin/test-board.py`
   (CI runs it); run it after touching either of those two readers.
+- `bin/board-export.py` — a read-only export of every open Projects v2 board one account
+  owns, to `status.json` and `STATUS.md`, for a reader with no board access (a cloud
+  Claude). `.github/workflows/board-status.yml` runs it hourly and force-pushes the two
+  files to the `board-status` branch — **in a private repository only**: the workflow's
+  first step refuses a public one, since the boards name private repositories' cards, and
+  this repository is public, so here it never gets past that step. `python3
+  bin/test-board-export.py` is its offline suite (CI runs it); run it after touching the
+  file.
 - `bin/notify.py` — Discord and/or Slack posts, called only from `board.py` (a `move` to
   Stuck, and `notify`). It posts when a card is stuck or something broke, and for nothing
   else. `python3 bin/test-notify.py` is its offline test; run it after touching either file.

@@ -1,0 +1,119 @@
+name: Board status
+
+# Every hour, export every open Projects (v2) board the account `roloc` owns to the
+# `board-status` branch — `board-status/status.json` (every card: board, repo, number,
+# title, column, labels, assignees, last update) and `board-status/STATUS.md` (counts per
+# column, then the Ready and In progress cards) — so a cloud Claude that can read this
+# repository can read the boards without a token of its own. `bin/board-export.py` does
+# the reading; this file only decides when, guards where, and commits.
+#
+# WHERE IT MAY RUN. The first step refuses a public repository: the boards list private
+# repositories' issue titles, and a branch in a public repository is a public page. The
+# check asks the API (the schedule event's payload does not carry the repository's
+# visibility), fails the job, and nothing is written. So this workflow does nothing in a
+# repository that is public — it has to live in a private one.
+#
+# THE BRANCH. `board-status` is rebuilt from scratch each time (an orphan commit, one
+# commit deep, force-pushed), never merged, and never anything but those two files. `main`
+# is never touched: the job's token can only reach this repository, the push names the one
+# branch, and nothing here checks `main` out for writing. When the export is byte-identical
+# to what the branch already holds, the job stops without a commit. The files carry no
+# timestamp of their own (that is what makes "unchanged" detectable); the branch's last
+# commit date is how fresh the export is.
+#
+# THE TOKEN. `BOARD_READ_TOKEN` is a repository secret — a read-only token for the boards
+# and the repositories whose cards are on them — reaching the job only as an environment
+# variable of the export step, never echoed. The job's own GITHUB_TOKEN has
+# `contents: write` and nothing else, which is what a push to a branch needs.
+#
+# How to make the token (a fine-grained personal access token; a classic token with
+# `read:project` only reads the boards, and needs `repo` — read AND write, every
+# repository — to see the cards' titles, which is why it is the fallback, not the choice):
+#   github.com → Settings → Developer settings → Personal access tokens → Fine-grained
+#   tokens → Generate new token
+#     Resource owner:      roloc (the personal account, never an org)
+#     Repository access:   Only select repositories: riffmap, watcher, riffmap-site,
+#                          NullTrader (and any other repository whose cards are on a board;
+#                          a card from a repository not listed exports as "unreadable")
+#     Repository permissions: Issues: Read-only; Pull requests: Read-only
+#                          (Metadata: Read-only is added by itself)
+#     Account permissions: Projects: Read-only
+#   Then, in the repository that runs this workflow:
+#   Settings → Secrets and variables → Actions → New repository secret →
+#     Name BOARD_READ_TOKEN, Secret: the token.
+#
+# COST. One GraphQL query for the list of boards and one per page of 100 cards, each a
+# point or two of the TOKEN OWNER's 5,000/hour GraphQL budget (not the bot's): a few
+# dozen points an hour across every board. The run's last line says how many it spent.
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # hourly, off the top of the hour (GitHub's busiest minute)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: board-status
+  cancel-in-progress: false
+
+jobs:
+  export:
+    # The same runner choice as ci.yml: Steve's lab's ci box when the repository variable
+    # names it, GitHub-hosted otherwise. The secret is present on this runner for the
+    # length of the export step; pull-request code never reaches this workflow (it has no
+    # pull_request trigger, and a scheduled run reads this file from the default branch).
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Refuse to run in a public repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          private="$(gh api "repos/$GITHUB_REPOSITORY" --jq .private 2>/dev/null || echo unknown)"
+          if [ "$private" != "true" ]; then
+            echo "::error::$GITHUB_REPOSITORY is not private (private=$private) — the board export would be a public page. Nothing written."
+            exit 1
+          fi
+          echo "$GITHUB_REPOSITORY is private; continuing."
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Export the boards
+        env:
+          BOARD_READ_TOKEN: ${{ secrets.BOARD_READ_TOKEN }}
+        run: |
+          if [ -z "$BOARD_READ_TOKEN" ]; then
+            echo "::error::the BOARD_READ_TOKEN secret is not set (the header of this file says how to make it)"
+            exit 1
+          fi
+          python3 bin/board-export.py --owner roloc --out "$RUNNER_TEMP/export/board-status"
+
+      - name: Commit to the board-status branch when it changed
+        run: |
+          set -eu
+          new="$RUNNER_TEMP/export/board-status"
+          if git fetch --quiet --depth=1 origin board-status 2>/dev/null; then
+            old="$(mktemp -d)"
+            git archive origin/board-status board-status | tar -x -C "$old"
+            if diff -r "$old/board-status" "$new" >/dev/null; then
+              echo "Unchanged since the last export; no commit."
+              exit 0
+            fi
+            echo "Changed:"; diff -r "$old/board-status" "$new" | head -40 || true
+          else
+            echo "No board-status branch yet; creating it."
+          fi
+          git config user.name "board-status"
+          git config user.email "board-status@users.noreply.github.com"
+          git checkout --quiet --orphan board-status
+          git rm -rfq .
+          mkdir -p board-status
+          cp "$new"/status.json "$new"/STATUS.md board-status/
+          git add board-status
+          git commit --quiet -m "Board status as of $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push --force --quiet origin board-status
+          echo "Pushed board-status."
