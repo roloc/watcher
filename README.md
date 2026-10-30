@@ -57,6 +57,9 @@ probes and a classifier, and the day that was tried it cost more than the featur
     mods/card-context/    the card-context mod (card #213): the card's body and comments, newest first,
                           as the last section of every tick's system prompt; `claude plugin test
                           mods/card-context`
+    mods/owner-pane/      the owner pane (card #214): Stuck cards and lane pills beside the chat in the
+                          owner's desktop sessions, plus /stuck, /card, /file-card; `claude plugin test
+                          mods/owner-pane`
     bin/desk.sh           the desk: a read-only Remote Control session on the box, in the owner's own
                           Claude sessions list (deploy/watcher-desk.service runs it; deploy/desk/ is its
                           CLAUDE.md and permission lists; see "The desk")
@@ -551,3 +554,12 @@ and `LANE_AGENTS`, give `<name>.env` the complementary `!` list, and enable
 ## License
 
 MIT. See `LICENSE.md`.
+
+## The owner pane in a desktop session
+
+`mods/owner-pane/` (card [#214](https://github.com/roloc/watcher/issues/214)) is for the owner's own Claude sessions on the Mac, not the box. Load it with
+`claude --plugin-dir <checkout>/mods/owner-pane` (or `CLAUDE_CODE_PLUGIN_DIRS`). Settings (`/config`): the floor page URL, the
+checkout path (for `bin/board.py` and `projects/<name>.env`) and the default repository. The pane lists every Stuck card's question,
+each lane's pill and the deploy line, refreshed every minute from `/api/state.json`. `/stuck` lists the questions; `/stuck <n> <reply>`
+posts the reply and moves the card to In progress; `/card <n>` reads a card; `/file-card <sentence>` drafts a card and files it
+in Backlog only after `/file-card yes`. It never touches a lane, a tick or `/opt/watcher`, and nothing deploys.

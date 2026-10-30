@@ -131,6 +131,10 @@ jobs:
           # every tick's system prompt.
           npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate --strict mods/card-context
           npx --yes @anthropic-ai/claude-code@2.1.312 plugin test mods/card-context
+          # Card #214: the owner pane for the owner's own desktop sessions (loaded on the Mac, never
+          # on the box).
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin validate --strict mods/owner-pane
+          npx --yes @anthropic-ai/claude-code@2.1.312 plugin test mods/owner-pane
 
       - name: The lane-tail suite
         run: bash bin/test-tail.sh
