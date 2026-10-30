@@ -123,6 +123,12 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   its output (a failure as text). Its own plugin, a third `--plugin-dir` in `bin/spawn.sh` and
   `bin/eval.sh`. `claude plugin validate --strict mods/browse` and `claude plugin test mods/browse`
   (CI runs both).
+- `mods/owner-pane/` — the owner pane (card #214): a pane and `/stuck`, `/card`, `/file-card` for
+  the owner's own desktop Claude sessions, read from the floor page's `/api/state.json` and the
+  Mac's own `gh` login. Loaded on the Mac (`--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`), never by
+  a tick and never on the box; it writes to the board only on a command the owner typed.
+  `claude plugin validate --strict mods/owner-pane` and `claude plugin test mods/owner-pane`
+  (CI runs both); run them after touching anything under it.
 - `bin/desk.sh`, `deploy/watcher-desk.service`, `deploy/desk/` — the desk (card #205): a
   read-only Remote Control session on the box, in the owner's own Claude sessions list, run
   as its own user `watcher-desk` (its login is the owner's own browser login, never
