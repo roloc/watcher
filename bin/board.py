@@ -78,7 +78,7 @@ import contextlib
 import fcntl
 import json
 import os, re, subprocess, sys, tempfile, time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notify  # noqa: E402  (bin/notify.py, beside this file)
@@ -1330,7 +1330,12 @@ def cmd_sweep_waiting():
         print(f"#{it['number']} labels +{add} -{remove}")
     for repo, l in sorted(removed_from):
         if not wearers.get((repo, l)):
-            _run_gh("label", "delete", l, "--yes", "-R", repo)
+            # `gh label delete` 404s on a `#` (it leaves it unencoded in the path), so REST
+            rc, _, err = _rest("-X", "DELETE", f"repos/{repo}/labels/{quote(l, safe='')}")
+            if rc:
+                print(f"board.py: sweep-waiting: could not delete label {l!r} from {repo}: {err.strip()[:200]}",
+                      file=sys.stderr)
+                continue
             print(f"label {l!r} deleted from {repo}: nobody wears it")
     if changed:
         _cache_invalidate(_items_cache_name())

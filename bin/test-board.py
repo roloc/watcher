@@ -782,7 +782,11 @@ def waits_run(cmd, **kwargs):
     # stands in for `gh`: api (REST reads), label create/delete, issue edit
     W["calls"].append(cmd[1:])
     if cmd[1] == "api":
-        path = cmd[2]
+        path = cmd[-1] if cmd[2] == "-X" else cmd[2]
+        if cmd[2] == "-X":
+            r = FakeResult("", returncode=W.get("delete_rc", 0))
+            r.stderr = "HTTP 500" if r.returncode else ""
+            return r
         parts = path.split("/")
         if path.endswith("/dependencies/blocked_by"):
             return FakeResult(json.dumps(W["deps"].get(int(parts[4]), [])))
@@ -836,7 +840,7 @@ board.cmd_sweep_waiting()
 check("the blocker closes: the next sweep removes the chip",
       ["issue", "edit", "32", "-R", REPO, "--remove-label", "waits on #36"] in edits(), W["calls"])
 check("…and deletes the repo label, since nobody wears it",
-      ["label", "delete", "waits on #36", "--yes", "-R", REPO] in W["calls"], W["calls"])
+      ["api", "-X", "DELETE", f"repos/{REPO}/labels/waits%20on%20%2336"] in W["calls"], W["calls"])
 
 W["calls"].clear()
 W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (33, "OPEN", "Backlog", ["waits on #36"]),
@@ -850,7 +854,18 @@ W["issues"] = {36: "closed"}
 W["calls"].clear()
 board.cmd_sweep_waiting()
 check("two cards wearing the label, blocker closed: both chips go, then the repo label",
-      len(edits()) == 2 and ["label", "delete", "waits on #36", "--yes", "-R", REPO] in W["calls"], W["calls"])
+      len(edits()) == 2 and ["api", "-X", "DELETE", f"repos/{REPO}/labels/waits%20on%20%2336"] in W["calls"], W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "CLOSED", "Done", []))
+W["delete_rc"] = 1
+_o, _e = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(_o), contextlib.redirect_stderr(_e):
+    board.cmd_sweep_waiting()
+W["delete_rc"] = 0
+check("a delete that fails prints the label and the error, and never says deleted",
+      "waits on #36" in _e.getvalue() and "HTTP 500" in _e.getvalue() and "deleted" not in _o.getvalue(),
+      (_o.getvalue(), _e.getvalue()))
 
 W["calls"].clear()
 W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on PR #46"]), (33, "OPEN", "Backlog", ["waits on PR #47"]))
