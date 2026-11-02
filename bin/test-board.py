@@ -827,10 +827,61 @@ check("a card blocked by an open issue gains `waits on #36`; the repo label is c
       W["calls"])
 
 W["calls"].clear()
-W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "OPEN", "Backlog", []))
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "OPEN", "Backlog", ["holds up 1 card"]))
 board.cmd_sweep_waiting()
 check("a card already wearing the right chip is left alone (no edit, no label call)",
       not edits() and not any(c[0] == "label" for c in W["calls"]), W["calls"])
+
+# card #244: the blocker's side, `holds up N cards`
+W["calls"].clear()
+W["issues"] = {1: "open", 2: "open", 3: "open", 4: "open"}
+W["deps"] = {2: [{"number": 1, "state": "open"}], 3: [{"number": 2, "state": "open"}],
+             4: [{"number": 3, "state": "open"}]}
+W["bodies"] = {}
+W["board"] = waits_cards((1, "OPEN", "Stuck - Needs help", []), (2, "OPEN", "Ready", ["waits on #1"]),
+                         (3, "OPEN", "Ready", ["waits on #2"]), (4, "OPEN", "Ready", ["waits on #3"]))
+board.cmd_sweep_waiting()
+check("a chain of four: the root holds up 3 cards, the middle 2, the leaf nothing",
+      ["issue", "edit", "1", "-R", REPO, "--add-label", "holds up 3 cards"] in edits()
+      and ["issue", "edit", "2", "-R", REPO, "--add-label", "holds up 2 cards"] in edits()
+      and ["issue", "edit", "3", "-R", REPO, "--add-label", "holds up 1 card"] in edits()
+      and not any(c[:3] == ["issue", "edit", "4"] for c in W["calls"]), W["calls"])
+check("…the repo label is created amber, first",
+      any(c[:3] == ["label", "create", "holds up 3 cards"] and "e4a11b" in c for c in W["calls"]), W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((1, "OPEN", "Stuck - Needs help", ["holds up 3 cards"]), (2, "OPEN", "Ready", ["waits on #1", "holds up 2 cards"]),
+                         (3, "OPEN", "Ready", ["waits on #2", "holds up 1 card"]), (4, "OPEN", "Ready", ["waits on #3"]))
+board.cmd_sweep_waiting()
+check("labels already true: nothing is touched", not edits(), W["calls"])
+
+W["calls"].clear()
+W["deps"][4] = []
+W["bodies"] = {}
+W["board"][3]["labels"] = []
+board.cmd_sweep_waiting()
+check("a count that changes swaps the label, and the label nobody wears is deleted",
+      ["issue", "edit", "1", "-R", REPO, "--add-label", "holds up 2 cards", "--remove-label", "holds up 3 cards"] in edits()
+      and ["issue", "edit", "3", "-R", REPO, "--remove-label", "holds up 1 card"] in edits()
+      and ["issue", "edit", "2", "-R", REPO, "--add-label", "holds up 1 card", "--remove-label", "holds up 2 cards"] in edits()
+      and ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%203%20cards"] in W["calls"]
+      and ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%201%20card"] not in W["calls"], W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((1, "OPEN", "Stuck - Needs help", ["holds up 2 cards"]), (2, "OPEN", "Ready", ["holds up 1 card"]),
+                         (5, "CLOSED", "Done", ["holds up 1 card"]))
+W["deps"] = {}
+board.cmd_sweep_waiting()
+check("nothing waits on a card any more: the label goes, also from a closed card, and the repo label is deleted",
+      len(edits()) == 3 and ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%202%20cards"] in W["calls"]
+      and ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%201%20card"] in W["calls"], W["calls"])
+
+W["calls"].clear()
+W["board"] = waits_cards((1, "OPEN", "Stuck - Needs help", ["holds up 2 cards"]), (2, "OPEN", "Ready", []))
+board.subprocess.run = lambda cmd, **kw: FakeResult("", returncode=1)
+board.cmd_sweep_waiting()
+board.subprocess.run = waits_run
+check("a lookup that fails leaves every `holds up` label as it was", not edits(), W["calls"])
 
 W["calls"].clear()
 W["deps"] = {32: []}

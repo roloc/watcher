@@ -243,7 +243,7 @@ BOARDS = {
                    # card is #7, alpha-design's is #5) — exactly card #96's "why nothing
                    # shows today": a lane that moved on must not make this card invisible.
                    {"number": 778, "state": "OPEN", "status": "Stuck - Needs help", "stage": "Parked",
-                    "labels": [], "url": "https://github.com/roloc/alpha/issues/778"},
+                    "labels": ["holds up 8 cards"], "url": "https://github.com/roloc/alpha/issues/778"},
                    # #5 shipped: alpha-design's last tick took it to Done, and the board has
                    # its title — the wins board shows it by name.
                    {"number": 5, "state": "CLOSED", "status": "Done", "stage": "Done", "title": "Mockup for the earlier thing",
@@ -504,6 +504,8 @@ try:
         chips = "[...document.querySelectorAll('#projects .direction-chip')].map(c => c.textContent)"
         check("the strip names both directions it offers, A marked recommended",
               b.eval(chips) == ["A ★", "B"], b.eval(chips))
+        check("the strip's link reads `#778 · holds up 8` (card #244); a Stuck card nothing waits on reads plain",
+              b.eval("document.querySelector('#projects .needs-ask')?.textContent.startsWith('#778 · holds up 8:')") is True)
         check("the old inline sliver is gone; a Review button stands in its place",
               b.eval("document.querySelector('#projects .car-img')") is None
               and b.eval("document.querySelector('#projects [data-review=\"778\"]')") is not None)
@@ -1069,7 +1071,7 @@ try:
         print("12a. the in-tray on the owner's desk (card #96): #778 is there, named for alpha, "
               "even though no lane is in their office for it")
         check("#778's chip is in the in-tray, after its board's name",
-              b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778"
+              b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778 · holds up 8"
               and b.eval("document.querySelector('.tray-board')?.textContent") == "alpha")
         check("...and the tray's own Review button opens the same overlay (card #100), "
               "not an inline sliver",

@@ -108,6 +108,7 @@ card. The labels that mean something:
 | `deploy-anyway` | on a "Deploy held" card: ship that version anyway |
 | `in-flight` | a tick holds the card right now — the lane's own, never set by hand |
 | `waits on #<n>` / `waits on PR #<n>` | gray chip: the card cannot be started until that card closes (or that PR merges). Put on and taken off by the watcher itself within five minutes (`board.py sweep-waiting`); a mirror of what the spawner decides, never what it reads. Never set by hand |
+| `holds up <N> cards` | amber chip: N open cards wait on this one, counting the whole chain behind it, not only the cards one step away (`holds up 1 card` for one). Put on, swapped when N changes and taken off by the same sweep, within five minutes; the floor page's in-tray and Stuck strip show it as `#<n> · holds up N`. Never read by the spawner, never set by hand |
 
 Priority is the board's **Priority** field (P0–P2), not a label.
 

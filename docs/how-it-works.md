@@ -491,6 +491,14 @@ open card wears it. A tick that sends a card back to Backlog for an open PR adds
 closes. REST calls only, one or two per open card per sweep. The label is advice: the spawner never
 reads it, and dragging a labeled card to Ready still costs no tick.
 
+The other half (card #244): the same sweep keeps an amber `holds up N cards` label on every
+open card that other open cards wait on. It keeps the waits map it already builds, walks it
+backward from each card, and N is the size of the whole chain behind it. The label is swapped
+when N changes and removed when nothing waits on the card any more (or the card closed); a
+sweep with any failed lookup leaves every `holds up` label alone. `bin/floor.py` reads N off the
+label for a Stuck card (`holds_up`) and prints `· holds up N` after its number in the in-tray
+and the Stuck strip. The spawner reads neither label.
+
 Across every card riffmap has ever filed, that reader finds 38 dependency statements and
 no false positive.
 
