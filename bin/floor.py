@@ -76,7 +76,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -4180,15 +4180,20 @@ def fetch_repo_picture(url, repos, timeout=20):
     if not m or m.group(1).lower() not in {r.lower() for r in repos}:
         return None
     repo, ref, path = m.group(1), m.group(2), unquote(m.group(3))
+    # The extension was matched on the encoded text: an encoded `?` or `#` would smuggle the
+    # rest of the path into a query, and any file in the repo with it. Judge the decoded path.
+    if (not path.lower().endswith(tuple("." + e for e in _PIC_TYPES)) or ".." in path.split("/")
+            or any(c in path for c in "?#\\") or any(ord(c) < 32 for c in path)):
+        return None
     try:
         r = subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github.raw",
-                            f"repos/{repo}/contents/{path}?ref={ref}"],
+                            f"repos/{repo}/contents/{quote(path)}?ref={quote(ref)}"],
                            capture_output=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if r.returncode != 0 or not r.stdout:
         return None
-    return r.stdout, _PIC_TYPES[m.group(4).lower()]
+    return r.stdout, _PIC_TYPES[path.rsplit(".", 1)[1].lower()]
 
 
 def make_handler(cache, tail_lookup=None, ship_lookup=None, card_lookup=None, pic_lookup=None):

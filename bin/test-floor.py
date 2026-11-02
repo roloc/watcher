@@ -1901,11 +1901,14 @@ floor.subprocess.run = lambda cmd, **kw: (_calls.append(cmd), _R())[1]
 try:
     got = floor.fetch_repo_picture("https://github.com/roloc/NullTrader/blob/main/docs/a%20b/x.png", ["roloc/NullTrader"])
     check("a project repo's blob picture is read through gh and typed image/png",
-          got == (b"\x89PNGdata", "image/png") and _calls[0][-1] == "repos/roloc/NullTrader/contents/docs/a b/x.png?ref=main", _calls)
+          got == (b"\x89PNGdata", "image/png") and _calls[0][-1] == "repos/roloc/NullTrader/contents/docs/a%20b/x.png?ref=main", _calls)
     check("a repo that is not one of the box's projects is never read",
           floor.fetch_repo_picture("https://github.com/evil/repo/blob/main/x.png", ["roloc/NullTrader"]) is None and len(_calls) == 1)
     check("a blob link to something that is not a picture is never read",
           floor.fetch_repo_picture("https://github.com/roloc/NullTrader/blob/main/.env", ["roloc/NullTrader"]) is None and len(_calls) == 1)
+    for bad in ("blob/main/.env%3Fx=.png", "blob/main/.env%23.png", "blob/main/a/..%2F..%2Fx.png", "blob/main/a%00.png"):
+        check(f"an encoded {bad.split('/')[-1]} cannot turn a picture link into any other file",
+              floor.fetch_repo_picture("https://github.com/roloc/NullTrader/" + bad, ["roloc/NullTrader"]) is None and len(_calls) == 1)
 finally:
     floor.subprocess.run = _orig_run
 
