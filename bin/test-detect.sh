@@ -227,7 +227,8 @@ check "200: healthy"                                     [ "$(probe)" = 0 ]
 
 probe_curl 401
 check "401 (anonymous, app is up): healthy, not just 2xx/3xx" [ "$(probe)" = 0 ]
-check "still probes RiffMap by its own hostname"          called "riffmap.lonestarprod.com"
+check "still probes RiffMap by its own hostname"          called "app.riffmap.ai"
+check "not the retired hostname (a 308 since the cutover)" not_called "riffmap.lonestarprod.com"
 check "pinned to lonestar-web's LAN address"              called "192.168.176.37"
 
 probe_curl 500
