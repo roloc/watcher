@@ -118,6 +118,11 @@ look.
   dependencies are yours to set on the issue.
 - A `waits on #n` chip means the lane will not start this until #n closes; drag it anyway and
   the lane skips it and tells you.
+- An amber `holds up N cards` chip is the other side: N cards are waiting on this one, through
+  every hop. When it sits in Stuck, it is the question to answer first — the floor page's
+  in-tray says the same (`#81 · holds up 8`).
+- Chips are labels. If your board view does not show them, open the view's **Fields** menu
+  and turn on **Labels**, once per view.
 
 ## When a card lands in Stuck
 

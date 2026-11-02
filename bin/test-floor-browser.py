@@ -242,8 +242,9 @@ BOARDS = {
                    # #778 is Stuck but no lane's own last tick points at it (alpha's last
                    # card is #7, alpha-design's is #5) — exactly card #96's "why nothing
                    # shows today": a lane that moved on must not make this card invisible.
+                   # ...and eight cards hang on it (card #244): the sweep's amber chip is on it.
                    {"number": 778, "state": "OPEN", "status": "Stuck - Needs help", "stage": "Parked",
-                    "labels": [], "url": "https://github.com/roloc/alpha/issues/778"},
+                    "labels": ["holds up 8 cards"], "url": "https://github.com/roloc/alpha/issues/778"},
                    # #5 shipped: alpha-design's last tick took it to Done, and the board has
                    # its title — the wins board shows it by name.
                    {"number": 5, "state": "CLOSED", "status": "Done", "stage": "Done", "title": "Mockup for the earlier thing",
@@ -501,6 +502,10 @@ try:
               "**" not in b.text(), b.text()[:800])
         check("the ask is actually bold, not just stripped",
               b.eval("document.querySelector('#projects .needs-ask strong')") is not None)
+        check("card #244: the strip says eight cards hang on #778, before the ask",
+              b.eval("document.querySelector('#projects .needs-ask .holds-up')?.textContent") == " · holds up 8"
+              and b.eval("document.querySelector('#projects .needs-ask').textContent").startswith("#778 · holds up 8: "),
+              b.eval("document.querySelector('#projects .needs-ask')?.textContent"))
         chips = "[...document.querySelectorAll('#projects .direction-chip')].map(c => c.textContent)"
         check("the strip names both directions it offers, A marked recommended",
               b.eval(chips) == ["A ★", "B"], b.eval(chips))
@@ -1068,8 +1073,8 @@ try:
 
         print("12a. the in-tray on the owner's desk (card #96): #778 is there, named for alpha, "
               "even though no lane is in their office for it")
-        check("#778's chip is in the in-tray, after its board's name",
-              b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778"
+        check("#778's chip is in the in-tray, after its board's name, with the count of cards hanging on it (card #244)",
+              b.eval("document.querySelector('.row-stuck-chip')?.textContent") == "#778 · holds up 8"
               and b.eval("document.querySelector('.tray-board')?.textContent") == "alpha")
         check("...and the tray's own Review button opens the same overlay (card #100), "
               "not an inline sliver",

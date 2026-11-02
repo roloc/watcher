@@ -491,6 +491,18 @@ open card wears it. A tick that sends a card back to Backlog for an open PR adds
 closes. REST calls only, one or two per open card per sweep. The label is advice: the spawner never
 reads it, and dragging a labeled card to Ready still costs no tick.
 
+**The other half (card #244).** The same sweep inverts what it just read: every open card on
+the board that another open card waits on — through any number of hops — wears an amber
+`holds up N cards`, N being the whole chain behind it, whatever column it sits in (the root of
+a chain is usually In progress or Stuck, not waiting on anything itself). Swapped when the
+count changes, removed when nothing waits on it any more, taken off a closed card, and the
+orphaned repo label deleted the same way. No extra REST call: the counts come from the
+lookups the gray chips already paid for. The floor page reads the chip back off the card and
+prints the count after the number in its in-tray and on the Stuck strip (`#81 · holds up 8`).
+November 1, 2026, the NullTrader board: eight Ready cards each wore their gray chip, the
+design card at the root of the chain sat in Stuck with one question, and nothing on it said
+it was the gate; the owner read the column as stuck on a card that had closed the day before.
+
 Across every card riffmap has ever filed, that reader finds 38 dependency statements and
 no false positive.
 
