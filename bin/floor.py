@@ -137,6 +137,8 @@ ALLOWED_FIELDS = {
     # the Needs-the-owner strip (card #96): every Stuck card on the board, whichever lane
     # last touched it, with every round it has been asked, newest first
     "stuck", "rounds", "label", "letter", "recommended",
+    # card #244: how many cards wait on a Stuck card, through every hop — its amber chip
+    "holds_up",
     # the account's GraphQL budget (card #98), read from board.py's own cache — never a
     # call of its own
     "github_remaining", "github_reset", "github_limit",
@@ -276,6 +278,19 @@ def lane_takes(agent, spec):
     names = {n.strip() for n in spec.split(",") if n.strip()}
     listed = agent in names
     return listed != negate
+
+
+HOLDS_UP_RE = re.compile(r"^holds up (\d+) cards?$")
+
+
+def holds_up_of(labels):
+    """Card #244: the count on the card's amber `holds up N cards` chip (`board.py
+    sweep-waiting` keeps it true), 0 when it wears none."""
+    for l in labels or []:
+        m = HOLDS_UP_RE.match(l)
+        if m:
+            return int(m.group(1))
+    return 0
 
 
 def agent_of(labels):
@@ -767,7 +782,7 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             pics = images(last_tick.issue, lane["project_repo"]) if images else []
             return {**base, "pill": "needs_steve", "link": url,
                     "card": {"number": last_tick.issue, "url": url}, "ask": text or "",
-                    "images": pics or []}
+                    "images": pics or [], "holds_up": holds_up_of(it.get("labels"))}
 
     if last_tick is not None and last_tick.died:
         age = _minutes_since(last_tick.mtime, now)
@@ -1396,7 +1411,7 @@ def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, as
             ask_text = ask_fn(num, p["project_repo"]) if ask_fn else ""
             rounds = rounds_fn(num, p["project_repo"]) if rounds_fn else []
             stuck_out.append({"card": {"number": num, "url": url}, "ask": ask_text or "",
-                               "rounds": rounds})
+                               "rounds": rounds, "holds_up": holds_up_of(it.get("labels"))})
         stuck_out.sort(key=lambda s: s["card"]["number"])
         needs_steve_total += len(stuck_out)
 
@@ -1695,6 +1710,8 @@ INDEX_HTML = """<!doctype html>
     display: block; font-size: 13px; font-weight: 600; color: inherit; text-decoration: none;
     margin-bottom: 6px;
   }
+  /* card #244: the count of cards hanging on this one, the board's amber chip, inline */
+  .holds-up { color: var(--warn, #bf8700); font-weight: 700; white-space: nowrap; }
   .direction-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
   .direction-chip {
     font-size: 11px; font-weight: 700; color: var(--dim);
@@ -2442,13 +2459,20 @@ function directionChipsHTML(slides) {
     .join("")}</div>`;
 }
 
+// Card #244: " · holds up N" after a Stuck card's number when N cards wait on it (through
+// every hop) — the one question that gates a chain reads like one, on the strip and in the
+// in-tray alike. Empty when nothing waits on it.
+function holdsUpText(s) {
+  return s && s.holds_up > 0 ? ` · holds up ${s.holds_up}` : "";
+}
+
 function stuckStripHTML(stuck) {
   if (!stuck || !stuck.length) return "";
   return `<div class="needs-strip">${stuck.map(s => {
     const slides = stuckSlides(s);
     return `
     <div class="needs-card">
-      <a class="needs-ask" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}: ${s.ask ? renderAsk(s.ask) : "needs a decision"}</a>
+      <a class="needs-ask" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}<span class="holds-up">${holdsUpText(s)}</span>: ${s.ask ? renderAsk(s.ask) : "needs a decision"}</a>
       ${slides.length ? `${directionChipsHTML(slides)}
         <button class="review-btn" type="button" data-review="${s.card.number}" aria-label="Review the pictures for #${s.card.number}">Review</button>` : ""}
     </div>`;
@@ -3678,7 +3702,7 @@ function renderRoomStuck(projects, boss) {
   for (const p of projects || []) if ((p.stuck || []).length) groups.push(p);
   if (!groups.length || !boss.tray) { document.getElementById("room-stuck").innerHTML = ""; return; }
   const chips = groups.map(p => `<span class="tray-board">${esc(p.name)}</span>` + p.stuck.map(s =>
-    `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}</a>${reviewButtonHTML(s.card.number, null, "tray")}`
+    `<a class="row-stuck-chip" href="${esc(s.card.url)}" target="_blank" rel="noopener">#${s.card.number}${holdsUpText(s)}</a>${reviewButtonHTML(s.card.number, null, "tray")}`
   ).join("")).join("");
   document.getElementById("room-stuck").innerHTML = `<div class="row-stuck in-tray"
       style="left:${boss.x + boss.tray.x}px;top:${boss.y + boss.tray.y}px;width:${boss.tray.w}px">

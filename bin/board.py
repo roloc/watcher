@@ -9,7 +9,7 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py move <issue> "<status>" [--why "<one line>"]
     python3 scripts/board.py stage <issue> "<stage>"     # "-" empties it
     python3 scripts/board.py sweep-stages           # empty the Stage on closed cards
-    python3 scripts/board.py sweep-waiting          # keep the `waits on #n` labels true (card #222)
+    python3 scripts/board.py sweep-waiting          # keep the `waits on #n` (card #222) and `holds up N cards` (card #244) labels true
     python3 scripts/board.py blockers <issue>       # open cards <issue> waits on: "<relationships|body>\t<n> <n>", or nothing
     python3 scripts/board.py file -R <owner/repo> --title "<t>" --body-file <f> [--status Backlog]
                                                     # create a card AND put it on the board; URL on stdout
@@ -1110,6 +1110,34 @@ def cmd_sweep_stages():
 # is empty; fail closed (BlockersError) on any lookup that told us nothing.
 WAITS_RE = re.compile(r"^waits on (?:(PR) )?#(\d+)$")
 WAITS_COLOR = "6e7781"  # gray
+# The other half (card #244): the card the chain hangs on wears the count of what waits on
+# it, through every hop — the one question in Stuck that gates eight cards reads like one.
+HOLDS_RE = re.compile(r"^holds up (\d+) cards?$")
+HOLDS_COLOR = "bf8700"  # amber: answer this one first
+
+
+def holds_up_label(count):
+    return f"holds up {count} card{'' if count == 1 else 's'}"
+
+
+def holds_up_counts(waits):
+    """{card: how many cards wait on it, through any number of hops}. `waits` maps a card
+    to the set of cards it waits on; m's count is the number of cards m is reachable from.
+    A cycle (bad data) is walked once and counted once, never looped on."""
+    rev = {}
+    for n, ms in waits.items():
+        for m in ms:
+            rev.setdefault(m, set()).add(n)
+    counts = {}
+    for m in rev:
+        seen, todo = set(), [m]
+        while todo:
+            for n in rev.get(todo.pop(), ()):
+                if n != m and n not in seen:
+                    seen.add(n)
+                    todo.append(n)
+        counts[m] = len(seen)
+    return counts
 
 
 class BlockersError(Exception):
@@ -1261,37 +1289,54 @@ def _target_open(repo, kind, num):
 
 
 def cmd_sweep_waiting():
-    """Keep the `waits on #<m>` chips true. For every open card not In progress and not
-    Done: add `waits on #<m>` for each open card it waits on. A chip is removed when its
-    card is closed `waits on PR #<p>` (put there by a tick that sent a card back for an
-    open PR) is removed once the PR is merged or closed. A repo label nobody wears any more
-    is deleted, so the list does not grow for ever. A mirror of what the spawner decides on
-    pick, never what it reads. Same clock as `sweep-stages` (STAGE_SWEEP_SEC), a stamp of
-    its own so the two do not eat each other's turn. Quiet unless it changes something."""
+    """Keep the `waits on #<m>` chips true, and the `holds up N cards` ones (card #244).
+    For every open card not In progress and not Done: add `waits on #<m>` for each open
+    card it waits on. A chip is removed when its card is closed; `waits on PR #<p>` (put
+    there by a tick that sent a card back for an open PR) is removed once the PR is merged
+    or closed. Then, from the same lookups, every open card on the board that another card
+    waits on — through any number of hops — wears `holds up N cards`, swapped when the
+    count changes and removed when nothing waits on it any more; a closed card loses it.
+    A repo label nobody wears any more is deleted, so the list does not grow for ever. A
+    mirror of what the spawner decides on pick, never what it reads. Same clock as
+    `sweep-stages` (STAGE_SWEEP_SEC), a stamp of its own so the two do not eat each other's
+    turn. Quiet unless it changes something."""
     _require_owner()
     if not _sweep_gate(_waiting_stamp_name()):
         return 0
     wearers = {}  # (repo, label) -> card numbers wearing it once this sweep is done
     removed_from = set()
     todo = []  # (card, repo, labels to add, labels to remove)
+    cards = []  # open cards, with their gray-chip decisions, for the holds-up pass below
+    waits = {}  # (repo, n) -> {(repo, m)}: what each open card waits on, as decided here
     for it in items():
         repo = _repo_of(it["url"])
-        if it["state"] != "OPEN" or not repo:
+        if not repo:
+            continue
+        have_holds = [l for l in it["labels"] if HOLDS_RE.match(l)]
+        if it["state"] != "OPEN":
+            # a closed card holds up nothing: its amber chip goes, whatever else it wears
+            if have_holds:
+                todo.append((it, repo, [], have_holds))
             continue
         have = [l for l in it["labels"] if WAITS_RE.match(l)]
         eligible = it.get("status") not in ("In progress", "Done")
         add, remove = [], []
         keep = list(have)
+        key = (repo, str(it["number"]))
         if eligible:
             try:
                 _, want = blockers_of(repo, it["number"])
             except BlockersError as e:
                 print(f"board.py: sweep-waiting: skipped #{it['number']}: {e}", file=sys.stderr)
-                for l in have:
+                for l in have + have_holds:
                     wearers.setdefault((repo, l), set()).add(it["number"])
+                # the lookup told us nothing, so the chips it already wears stand in: the
+                # count on its blockers must not flap on one failed read
+                waits[key] = {(repo, m) for kind, m in (WAITS_RE.match(l).groups() for l in have) if kind is None}
                 continue
             wanted = {f"waits on #{m}" for m in want}
             add = sorted(wanted - set(have), key=lambda l: int(l.rsplit("#", 1)[1]))
+            waits[key] = {(repo, m) for m in want}
         # A chip goes when its target (the card, or the PR) is closed or merged — and only
         # then: a tick's `waits on #<m>` for a blocker nobody recorded (a gate in the card's
         # prose) must outlast the next sweep, so "no longer a blocker" is not enough.
@@ -1302,6 +1347,16 @@ def cmd_sweep_waiting():
                 keep.remove(l)
         for l in keep + add:
             wearers.setdefault((repo, l), set()).add(it["number"])
+        cards.append((it, repo, add, remove, have_holds))
+    counts = holds_up_counts(waits)
+    for it, repo, add, remove, have_holds in cards:
+        count = counts.get((repo, str(it["number"])), 0)
+        want_hold = holds_up_label(count) if count else None
+        remove += [l for l in have_holds if l != want_hold]
+        if want_hold:
+            if want_hold not in have_holds:
+                add.append(want_hold)
+            wearers.setdefault((repo, want_hold), set()).add(it["number"])
         if add or remove:
             todo.append((it, repo, add, remove))
     changed = False
@@ -1309,8 +1364,11 @@ def cmd_sweep_waiting():
     for it, repo, add, remove in todo[:SWEEP_MAX]:
         for l in add:
             if (repo, l) not in created:
-                _run_gh("label", "create", l, "--color", WAITS_COLOR, "--force", "-R", repo,
-                        "--description", "Cannot be started until that card closes")
+                if HOLDS_RE.match(l):
+                    color, about = HOLDS_COLOR, "Other cards wait on this one; the count is the whole chain behind it"
+                else:
+                    color, about = WAITS_COLOR, "Cannot be started until that card closes"
+                _run_gh("label", "create", l, "--color", color, "--force", "-R", repo, "--description", about)
                 created.add((repo, l))
         cmd = ["issue", "edit", str(it["number"]), "-R", repo]
         for l in add:
@@ -1340,7 +1398,6 @@ def cmd_sweep_waiting():
     if changed:
         _cache_invalidate(_items_cache_name())
     return 0
-
 
 def cmd_stage(issue, stage):
     """What the tick is doing right now: Claimed | Designing | Building | Testing |

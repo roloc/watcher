@@ -827,7 +827,7 @@ check("a card blocked by an open issue gains `waits on #36`; the repo label is c
       W["calls"])
 
 W["calls"].clear()
-W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "OPEN", "Backlog", []))
+W["board"] = waits_cards((32, "OPEN", "Backlog", ["waits on #36"]), (36, "OPEN", "Backlog", ["holds up 1 card"]))
 board.cmd_sweep_waiting()
 check("a card already wearing the right chip is left alone (no edit, no label call)",
       not edits() and not any(c[0] == "label" for c in W["calls"]), W["calls"])
@@ -915,6 +915,97 @@ for _ in range(9):
 check("nine lanes inside the interval sweep once between them (the stamp)",
       len([c for c in W["calls"] if c[0] == "api" and c[1].endswith("/dependencies/blocked_by")]) == 1,
       W["calls"])
+del os.environ["STAGE_SWEEP_SEC"]
+
+print("27b. the holds-up chip (card #244): the card a chain hangs on wears `holds up N cards`, N "
+      "being the whole chain behind it, kept true by the same sweep; a closed card loses it. "
+      "November 1, 2026: NullTrader #81 gated eight Ready cards and nothing on it said so")
+os.environ["STAGE_SWEEP_SEC"] = "0"
+board.OWNER, board.NUMBER = "roloc", 244
+W["calls"].clear()
+W["bodies"] = {}
+W["prs"] = {}
+# the NullTrader shape, small: 58 waits on 57, 57 on 56, 56 on 51, 51 on 81 (In progress, Stuck in life)
+W["issues"] = {81: "open", 51: "open", 56: "open", 57: "open", 58: "open"}
+W["deps"] = {51: [{"number": 81, "state": "open"}], 56: [{"number": 51, "state": "open"}],
+             57: [{"number": 56, "state": "open"}], 58: [{"number": 57, "state": "open"}]}
+W["board"] = waits_cards((81, "OPEN", "In progress", []), (51, "OPEN", "Ready", ["waits on #81"]),
+                         (56, "OPEN", "Ready", ["waits on #51"]), (57, "OPEN", "Ready", ["waits on #56"]),
+                         (58, "OPEN", "Ready", ["waits on #57"]))
+board.cmd_sweep_waiting()
+check("the root of the chain, though In progress, wears the whole chain's count: `holds up 4 cards`",
+      ["issue", "edit", "81", "-R", REPO, "--add-label", "holds up 4 cards"] in edits(), edits())
+check("...the next card down counts what is behind it, not one hop: `holds up 3 cards`",
+      ["issue", "edit", "51", "-R", REPO, "--add-label", "holds up 3 cards"] in edits(), edits())
+check("...one card behind it is the singular `holds up 1 card`",
+      ["issue", "edit", "57", "-R", REPO, "--add-label", "holds up 1 card"] in edits(), edits())
+check("...and the leaf, which nothing waits on, gets no amber chip",
+      not any(c[2] == "58" for c in edits()), edits())
+check("the amber repo label is created with its own color, once per label",
+      [c for c in W["calls"] if c[:2] == ["label", "create"] and c[2] == "holds up 4 cards"
+       and c[4] == board.HOLDS_COLOR] != [] and
+      len([c for c in W["calls"] if c[:2] == ["label", "create"] and c[2] == "holds up 1 card"]) == 1, W["calls"])
+
+W["calls"].clear()
+W["issues"] = {81: "closed", 51: "open", 56: "open", 57: "open", 58: "open"}
+W["deps"] = {51: [], 56: [{"number": 51, "state": "open"}], 57: [{"number": 56, "state": "open"}],
+             58: [{"number": 57, "state": "open"}]}
+W["board"] = waits_cards((81, "CLOSED", "Done", ["holds up 4 cards"]), (51, "OPEN", "Ready", ["waits on #81", "holds up 3 cards"]),
+                         (56, "OPEN", "Ready", ["waits on #51", "holds up 2 cards"]),
+                         (57, "OPEN", "Ready", ["waits on #56", "holds up 1 card"]), (58, "OPEN", "Ready", ["waits on #57"]))
+board.cmd_sweep_waiting()
+check("the root closes: its amber chip is taken off the closed card",
+      ["issue", "edit", "81", "-R", REPO, "--remove-label", "holds up 4 cards"] in edits(), edits())
+check("...and the repo label nobody wears any more is deleted",
+      ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%204%20cards"] in W["calls"], W["calls"])
+check("...the gray chip on the card that waited on it goes in the same sweep, its own count untouched",
+      ["issue", "edit", "51", "-R", REPO, "--remove-label", "waits on #81"] in edits()
+      and not any("holds up" in x for c in edits() if c[2] == "51" for x in c), edits())
+check("cards whose count did not change are left alone",
+      not any(c[2] in ("56", "57", "58") for c in edits()), edits())
+
+W["calls"].clear()
+W["issues"] = {51: "open", 56: "open", 57: "open"}
+W["deps"] = {56: [{"number": 51, "state": "open"}], 57: [{"number": 51, "state": "open"}]}
+W["board"] = waits_cards((51, "OPEN", "Ready", ["holds up 3 cards"]), (56, "OPEN", "Ready", ["waits on #51"]),
+                         (57, "OPEN", "Ready", ["waits on #51", "holds up 1 card"]))
+board.cmd_sweep_waiting()
+check("a count that changes swaps the label in one edit: +`holds up 2 cards` -`holds up 3 cards`",
+      ["issue", "edit", "51", "-R", REPO, "--add-label", "holds up 2 cards", "--remove-label", "holds up 3 cards"] in edits(), edits())
+check("a card nothing waits on any more loses its amber chip",
+      ["issue", "edit", "57", "-R", REPO, "--remove-label", "holds up 1 card"] in edits(), edits())
+check("...and both orphaned repo labels are deleted",
+      ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%203%20cards"] in W["calls"]
+      and ["api", "-X", "DELETE", f"repos/{REPO}/labels/holds%20up%201%20card"] in W["calls"], W["calls"])
+
+W["calls"].clear()
+W["issues"] = {51: "open", 56: "open"}
+W["deps"] = {56: [{"number": 51, "state": "open"}]}
+W["board"] = waits_cards((51, "OPEN", "Ready", ["holds up 1 card"]), (56, "OPEN", "Ready", ["waits on #51"]))
+_real_run = board.subprocess.run
+def flaky_run(cmd, **kw):
+    if cmd[1] == "api" and cmd[2].endswith("/56/dependencies/blocked_by"):
+        return FakeResult("", returncode=1)
+    return _real_run(cmd, **kw)
+board.subprocess.run = flaky_run
+_o, _e = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(_o), contextlib.redirect_stderr(_e):
+    board.cmd_sweep_waiting()
+board.subprocess.run = _real_run
+check("one failed lookup on a waiting card: the chip it already wears stands in, so its blocker's count does not flap",
+      not edits() and "skipped #56" in _e.getvalue(), (edits(), _e.getvalue()))
+
+# back to the state the next case inherits
+W["calls"].clear()
+W["board"] = waits_cards((32, "OPEN", "Backlog", []))
+W["deps"] = {}
+W["bodies"] = {32: "Depends on #36."}
+W["issues"] = {36: "open"}
+W["prs"] = {46: "closed", 47: "open"}
+board.OWNER, board.NUMBER = "roloc", 2220
+check("holds_up_counts walks a cycle once and never loops",
+      board.holds_up_counts({("r", "1"): {("r", "2")}, ("r", "2"): {("r", "1")}}) == {("r", "1"): 1, ("r", "2"): 1},
+      board.holds_up_counts({("r", "1"): {("r", "2")}, ("r", "2"): {("r", "1")}}))
 del os.environ["STAGE_SWEEP_SEC"]
 
 print("28. `board.py blockers`: Relationships first, the words only when nothing is recorded, "

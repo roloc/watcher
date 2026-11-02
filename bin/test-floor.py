@@ -247,7 +247,7 @@ BOARDS = {
         # one earlier and moved on to #777 since (card #96's "why nothing shows today"):
         # #778 must still show up on the board's own Needs Steve strip.
         {"number": 778, "title": "an earlier pick, still unanswered", "url": "https://github.com/roloc/riffmap/issues/778",
-         "state": "OPEN", "labels": [], "status": "Stuck - Needs help", "priority": "P2", "stage": "Parked"},
+         "state": "OPEN", "labels": ["holds up 8 cards"], "status": "Stuck - Needs help", "priority": "P2", "stage": "Parked"},
         {"number": 900, "title": "in ready", "url": "https://github.com/roloc/riffmap/issues/900",
          "state": "OPEN", "labels": [], "status": "Backlog", "priority": "P2", "stage": None},
     ],
@@ -616,6 +616,10 @@ check("#778's rounds, newest first, lettered pictures and all",
       s778["rounds"] == [{"when": "2026-09-28T10:00:00Z", "images": [
           {"url": "https://example.com/778-a.png", "label": "desktop", "letter": "A",
            "recommended": True}]}], s778)
+check("card #244: #778 wears `holds up 8 cards` on the board, so its strip entry carries the count",
+      s778["holds_up"] == 8, s778)
+check("...and a Stuck card with no such chip reads 0, never a missing key",
+      s777["holds_up"] == 0, s777)
 check("the rounds lookup was resolved against riffmap's OWN repo",
       (778, "roloc/riffmap") in ROUNDS_CALLS, ROUNDS_CALLS)
 fourth_proj = next(p for p in state["projects"] if p["name"] == "fourth")
