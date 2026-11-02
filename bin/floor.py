@@ -76,7 +76,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -2387,10 +2387,16 @@ function shipHTML(ship, project) {
 // #91), shown right here instead of making the owner click through to the card to find it. Several
 // thumbnails stack in one row; a broken or slow image collapses to nothing rather than a
 // visible placeholder box, since a missing picture is not itself news.
+// A GitHub `blob` link is a web page, and in a private repo nothing a browser can load as a
+// picture; the floor serves it itself (card #247). Every other link is used as given.
+function picSrc(u) {
+  return (u || "").startsWith("https://github.com/") && u.split("/")[5] === "blob" ? "/api/pic?u=" + encodeURIComponent(u) : u;
+}
+
 function mockupThumbsHTML(images, cls) {
   if (!images || !images.length) return "";
   return `<div class="${cls || "mockups"}">${images.map(u => `
-    <img class="mockup-thumb" src="${esc(u)}" alt="Mockup to approve" loading="lazy"
+    <img class="mockup-thumb" src="${esc(picSrc(u))}" alt="Mockup to approve" loading="lazy"
          onerror="this.style.display='none'">`).join("")}</div>`;
 }
 
@@ -2834,7 +2840,7 @@ function renderReviewSlide() {
   const {slides, idx, slide} = currentSlide(reviewEntry);
   if (!slide) { closeReview(); return; }
   const img = document.getElementById("review-img");
-  img.src = slide.url;
+  img.src = picSrc(slide.url);
   img.alt = slide.label || "Mockup to approve";
   const parts = [slide.letter ? `${slide.letter}${slide.recommended ? " ★" : ""}` : null, slide.label].filter(Boolean);
   document.getElementById("review-caption").textContent = parts.join(" — ");
@@ -3640,12 +3646,12 @@ function heldMockupHTML(l, stuckByCard) {
   if (entry) {
     const {slide} = currentSlide(entry);
     if (!slide) return "";
-    img = `<img class="mockup-thumb" src="${esc(slide.url)}"
+    img = `<img class="mockup-thumb" src="${esc(picSrc(slide.url))}"
       alt="${esc(slide.label || "Mockup to approve")}" loading="lazy" onerror="this.style.display='none'">`;
   } else {
     const first = (l.images || [])[0];
     if (!first) return "";
-    img = `<img class="mockup-thumb" src="${esc(first)}" alt="Mockup to approve" loading="lazy" onerror="this.style.display='none'">`;
+    img = `<img class="mockup-thumb" src="${esc(picSrc(first))}" alt="Mockup to approve" loading="lazy" onerror="this.style.display='none'">`;
   }
   const fallback = entry ? "" : ` data-review-images='${esc(JSON.stringify((l.images || []).slice(0, 1)))}'`;
   return `<div class="character-mockup" data-review="${l.card.number}"${fallback}>${img}</div>`;
@@ -4160,7 +4166,37 @@ class Cache:
             self._maybe_background_rebuild()
 
 
-def make_handler(cache, tail_lookup=None, ship_lookup=None, card_lookup=None):
+_BLOB_RE = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/blob/([^/?#]+)/([^?#]+\.(png|jpe?g|gif|webp))(?:[?#].*)?$", re.I)
+_PIC_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+
+
+def fetch_repo_picture(url, repos, timeout=20):
+    """A picture a Stuck comment links as a GitHub `blob` page (`github.com/o/r/blob/main/x.png`),
+    fetched with the bot's own `gh` login: that URL is a web page, and in a private repo a
+    browser cannot load it as an image at all, so the design review showed nothing (card
+    #247, NullTrader#86). Only a repo in `repos` (the box's own projects) is ever read.
+    `(bytes, content-type)`, or None."""
+    m = _BLOB_RE.match(url or "")
+    if not m or m.group(1).lower() not in {r.lower() for r in repos}:
+        return None
+    repo, ref, path = m.group(1), m.group(2), unquote(m.group(3))
+    # The extension was matched on the encoded text: an encoded `?` or `#` would smuggle the
+    # rest of the path into a query, and any file in the repo with it. Judge the decoded path.
+    if (not path.lower().endswith(tuple("." + e for e in _PIC_TYPES)) or ".." in path.split("/")
+            or any(c in path for c in "?#\\") or any(ord(c) < 32 for c in path)):
+        return None
+    try:
+        r = subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github.raw",
+                            f"repos/{repo}/contents/{quote(path)}?ref={quote(ref)}"],
+                           capture_output=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0 or not r.stdout:
+        return None
+    return r.stdout, _PIC_TYPES[path.rsplit(".", 1)[1].lower()]
+
+
+def make_handler(cache, tail_lookup=None, ship_lookup=None, card_lookup=None, pic_lookup=None):
     """`tail_lookup`, when given, is `(lane, card, file, pos) -> dict | None` — the Peek
     endpoint's `/api/tail.json`, built on `tail_status` above. `None` (the default) keeps
     every existing caller — `bin/test-floor.py`'s `FixedCache` included — working exactly
@@ -4187,6 +4223,18 @@ def make_handler(cache, tail_lookup=None, ship_lookup=None, card_lookup=None):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif path == "/api/pic":
+                got = pic_lookup((parse_qs(parsed.query).get("u") or [""])[0]) if pic_lookup else None
+                if got is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", got[1])
+                self.send_header("Content-Length", str(len(got[0])))
+                self.send_header("Cache-Control", "max-age=300")
+                self.end_headers()
+                self.wfile.write(got[0])
             elif path == "/api/tail.json":
                 self._serve_tail(parsed.query)
             elif path == "/api/ship.json":
@@ -4331,7 +4379,10 @@ def main(argv):
     card_lookup = make_card_lookup(
         lambda: {p["name"]: p["project_repo"] for p in group_by_project(lane_cache.get().values())})
 
-    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup, ship_lookup, card_lookup))
+    def pic_lookup(url):
+        return fetch_repo_picture(url, [l["project_repo"] for l in lane_cache.get().values()])
+
+    server = ThreadingHTTPServer((host, port), make_handler(cache, tail_lookup, ship_lookup, card_lookup, pic_lookup))
     print(f"floor.py: serving on {host}:{port}, refreshing every {refresh_sec}s")
     try:
         server.serve_forever()

@@ -352,8 +352,18 @@ ship_lookup = floor.make_ship_lookup(
                          "deployed aaaaaaa; every lane un-paused")],
     cache_sec=0)
 
+# Card #247: a picture a Stuck comment links as a GitHub `blob` page (a private repo's mockup,
+# NullTrader#86) is served by the floor itself; the stand-in answers only for alpha's repo.
+BLOB_PIC = "https://github.com/roloc/alpha/blob/main/docs/design/shots/9/cockpit.png"
+PIC_BYTES = __import__("base64").b64decode(TINY_PNG.split(",", 1)[1])
+
+
+def pic_lookup(url):
+    return (PIC_BYTES, "image/png") if url == BLOB_PIC else None
+
+
 cache = LiveCache()
-server = QuietServer(("127.0.0.1", 0), floor.make_handler(cache, tail_lookup, ship_lookup, card_lookup))
+server = QuietServer(("127.0.0.1", 0), floor.make_handler(cache, tail_lookup, ship_lookup, card_lookup, pic_lookup))
 URL = f"http://127.0.0.1:{server.server_address[1]}/"
 threading.Thread(target=server.serve_forever, daemon=True).start()
 
@@ -578,6 +588,16 @@ try:
               b.eval("getComputedStyle(document.body).overflow") != "hidden")
         check("still no errors after the whole Review round trip", b.errors == [], b.errors)
         shot(b, "floor-needs-strip.png")
+
+        print("2f2. card #247: a mockup linked as a private repo's blob page still draws")
+        b.eval(f"openReview(9999, [{json.dumps(BLOB_PIC)}])")
+        check("the overlay opens on it", b.wait_for(OPEN))
+        check("the picture really drew (a blob page is not an image; the floor serves it)",
+              b.wait_for(f"{IMG}.complete && {IMG}.naturalWidth > 0"), b.eval(f"{IMG}.src"))
+        check("open-in-new-tab still points at the original link",
+              b.eval(f"{NEWTAB}.href") == BLOB_PIC)
+        b.key("Escape")
+        check("the overlay closes again", b.wait_for("!" + OPEN))
 
         print("2g. card #106: the Ship desk names which release each lane on the box is on")
         ship_text = b.eval("document.querySelector('.desk.ship').textContent")
