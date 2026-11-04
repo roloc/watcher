@@ -51,9 +51,20 @@ test('the pane lists the Stuck card, the lanes and the deploy line, on every sur
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /#213 is the note/ }))?.text).toContain('#213')
-    expect(await ui.find({ type: 'Text', text: /watcher: needs you #213/ })).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /watcher: needs you/ })).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /riffmap: idle/ })).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /deploy held at debdfad/ })).toBeTruthy()
+    await ui.unmount()
+  }
+})
+
+test('a card number in the pane is a link to the card, on a lane and on a Needs-you row', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const links = await ui.findAll({ type: 'Link' })
+    expect(links.map((l: any) => l.props.href)).toEqual(['https://github.com/roloc/watcher/issues/213', 'https://github.com/roloc/watcher/issues/213'])
     await ui.unmount()
   }
 })

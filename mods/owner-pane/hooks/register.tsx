@@ -19,7 +19,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Dollar, Register } from 'claude-code'
 
 import type { Draft, Snapshot } from '../types'
-import { DRAFT_PROMPT, EMPTY, cardText, envFile, fromState, laneLine, parseDraft, repoOf, stuckText } from './model'
+import { DRAFT_PROMPT, EMPTY, cardText, envFile, fromState, laneLine, parseDraft, pillText, repoOf, stuckText } from './model'
 
 const PANE = 'owner-pane'
 const RUN_MS = 30_000
@@ -119,7 +119,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Link, Text } = $.ui.resolve(e)
     const s = await read($, snapshot)
     return (
       <Box flexDirection="column">
@@ -127,11 +127,13 @@ export const register: Register = (on, options) => {
         <Text bold>Needs you ({s.stuck.length})</Text>
         {s.stuck.length === 0 && <Text dimColor>Nothing is waiting on you.</Text>}
         {s.stuck.map((c) => (
-          <Text>#{c.number} {c.ask || '(no question posted yet)'}</Text>
+          <Text>{c.url ? <Link href={c.url}>#{c.number}</Link> : `#${c.number}`} {c.ask || '(no question posted yet)'}</Text>
         ))}
         <Text bold>Lanes</Text>
         {s.lanes.map((l) => (
-          <Text dimColor={l.pill === 'idle'}>{laneLine(l)}</Text>
+          <Text dimColor={l.pill === 'idle'}>
+            {l.card && l.url ? [`${l.lane}: ${pillText(l.pill)} `, <Link href={l.url}>#{l.card}</Link>] : laneLine(l)}
+          </Text>
         ))}
         {s.error && s.at && <Text dimColor>Last read failed: {s.error}</Text>}
       </Box>
