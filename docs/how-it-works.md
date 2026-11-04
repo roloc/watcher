@@ -675,7 +675,8 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   nothing else. At or above the large band: a card, filed in **Backlog** with the metric,
   the rolling average, the readings behind it, and (best-effort) the commit on `main` at
   the time — evidence, not a diagnosis. **No second card while the first stays open** —
-  closing it, however the owner closes it, is what allows the next one.
+  and closing it is not enough either: the window still holds the readings that filed it, so
+  the next card needs the card closed *and* the average back under the small band once.
 - **The card is written like one of the owner's**, with no `agent:` label, so a project
   with a triage lane routes it the same as anything else they might have filed. It names the
   artifact that shows the problem (`DETECT_LOOK_URL`, when the project has one) — the same
