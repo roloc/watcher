@@ -187,13 +187,51 @@ run
 check "still open: no second card"                      [ "$(count 'board file')" = 0 ]
 check "still open: says so"                              out_has "already filed #701"
 
-# 7. The filed card closed; breaching again: a fresh card
+# 7. The filed card closed. Closing alone does not re-arm the detector.
+# 7a. Still breaching, card closed: no new card, `filed` kept
 issue_state CLOSED; next_issue 702
 run
-check "old card closed: a new one is filed"              called "board file -R roloc/testproj"
-check "old card closed: it is the next number"           called "board notify 702 breach"
+check "closed, still breaching: no new card"             not_called "board file"
+check "closed, still breaching: says why"                out_has "closed but the average has not come back"
+check "closed, still breaching: filed still says 701"    [ "$(cat "$STATE/testproj/detect/filed")" = 701 ]
+
+# 7b. Back in band (window of 1 so a single 0 reading is the average), card closed: re-armed
+conf 1 1 0.3 0.6 "https://example.test/look"; metric 0
+run
+check "closed, in band: no card"                         not_called "board file"
+check "closed, in band: filed is gone"                   [ ! -e "$STATE/testproj/detect/filed" ]
+check "closed, in band: says the breach has cleared"     out_has "breach has cleared"
+
+# 7c. Breaching again after that: the fresh card (the old case 7), now reached through 7b
+metric 1
+run
+check "breach again after recovery: a new card is filed" called "board file -R roloc/testproj"
+check "breach again after recovery: the next number"     called "board notify 702 breach"
+check "breach again after recovery: filed says 702"      [ "$(cat "$STATE/testproj/detect/filed")" = 702 ]
+
+# 7d. In band, the card still open: stays armed
+issue_state OPEN; metric 0
+run
+check "open, in band: filed stays"                       [ "$(cat "$STATE/testproj/detect/filed")" = 702 ]
+check "open, in band: no card"                           not_called "board file"
+
+# 7e. In band, lookup fails: filed untouched, and says so
+rm -f "$TMP/issue-state"; run
+check "in band, lookup failure: filed stays"             [ "$(cat "$STATE/testproj/detect/filed")" = 702 ]
+check "in band, lookup failure: says so"                 out_has "could not check #702"
+
+# 7f. Replay of November 2: 1 x12 then 0 x8, card closed between reading 12 and 13
+fresh; conf 20 3 0.3 0.6; metric 1; next_issue 820
+for _ in $(seq 12); do run; done
+filed_first="$(cat "$STATE/testproj/detect/filed")"
+issue_state CLOSED; metric 0; next_issue 821
+files=0
+for _ in $(seq 8); do run; files=$((files + $(count 'board file'))); done
+check "November 2 replay: the first card was filed"      [ "$filed_first" = 820 ]
+check "November 2 replay: no second card after the close" [ "$files" = 0 ]
 
 # 8. A `gh issue view` lookup failure fails closed — never risks a duplicate
+fresh; conf 5 1 0.3 0.6; metric 1; next_issue 702; run
 rm -f "$TMP/issue-state"; run
 check "lookup failure: no new card is risked"            not_called "board file"
 check "lookup failure: says why"                          out_has "could not check #702"

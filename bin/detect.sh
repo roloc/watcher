@@ -20,8 +20,10 @@
 # One reading a run, appended to state; the *rolling average* of the last
 # DETECT_BASELINE_WINDOW readings is what gets compared to the fixed bands, so one noisy
 # reading cannot look like a sustained regression. A large breach files one card and, while
-# that card stays open, files no second one for the same breach — closing it (fixed, or
-# Steve saying not now) is what allows the next one.
+# that card stays open, files no second one for the same breach. Closing it (fixed, or
+# Steve saying not now) is not enough: the window still holds the readings that filed it, so
+# the next card needs the card closed *and* one in-band reading since (the average back under
+# the small band). $STATE/filed is the memory of the episode, removed only on that recovery.
 set -uo pipefail
 
 WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
@@ -83,11 +85,28 @@ case "$tier" in
   large) say "LARGE BREACH: $DETECT_WHAT — value=$value avg=$avg over $count readings (band $DETECT_LARGE_BAND)" ;;
 esac
 
+n="$(cat "$FILED" 2>/dev/null || true)"
+
+# Back in band: a closed card's episode is over, so the next breach may file. A card still
+# open is left armed (a reader may be on it). A failed lookup changes nothing this run.
+if [ "$tier" = ok ]; then
+  [ -n "$n" ] || exit 0
+  if ! state="$(gh issue view "$n" -R "$PROJECT_REPO" --json state -q .state 2>/dev/null)"; then
+    say "could not check #$n's state; leaving it as filed this run"
+    exit 0
+  fi
+  if [ "$state" = "CLOSED" ]; then
+    rm -f "$FILED"
+    say "#$n is closed and the breach has cleared; the next one files a new card"
+  fi
+  exit 0
+fi
+
 [ "$tier" = large ] || exit 0
 
-# Already filed for this breach, and it is still open: no second card. A failed lookup
-# fails closed — skip this run rather than risk a duplicate on a transient `gh` error.
-n="$(cat "$FILED" 2>/dev/null || true)"
+# Already filed for this breach: no second card, whether it is still open or closed without
+# the average having come back under the small band. A failed lookup fails closed — skip
+# this run rather than risk a duplicate on a transient `gh` error.
 if [ -n "$n" ]; then
   if ! state="$(gh issue view "$n" -R "$PROJECT_REPO" --json state -q .state 2>/dev/null)"; then
     say "could not check #$n's state; not filing a possible duplicate this run"
@@ -95,9 +114,10 @@ if [ -n "$n" ]; then
   fi
   if [ "$state" = "OPEN" ]; then
     say "already filed #$n for this breach and it is still open; not filing again"
-    exit 0
+  else
+    say "already filed #$n for this breach; it is closed but the average has not come back under the small band since — not filing again"
   fi
-  rm -f "$FILED"
+  exit 0
 fi
 
 # Best-effort: the commit deploy-dev would have shipped, if this project tracks one.
