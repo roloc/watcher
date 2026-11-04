@@ -1,6 +1,6 @@
 // The contract for the owner-pane mod's `$.state` (card #214).
 export type StuckRow = { project: string; number: number; url: string; ask: string }
-export type LaneRow = { project: string; lane: string; pill: string; card?: number; reason: string }
+export type LaneRow = { project: string; lane: string; pill: string; card?: number; url?: string; reason: string }
 export type Snapshot = {
   // ISO time of the last good read; empty before the first.
   at: string

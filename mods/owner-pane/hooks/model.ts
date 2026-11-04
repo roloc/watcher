@@ -23,7 +23,7 @@ export function fromState(state: Json, at: string): Snapshot {
       stuck.push({ project: p.name, number: s.card?.number, url: s.card?.url ?? '', ask: oneLine(s.ask ?? '') })
     }
     for (const l of (p.lanes ?? []) as Json[]) {
-      lanes.push({ project: p.name, lane: l.lane, pill: l.pill ?? '', card: l.card?.number, reason: l.reason ?? '' })
+      lanes.push({ project: p.name, lane: l.lane, pill: l.pill ?? '', card: l.card?.number, url: l.card?.url ?? '', reason: l.reason ?? '' })
     }
     const d = p.ship?.deploy
     if (!ship && d?.live) ship = `/opt/watcher runs ${d.live}${d.state && d.state !== 'live' ? `; deploy ${d.state}${d.target ? ` at ${d.target}` : ''}` : ''}`
