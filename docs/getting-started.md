@@ -62,6 +62,9 @@ then a PR comment instead of a review.
 **Check:** `bin/gh-app-token.sh myproject author --identity`, run on the box, prints
 `roloc-myproject-author[bot]` and an address.
 
+The reviewer runs as its own system user, so `/etc/watcher` must be mode 751 (the installer sets
+it): that user can then reach its key under `apps/` without being able to list or read the rest.
+
 `gh api user` is not a check here: an installation token has no user, so GitHub answers 403
 ("Resource not accessible by integration"). That 403 is the App working, not broken.
 
