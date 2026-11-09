@@ -266,6 +266,7 @@ def main():
     check("Status, Priority and Stage come across by option", carried["I_1"] == {"Status": "Done", "Priority": "P1"}
           and carried["I_2"] == {"Status": "Ready", "Stage": "PR open"}, carried)
     check("a field the new board lacks (Size) is left out, not an error", carried["I_3"] == {"Status": "Backlog"}, carried.get("I_3"))
+    check("... and says so", "not carried, the new board has no such field or option: Size=XL on #3" in r.stdout, r.stdout)
     check("says what it did not carry", "1 pull requests not carried" in r.stdout and "1 drafts not carried" in r.stdout
           and "1 from other repos left alone" in r.stdout, r.stdout)
     put = [c for c in calls if "-X PUT repos/lonestarprod/thing/branches/main/protection" in c]
@@ -297,15 +298,28 @@ def main():
         {"id": "N_1", "type": "ISSUE", "content": {"__typename": "Issue", "id": "I_1", "number": 1, "repository": {"nameWithOwner": "lonestarprod/thing"}},
          "values": {"Status": "Done", "Priority": "P1"}}]})
     by_id = w.get("board-by-id.json"); by_id["PVT_lonestarprod_9"] = ["lonestarprod", "9"]; w.put("board-by-id.json", by_id)
-    r = w.run("--required-checks", "verify")
+    r = w.run()
     calls = w.called()
     check("exits 0", r.returncode == 0, r.stderr[-400:] + r.stdout[-400:])
     check("does not transfer again", not any("transfer" in c for c in calls))
     check("reuses the board by title, no copy", not any("project copy" in c for c in calls) and "already exists" in r.stdout)
     check("adds only the two cards that were missing", len(w.get("board-lonestarprod-9.json")["items"]) == 3)
-    check("protects with --required-checks when the old protection is gone",
-          any("PUT repos/lonestarprod/thing/branches/main/protection" in c and "contexts][]=verify" in c and "review-receipt" not in c for c in calls))
+    check("keeps the checks the moved repo already requires, never a guessed 'verify' alone",
+          any("PUT repos/lonestarprod/thing/branches/main/protection" in c and "contexts][]=verify" in c and "contexts][]=review-receipt" in c for c in calls)
+          and "already requires" in r.stdout, [c for c in calls if "PUT" in c])
     check("writes the env file", "BOARD_NUMBER=9\n" in w.env_text())
+    w.close()
+
+    print("3b. ... and when no protection can be read anywhere, it stops and asks rather than guess")
+    w = World()
+    w.put("repos.json", {"roloc/thing": "roloc", "lonestarprod/thing": "lonestarprod", "lonestarprod/watcher": "lonestarprod"})
+    os.remove(os.path.join(w.tmp, "protection.json"))
+    r = w.run()
+    check("exits 1 asking for --required-checks", r.returncode == 1 and "--required-checks" in r.stderr, r.stderr)
+    check("no PUT, env untouched", not any("PUT" in c for c in w.called()) and w.env_text() == ENV_TEXT)
+    r = w.run("--required-checks", "verify,review-receipt")
+    check("--required-checks names them explicitly", r.returncode == 0
+          and any("PUT" in c and "contexts][]=review-receipt" in c for c in w.called()), r.stderr[-300:])
     w.close()
 
     print("4. protection refused (a private repo in a Free organization) stops before the env file")

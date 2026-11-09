@@ -16,8 +16,8 @@ one you simply run again later, is safe to run again.
   2. the board       `gh project copy` of the template (the watcher's own board): every field,
                      every view and every workflow except Auto-add, which names a repo and has no
                      API (the watcher's own sweep makes it unnecessary, card #267). Then
-                     `gh project link` to the moved repo. A board with that title already in the
-                     organization is reused.
+                     `gh project link` to the moved repo. An open board with that title already in
+                     the organization is reused (--title names another when that one is not it).
   3. the cards       every issue on the old board goes onto the new one with the same Status,
                      Priority, Stage (every single-select field whose name and option exist on
                      both). Read back until nothing differs: the board's own "Item added" workflow
@@ -292,12 +292,14 @@ def set_values(board_id, sets, dry_run):
 def wanted_values(old_item, new_fields):
     """{field name: option name} the new card should carry: every single-select the old card
     has a value for, when the new board has that field and that option."""
-    out = {}
+    out, dropped = {}, []
     for name, value in old_item["values"].items():
         f = new_fields.get(name)
         if f and value in f["options"] and name not in CARRIED_FIELDS_SKIPPED:
             out[name] = value
-    return out
+        elif name not in CARRIED_FIELDS_SKIPPED:
+            dropped.append(f"{name}={value}")
+    return out, dropped
 
 
 def pause(seconds):
@@ -321,19 +323,26 @@ def carry_cards(old_owner, old_number, org, new_number, repos, dry_run):
     added = add_items(new_id, missing, dry_run)
     for cid, item_id in added.items():
         new_items[cid] = {"item": item_id, "number": mine[cid]["number"], "repo": "", "values": {}}
+    not_carried = {}
     for attempt in range(4):
         sets = []
         for cid, it in mine.items():
             new = new_items.get(cid)
             if not new:
                 continue
-            for name, value in wanted_values(it, new_fields).items():
+            wanted, dropped = wanted_values(it, new_fields)
+            for d in dropped:
+                not_carried.setdefault(d, []).append(it["number"])
+            for name, value in wanted.items():
                 if new["values"].get(name) != value:
                     sets.append((new["item"], new_fields[name]["id"], new_fields[name]["options"][value]))
+        if attempt == 0:
+            for d, nums in sorted(not_carried.items()):
+                print(f"  not carried, the new board has no such field or option: {d} on #{', #'.join(str(n) for n in nums)}")
         if not sets:
             print(f"  every carried card has its Status, Priority and Stage ({'read back ' + str(attempt) + 'x' if attempt else 'nothing to set'})")
             return
-        print(f"  setting {len(sets)} field values" + (" (read-back pass)" if attempt else ""))
+        print(f"  {'would set' if dry_run else 'setting'} {len(sets)} field values" + (" (read-back pass)" if attempt else ""))
         set_values(new_id, sets, dry_run)
         if dry_run:
             return
@@ -345,7 +354,17 @@ def carry_cards(old_owner, old_number, org, new_number, repos, dry_run):
 # --- protection -------------------------------------------------------------------------------
 
 def protect(new_repo, checks, dry_run):
-    checks = checks or ["verify"]
+    """`checks` is what the old repo required, read before the transfer. On a rerun that
+    reading is gone, so the moved repo's own protection (it comes across with the repo) is
+    read instead; with neither and no --required-checks this stops rather than guess a check
+    name — a guess could silently drop a required check (the merge gate, card #142)."""
+    if not checks:
+        checks = read_protection(new_repo)
+        if checks:
+            print(f"  {new_repo} main already requires {', '.join(checks)}; keeping those")
+    if not checks:
+        raise Stop(f"cannot tell which checks {new_repo} main must require (the old repo's protection could not be "
+                   "read, and the moved repo has none): pass --required-checks <a,b>, or --no-protection on purpose")
     if dry_run:
         print(f"  would require {', '.join(checks)} on {new_repo} main (PR required, 0 approvals, admins not enforced)")
         return
@@ -438,7 +457,7 @@ def main(argv=None):
     `ssh -L 8799:127.0.0.1:8799 root@<box>`): two Create clicks, two Install clicks, on {new_repo} only:
       python3 /opt/watcher/deploy/app-setup.py {a.name} --org {org} --repos {new_repo}
   - In {new_repo}: docs/board.md and CLAUDE.md name the board and repo —
-      sed -i '' -e 's|{old_repo}|{new_repo}|g' -e 's|users/{old_owner}/projects/{old_number}|orgs/{org}/projects/{new_number or '<new>'}|g' docs/board.md CLAUDE.md
+      sed -i.bak -e 's|{old_repo}|{new_repo}|g' -e 's|users/{old_owner}/projects/{old_number}|orgs/{org}/projects/{new_number or '<new>'}|g' docs/board.md CLAUDE.md && rm -f docs/board.md.bak CLAUDE.md.bak
     (a card on the new board does as well; it is the first thing the project's lane does as its App).
   - The old board {old_owner}/#{old_number} is still open; close it once the new one looks right:
       gh project close {old_number} --owner {old_owner}
@@ -447,4 +466,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except RuntimeError as e:  # a gh or GraphQL call that failed: one line, not a traceback
+        raise Stop(str(e))
