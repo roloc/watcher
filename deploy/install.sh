@@ -219,6 +219,8 @@ install_apps() {
   local root="${WATCHER_APPS_DIR:-/etc/watcher/apps}" lib="${REVIEW_LIB_DIR:-/usr/local/lib/watcher-review}"
   local rhome="${REVIEW_HOME:-/var/lib/watcher-review}" sudoers="${SUDOERS_DIR:-/etc/sudoers.d}"
   [ -d "$root" ] || return 0
+  # The folders above the keys must be traversable by watcher-reviewer (no listing, no read).
+  chmod 751 "$(dirname "$root")" "$root"
   local d have_reviewer=0
   for d in "$root"/*/; do
     [ -f "${d}reviewer.pem" ] && have_reviewer=1
@@ -284,7 +286,10 @@ chmod +x "$WATCHER_DIR"/bin/*.sh "$WATCHER_DIR"/bin/shim/* "$WATCHER_DIR"/deploy
 # a checkout with changes of its own (deploy/autodeploy.sh sets this too).
 su - watcher -c "git -C '$WATCHER_DIR' config core.fileMode false" 2>/dev/null || true
 
-install -d -m 750 -o root -g watcher /etc/watcher
+# 751, not 750: watcher-reviewer (card #255) is in no group but its own and must traverse
+# this folder to reach /etc/watcher/apps/<project>/reviewer.pem. Others get no listing, and
+# env and floor.env stay 640, so nothing secret opens up.
+install -d -m 751 -o root -g watcher /etc/watcher
 [ -f /etc/watcher/env ] || { echo "CLAUDE_CODE_OAUTH_TOKEN=" > /etc/watcher/env; chown root:watcher /etc/watcher/env; chmod 640 /etc/watcher/env; }
 # Discord and Slack are both optional: an empty *_WEBHOOK_URL is the off switch for each.
 # The lines are added once so the file documents itself; existing values are never touched.
