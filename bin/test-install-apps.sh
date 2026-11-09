@@ -69,6 +69,9 @@ check "the sudoers line lets watcher run that one program as watcher-reviewer, a
 check "…and visudo checked it first; the file is 0440 root" 'grep -q "^visudo -cf" "$CALLS" && grep -q "install -m 440 -o root -g root .* $SUDOERS_DIR/watcher-review-submit" "$CALLS"'
 check "the reviewer's token cache is private to it" 'grep -q "install -d -o watcher-reviewer -g watcher-reviewer -m 700 $REVIEW_HOME/cache" "$CALLS"'
 
+check "/etc/watcher and its apps folder are 751: the reviewer user can traverse, nobody lists" 'grep -q "chmod 751 $TMP/etc $WATCHER_APPS_DIR" "$CALLS"' "$(cat "$CALLS")"
+check "the Claude login file is not opened: no chmod or chgrp of env, and no group change for watcher-reviewer" '! grep -q "usermod\|/env" "$CALLS"' "$(cat "$CALLS")"
+
 echo "4. a second run changes nothing it need not"
 run
 check "the user exists, the sudoers file is the same: no useradd and no second sudoers install" '! grep -q "^useradd" "$CALLS" && ! grep -q "install -m 440" "$CALLS"' "$(cat "$CALLS")"
