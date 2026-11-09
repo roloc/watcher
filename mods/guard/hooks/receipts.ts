@@ -110,8 +110,10 @@ async function submitReview($: Engine, number: string, line: string): Promise<bo
   if (!v) return false
   try {
     const r = await $.process.run(['sudo', '-n', '-u', 'watcher-reviewer', REVIEW_SUBMIT, number, v.sha, v.verdict, '-'], { timeoutMs: RUN_MS, stdin: line })
+    if (r.exitCode !== 0) warn('review-submit (falling back to the comment)', `exit ${r.exitCode}: ${String(r.stderr ?? '').trim().slice(0, 300)}`)
     return r.exitCode === 0
-  } catch {
+  } catch (e) {
+    warn('review-submit (falling back to the comment)', e)
     return false
   }
 }
