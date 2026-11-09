@@ -63,6 +63,17 @@ PERMISSIONS = {
 }
 
 
+# What GitHub's App settings page calls each permission and level, for anything a person reads.
+UI_NAMES = {"actions": "Actions", "checks": "Checks", "statuses": "Commit statuses", "contents": "Contents",
+            "pull_requests": "Pull requests", "issues": "Issues", "workflows": "Workflows",
+            "organization_projects": "Projects (organization)", "metadata": "Metadata"}
+UI_LEVELS = {"read": "Read-only", "write": "Read and write", "admin": "Admin"}
+
+
+def ui_permission(key, level):
+    return f"{UI_NAMES.get(key, key)}: {UI_LEVELS.get(level, level)}"
+
+
 def app_name(key, role):
     return f"roloc-{key}-{role}"
 
@@ -267,7 +278,7 @@ class Setup:
         if missing:
             fix = f"{WEB}/organizations/{urllib.parse.quote(self.org)}/settings/apps/{html.escape(slug)}/permissions"
             accept = f"{WEB}/organizations/{urllib.parse.quote(self.org)}/settings/installations"
-            want = ", ".join(f"{k} {PERMISSIONS[role][k]}" for k in missing)
+            want = "; ".join(ui_permission(k, PERMISSIONS[role][k]) for k in missing)
             return (f'<li><b>{html.escape(slug)}</b> installed, <b>missing permissions</b>: {html.escape(want)}. '
                     f'<a href="{fix}" target="_blank">Add them</a> under Repository permissions and save, then '
                     f'<a href="{accept}" target="_blank">accept them</a> on the installation (Configure).</li>')
@@ -394,7 +405,7 @@ def report(setup):
             line = f"app-setup: {p.key} {r}: App {cfg.get(R + '_APP_ID')}, installation {cfg.get(R + '_INSTALLATION_ID')}"
             missing = setup.missing_permissions(p, r)
             if missing:
-                line += " — MISSING permissions: " + ", ".join(f"{k} {PERMISSIONS[r][k]}" for k in missing) \
+                line += " — MISSING permissions: " + "; ".join(ui_permission(k, PERMISSIONS[r][k]) for k in missing) \
                         + f" (add at {WEB}/organizations/{setup.org}/settings/apps/{cfg.get(R + '_SLUG')}/permissions, then accept at {WEB}/organizations/{setup.org}/settings/installations)"
             print(line)
 

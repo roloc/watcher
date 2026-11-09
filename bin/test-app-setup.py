@@ -193,8 +193,8 @@ check("after: installed, the installation ID lands in config (login compared wit
       json.loads(body) == {"installed": True, "missing": ["actions", "checks", "statuses"]}
       and mod.read_config(demo.config_path).get("AUTHOR_INSTALLATION_ID") == "2222", body)
 status, page = get("/")
-check("the page says which permissions that App lacks and links where to add and accept them",
-      "missing permissions" in page and "actions write, checks read, statuses read" in page
+check("the page names the gaps the way GitHub's settings page does and links where to add and accept them",
+      "missing permissions" in page and "Actions: Read and write; Checks: Read-only; Commit statuses: Read-only" in page
       and "https://github.test/organizations/lonestarprod/settings/apps/roloc-demo-author/permissions" in page
       and "https://github.test/organizations/lonestarprod/settings/installations" in page, page[:900])
 check("the run is not finished until every App of every project is installed", not setup.done.is_set())
@@ -231,7 +231,7 @@ out = subprocess.run([sys.executable, script, "demo", "other", "--apps-dir", app
                      env=env, capture_output=True, text=True, timeout=30)
 check("every App already installed: reports each, flags the one with missing permissions, creates nothing, exits 0",
       out.returncode == 0 and "nothing to create" in out.stdout and "already set up" in out.stdout
-      and out.stdout.count("MISSING permissions: actions write, checks read, statuses read") == 1
+      and out.stdout.count("MISSING permissions: Actions: Read and write; Checks: Read-only; Commit statuses: Read-only") == 1
       and "settings/apps/roloc-demo-author/permissions" in out.stdout, out.stdout + out.stderr)
 
 print("5. the offline token script reads what this wrote")
