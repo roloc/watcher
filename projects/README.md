@@ -16,7 +16,9 @@ what keeps these three read as documentation and never as a project to start a t
 lane for. Copy one, drop the `.txt`, and fill in its blanks.
 
 Every other file in this directory — `riffmap*`, `riffmap-site*`, `azeroth-rewind*`,
-`watcher.env` — is Steve's own: his boards, his bot, his repos. A fork of this repo
+`nulltrader*`, `watcher.env` — is Steve's own: his boards, his GitHub Apps, his repos
+(`watcher.env` is the shape a board in an organization takes: `BOARD_OWNER` is the
+organization and `OWNER_LOGIN` the person a Stuck card pings). A fork of this repo
 deletes every one of them and adds its own with `deploy/add-project.sh` (the normal path
 for a single-lane project — it writes the short form directly) or the examples here (for
 a second lane, the canary channel, or just to see what a knob does before setting it).

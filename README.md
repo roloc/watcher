@@ -18,7 +18,9 @@ moves the card to **Done**; anything it cannot decide goes to
 card. The spawner is also the stale-claim sweeper.
 
 **Why a box.** Skipping permissions is only safe where there is nothing to protect. The box
-holds a bot GitHub login, a Claude subscription token, and a checkout. If a tick misbehaves,
+holds two GitHub App keys per project (an author and a reviewer, card
+[#255](https://github.com/lonestarprod/watcher/issues/255); a fork without Apps holds one
+bot GitHub login instead), a Claude subscription token, and a checkout. If a tick misbehaves,
 rebuild the box. On a developer's own machine the same loop needs allow lists, trust
 probes and a classifier, and the day that was tried it cost more than the feature work.
 
@@ -28,6 +30,16 @@ probes and a classifier, and the day that was tried it cost more than the featur
     bin/board.py          the board CLI: list/show/move/stage/unclaim/notify/dump/ask (BOARD_OWNER, BOARD_NUMBER)
     bin/notify.py         Discord or Slack: posts through a webhook (DISCORD_WEBHOOK_URL and/or SLACK_WEBHOOK_URL) when a card is stuck or something broke; bin/test-notify.py checks the shapes
     bin/worktree.sh       one worktree per card; copies a project's private inputs in
+    bin/gh-app-token.sh   a short-lived installation token for a project's author or reviewer GitHub
+                          App, minted from the key under /etc/watcher/apps/<project>/ (card #255)
+    bin/shim/gh, bin/shim/gh-credential  first on a tick's PATH: the real gh, and git's pushes, with
+                          the author App's token minted per call; with no Apps set up they change nothing
+    bin/review-submit.sh  files the reviewer's verdict as a real PR review from the reviewer App; the
+                          one program `watcher` may sudo to the `watcher-reviewer` user (see "The guard")
+    bin/receipt-check.sh  the `review-receipt` CI check: the reviewer App's review (or a 🤖 reviewer:
+                          comment) on the PR's exact head commit, or no merge (see "CI")
+    deploy/app-setup.py   creates a project's two Apps through GitHub's manifest flow and writes their
+                          keys into place (see "Set up a box", step 2)
     bin/doctor.sh         read-only sanity check that a project is wired up; deploy/install.sh and
                           bin/spawn.sh both run it before a lane's first tick (see "Add a project")
     bin/hygiene.sh        the weekly debt sweep: stale branches, old TODOs, orphan scripts, dead doc
@@ -67,7 +79,8 @@ probes and a classifier, and the day that was tried it cost more than the featur
                           CLAUDE.md and permission lists; see "The desk")
     bin/test-desk.sh      the desk runner's cases, offline, claude and gh stubbed
     bin/test-install-desk.sh  deploy/install.sh's install_desk, offline, every root-only command stubbed
-    .github/workflows/ci.yml  `verify`: both suites plus a syntax pass, on every PR (see below)
+    .github/workflows/ci.yml  `verify` (the offline suites plus a syntax pass) and `review-receipt`
+                          (bin/receipt-check.sh), both required on main, on every PR (see "CI")
     commands/watch.md     the /watch contract, installed for the watcher user (all projects)
     commands/triage.md    one triage tick: label an unlabeled card, record what it waits on, stop
     agents/reviewer.md    the last review pass: blocking findings only, one round
@@ -76,8 +89,10 @@ probes and a classifier, and the day that was tried it cost more than the featur
     docs/talking-to-the-owner.md  the format for anything a human reads (see below)
     docs/owner-cheat-sheet.md one page for the owner: columns, answering a Stuck card, pause, logs
     CLAUDE.md             rules for editing this repo
-    projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER, BOARD_NUMBER, PROJECT_REPO,
-                          WORKTREE_COPY_DIRS, and LANE_AGENTS for a lane
+    projects/<name>.env   PROJECT_NAME, PROJECT_ROOT, BOARD_OWNER (a user or an organization),
+                          BOARD_NUMBER, PROJECT_REPO, OWNER_LOGIN (the person a Stuck card pings, when
+                          the board's owner is an organization), WORKTREE_COPY_DIRS, and LANE_AGENTS
+                          for a lane
     deploy/bootstrap.sh   idempotent apt/npm setup for a fresh box, run once before install.sh
     deploy/watcher@.service, deploy/install.sh
     deploy/autodeploy.sh  THE deploy path: ships main by itself when every lane is idle (see below)
@@ -228,18 +243,26 @@ Then by hand, once:
    project: `python3 deploy/app-setup.py riffmap --org yourorg --repos yourorg/riffmap`
    serves a page with a Create button per App, receives each App's ID and private key and
    writes them into `/etc/watcher/apps/riffmap/` (`deploy/install.sh` sets owners; the
-   reviewer's key goes to its own system user, so a tick cannot approve its own PR).
+   reviewer's key goes to its own system user, so a tick cannot approve its own PR). The
+   page answers on `localhost`, so from the box open `ssh -L 8799:127.0.0.1:8799 root@<box>`
+   first and click from your own browser (`docs/getting-started.md`, step 2, has the
+   whole walk-through).
    `bin/shim/gh` and `bin/shim/gh-credential` mint a short-lived token per call
    (`bin/gh-app-token.sh`); nothing is stored with `gh auth login`. *Fallback:* one bot
    account, `su - watcher`, `gh auth login`, `gh auth setup-git` — with no
    `/etc/watcher/apps/<project>/` the box leaves `gh` alone, and the verdict is a PR comment
    instead of a review. GitHub's terms allow one machine account per person; more is what got
    the watcher's own owner suspended.
-3. **Project:** `BOT_LOGIN=<the author App's login, or the fallback bot's> deploy/add-project.sh riffmap yourorg/riffmap`
+3. **Project:** `BOT_LOGIN=<a bot login> deploy/add-project.sh riffmap yourorg/riffmap`
    (from your own machine, see "Add a project" below) sets up the board, the labels, and
-   `projects/riffmap.env`; commit and push that file, then `deploy/install.sh riffmap`
-   clones the repo under `/home/watcher/projects/` and drop its `.env.local` and any
-   private inputs in place.
+   `projects/riffmap.env`. The script is written for the single-bot-account path: it
+   requires `BOT_LOGIN` and checks that login has write access to the repo before it does
+   anything else, even though with Apps the installation from step 2 is the grant and no
+   such login exists (open as a card; see "Add a project"). With an organization as
+   `BOARD_OWNER`, add `OWNER_LOGIN=<your own login>` to the file it wrote, so a Stuck card
+   pings you and not the organization. Commit and push that file, then
+   `deploy/install.sh riffmap` clones the repo under `/home/watcher/projects/` and drop its
+   `.env.local` and any private inputs in place.
 4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design
    watcher@riffmap-triage` (the build, design and triage lanes — without the triage lane
    an unlabeled card is nobody's); `journalctl -u watcher@riffmap -f` follows one.
@@ -283,14 +306,23 @@ have to build the means each time. So the browser comes with the box:
 
 ## CI
 
-`.github/workflows/ci.yml`, one job — `verify`: `bash -n` over the scripts systemd and the
-installer run, then `bin/test-spawn.sh` and `bin/test-notify.py`. Both suites are offline
-and stubbed, so the job needs no network, no secrets and no services, and takes seconds.
+`.github/workflows/ci.yml`, two jobs, both required on `main`. `verify`: `bash -n` over the
+scripts systemd and the installer run, then every offline suite (`bin/test-spawn.sh`,
+`bin/test-notify.py`, the deployer's, the Apps' and the rest — all stubbed, so the job
+needs no network, no secrets and no services, and takes seconds). `review-receipt`:
+`bin/receipt-check.sh` (card [#142](https://github.com/lonestarprod/watcher/issues/142))
+reads the PR's own reviews and comments and passes a code PR only when the reviewer's
+verdict names the PR's *current* head commit — a real review from the project's reviewer
+App (`roloc-<project>-reviewer[bot]`, Approve on that exact SHA; its Request changes
+fails the check even next to a clean comment) or, on a fork without a reviewer App, a
+`🤖 reviewer:` comment with the same SHA — plus a `🤖 usability:` one for a screen change.
+An amend after the review, or a review that never ran, fails it instead of merging
+silently. A docs-only PR that touches no part of the merge gate needs no receipt.
 
 **Where it runs.** PR code is code any branch can write, so it never runs on a box that
 holds credentials — riffmap's split (its `ci.yml`, riffmap
 [#407](https://github.com/roloc/riffmap/issues/407)), which here rules out exactly one box:
-the `agents` LXC this repo deploys to, holding the bot's GitHub login and a Claude
+the `agents` LXC this repo deploys to, holding the GitHub Apps' keys and a Claude
 subscription token. The repo variable `CI_RUNNER` picks the runner. It is **`watcher-ci`**
 (since September 28, 2026): the `ci-watcher` runner on the `ci` LXC (108), in
 `/opt/actions-runner-watcher` beside riffmap's, run by the same `gha-runner` user. It needs
@@ -298,7 +330,9 @@ nothing beyond bash and python3.
 
 - **Each repo needs its own runner registration.** Repos in a user account cannot share
   runners, so riffmap's `riffmap-ci` never picks up this repo's jobs; pointing
-  `CI_RUNNER` at it queues every check, and with `verify` required, nothing merges.
+  `CI_RUNNER` at it queues every check, and with `verify` required, nothing merges. The
+  `ci-watcher` runner came along with the repo's move into `lonestarprod` (November 9,
+  2026) and picked up the next run without being re-registered.
 - **If the ci box is down**, unset the variable (`gh variable delete CI_RUNNER`) and the
   job falls back to GitHub-hosted until it is back. That costs metered minutes, so set it
   again as soon as the box is up.
@@ -321,8 +355,21 @@ scripts, and a redirect, `tee`, `rm`, `cp`, `sed -i` or `git pull` aimed at `/op
 `/etc/watcher` or a lane's state directory are refused with a one-line reason the model
 reads as the tool's error. A `Write`, `Edit` or `NotebookEdit` whose path resolves (every
 symlink followed) outside the worktree, `$TMPDIR` or `~/.claude` is refused the same way.
-Nothing it does approves, merges or moves a card. A refused command is one line in the
-tick's own session, where the floor page's Peek shows it like any other tool result.
+So is `sudo` in any form from a tick's shell, and `review-submit` run by hand (card
+[#255](https://github.com/lonestarprod/watcher/issues/255)): the reviewer's verdict reaches
+GitHub only through the mod's own receipts hook (`mods/guard/hooks/receipts.ts`, card
+[#211](https://github.com/lonestarprod/watcher/issues/211)), which takes the `reviewer`
+subagent's first line from the tool result and hands it to `bin/review-submit.sh` as the
+separate `watcher-reviewer` user — the one program `watcher` may sudo, from a root-owned
+copy, and the only user that can read the reviewer App's key. That files a real GitHub
+review (Approve or Request changes) from `roloc-<project>-reviewer[bot]` on exactly the
+PR's current head; a stale SHA is refused, never reviewed. When that fails (no reviewer
+App, a fork on one bot account), the hook posts the same line as the `🤖 reviewer:` PR
+comment, with one stderr line saying why. The same hook sets the card's Stage from
+`gh pr create` and `gh pr merge`. The guard itself approves, merges and moves nothing; a
+tick cannot sign as the reviewer, mint its token, or approve anything it was not shown.
+A refused command is one line in the tick's own session, where the floor page's Peek
+shows it like any other tool result.
 
 One more hook guards the owner's phone rather than the box (card
 [#210](https://github.com/roloc/watcher/issues/210)): a `gh issue comment` or `gh pr comment`
@@ -403,7 +450,11 @@ Code must be able to write; the shell startup files and gh's `config.yml` are pi
 root-owned and empty so those two roads are shut). A card body is untrusted text the desk
 reads. The desk's own credentials (the owner's Claude login, its `gh` token) are the thing
 worth protecting there, and every road out — the network clients, the interpreters,
-`gh`'s writes and `gh auth token` — is denied or asks. The one thing done by hand, once per box:
+`gh`'s writes and `gh auth token` — is denied or asks. The desk's `gh` is still a login of
+its own, not one of the project Apps: card
+[#255](https://github.com/lonestarprod/watcher/issues/255) planned a read-only App
+installation for it and did not build one, so it is the one place on the box where a `gh
+auth login` is still typed. The two things done by hand, once per box:
 
     sudo -u watcher-desk -H claude auth login     # the owner's own account
     sudo -u watcher-desk -H gh auth login         # so board show / gh pr view work
@@ -425,9 +476,12 @@ script nothing runs, a link to a file that moved — is invisible to CI, which o
 one PR. `bin/hygiene.sh` sweeps for it; `bin/hygiene-run.sh`, off `watcher-hygiene@watcher.timer`
 on the agents box (card #196), runs the sweep every Monday and files **one** card,
 `Weekly hygiene sweep — <date>`, with the report as its body — or files nothing when the
-sweep is clean. It files straight into **Ready** with the bot's own `gh` login, which
-already holds `project` scope, so no `BOARD_TOKEN` secret and no Backlog exception are
-needed any more: the week's debt is paid with nobody moving a card. While a hygiene card
+sweep is clean. It files straight into **Ready** with the `watcher` user's own `gh` login,
+which already reaches the board, so no `BOARD_TOKEN` secret and no Backlog exception are
+needed any more: the week's debt is paid with nobody moving a card. (That login is not the
+author App: the timer runs `bin/hygiene-run.sh` outside a lane, without the `gh` shim on
+its `PATH`, so it uses whatever `gh auth login` the `watcher` user holds — the same as the
+floor page, the detector and the deployer's own check-run read.) While a hygiene card
 is open the next sweep comments the fresh list on it instead of filing a second one. The
 same script runs on riffmap ([roloc/riffmap#711](https://github.com/roloc/riffmap/pull/711))
 and riffmap-site ([roloc/riffmap-site#54](https://github.com/roloc/riffmap-site/pull/54)) —
@@ -521,29 +575,53 @@ branch, run it again for `main`.
 ## Add a project
 
 Putting a project on the watcher used to be a dozen hand steps, written down in three
-places, most of them found only when they broke (card #39 — setting up this repo's own
-board, PR #38, is what surfaced them). Now it is one idempotent script, run from the
-owner's Mac (or wherever), authenticated as **yourself** — never as the bot, since two of its steps
-(main's branch protection, the board itself) need admin/ownership the bot is never given:
+places, most of them found only when they broke (card
+[#39](https://github.com/lonestarprod/watcher/issues/39) — setting up this repo's own
+board, PR [#38](https://github.com/lonestarprod/watcher/pull/38), is what surfaced them).
+Now it is one idempotent script, run from the owner's Mac (or wherever), authenticated as
+**yourself** — never as the bot or an App, since two of its steps (main's branch
+protection, the board itself) need admin/ownership neither is ever given:
 
-    BOT_LOGIN=<the bot's login> TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
+    BOT_LOGIN=<a bot login> TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
 
 `TEMPLATE_BOARD` is a clean, existing board to copy — `gh project copy` works on any board
 the caller can read, so it does not have to be a GitHub "template" (that flag is
-organization-only anyway). The script checks each step before doing it, so running it again
-after fixing something is the normal way to finish a partial run — it prints "unchanged"
-for everything already in place. It copies the board, links the repo, creates the `in-
-flight` / `blocked` / `owner-decision` labels, sets `main`'s branch protection (the named
-check required, PR required, 0 approvals, admins not enforced), and writes
-`projects/<name>.env`. Two things it cannot do for you — GitHub gives no API for either —
-it prints as an ask-first checklist and waits for a yes: granting the bot account
-(`BOT_LOGIN`) access to the new board. The board's **Auto-add to project** workflow is no
-longer asked for (card #200): every card the watcher files goes through `board file`,
-which creates the issue, puts it on the board and sets its column. Auto-add stays worth
-turning on (filter `is:issue is:open`) only for cards a person files from the GitHub UI;
-`bin/doctor.sh` warns, and never refuses a lane, when it is off.
+organization-only anyway). `BOARD_OWNER` (default: the repo's owner) may be a user or an
+organization; since card [#255](https://github.com/lonestarprod/watcher/issues/255) the
+watcher's own is the `lonestarprod` organization, because a GitHub App can reach an
+organization's Projects board and not a user's. The script checks each step before doing
+it, so running it again after fixing something is the normal way to finish a partial run —
+it prints "unchanged" for everything already in place. It copies the board, links the
+repo, creates the `in-flight` / `blocked` / `owner-decision` labels, sets `main`'s branch
+protection (the named check required, PR required, 0 approvals, admins not enforced), and
+writes `projects/<name>.env`.
 
-Then commit and push `projects/<name>.env` (the script writes it but does not push it), and
+**It is the single-bot-account path.** The script requires `BOT_LOGIN` — a machine
+account's login — refuses to start until that login has write access to the repo, and
+pauses once more, as an ask-first checklist waiting for a yes, for the one thing GitHub
+gives no API for: granting that account access to the new board. On the GitHub Apps path
+there is no such login: `deploy/app-setup.py <name> --org <org> --repos <owner/repo>`
+creates the project's author and reviewer Apps and installing each on the repo *is* the
+grant, and an App owned by the organization reaches the organization's boards with no
+board-level grant at all. The script does not know that yet and still insists on a
+`BOT_LOGIN` with write access — a leftover from before the Apps, open as a card. For a
+project that already exists under a user and is moving into an organization,
+`deploy/move-project.py <name> --to <org>` (November 9, 2026) transfers the repo into the
+org, copies the watcher board as the template (`gh project copy`: fields, views and every
+workflow except Auto-add come across), carries every card with its Status, Priority and
+Stage, re-applies main's branch protection, and rewrites `projects/<name>.env`.
+
+The board's **Auto-add to project** workflow is no longer asked for (card
+[#200](https://github.com/lonestarprod/watcher/issues/200)): every card the watcher files
+goes through `board file`, which creates the issue, puts it on the board and sets its
+column. Auto-add stays worth turning on (filter `is:issue is:open`) only for cards a
+person files from the GitHub UI; `bin/doctor.sh` warns, and never refuses a lane, when it
+is off.
+
+Then commit and push `projects/<name>.env` (the script writes it but does not push it;
+when `BOARD_OWNER` is an organization, add `OWNER_LOGIN=<the person who answers Stuck
+cards>` to it first, since the script does not write that line and a Stuck comment
+otherwise pings the organization), and
 paste `templates/project-CLAUDE.md`'s section into the project's own `CLAUDE.md` — it is
 built from what `/watch`, `/triage` and the reviewer actually read out of a project's
 `CLAUDE.md`, with a blank for each one. Give the project a `docs/board.md` from
@@ -585,4 +663,8 @@ MIT. See `LICENSE.md`.
 checkout path (for `bin/board.py` and `projects/<name>.env`) and the default repository. The pane lists every Stuck card's question,
 each lane's pill and the deploy line, refreshed every minute from `/api/state.json`. `/stuck` lists the questions; `/stuck <n> <reply>`
 posts the reply and moves the card to In progress; `/card <n>` reads a card; `/file-card <sentence>` drafts a card and files it
-in Backlog only after `/file-card yes`. It never touches a lane, a tick or `/opt/watcher`, and nothing deploys.
+in Backlog only after `/file-card yes`. It never touches a lane, a tick or `/opt/watcher`, and nothing deploys. Its reads and
+its two writes go out as whatever the Mac's own `gh` is: the project's author App, when `deploy/app-setup.py <name> --roles author`
+has written its key under `~/.config/roloc-apps/<name>/` and `gh` runs through `bin/shim/gh`, or the owner's own login. Never a
+machine account — the Mac's, `roloc-desk`, is what GitHub suspended on November 8, 2026 (card
+[#255](https://github.com/lonestarprod/watcher/issues/255)).

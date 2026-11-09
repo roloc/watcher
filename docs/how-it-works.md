@@ -22,8 +22,35 @@ short version.
 | **The owner** | a human | GitHub, on their phone | moves cards, answers Stuck cards, owns every product decision |
 
 One human owns the board. Everything else is a bot. The box the bots run in is throwaway
-and holds nothing worth protecting beyond a bot GitHub login and a Claude token, which is
+and holds nothing worth protecting beyond the GitHub Apps' keys and a Claude token, which is
 why the tick can run with permissions skipped.
+
+## Who acts as whom on GitHub
+
+Since card [#255](https://github.com/lonestarprod/watcher/issues/255) (November 8 and 9,
+2026) the loop acts on GitHub as **GitHub Apps**, not as user accounts. GitHub's terms allow
+one machine account per person; the owner had three, and GitHub suspended one of them
+(`roloc-desk`, the Mac sessions' login) on November 8, 2026. Every project has two Apps:
+
+| Identity | Who | What it does |
+|---|---|---|
+| `roloc` | the owner's own hand | moves cards, answers Stuck cards, owns every product decision. The only identity whose comment is the owner's answer |
+| `roloc-<project>-author[bot]` | the lane and its ticks (`bin/shim/gh`, `bin/shim/gh-credential`, a token minted per call by `bin/gh-app-token.sh` from `/etc/watcher/apps/<project>/author.pem`); also the owner's own Mac sessions, from `~/.config/roloc-apps/<project>/` | pushes, opens PRs, comments, moves cards. Commits are authored as this bot |
+| `roloc-<project>-reviewer[bot]` | `bin/review-submit.sh`, run as the separate `watcher-reviewer` system user, the only one that can read `reviewer.pem`; called only by the guard mod's receipts hook | files the `reviewer` subagent's verdict as a real PR review — Approve or Request changes — on the PR's exact head commit. A stale SHA is refused |
+| `roloc-watcher-bot`, `roloc-desk`, `Roloc59-Barf` | machine accounts, being retired (the last step of [#255](https://github.com/lonestarprod/watcher/issues/255), after the appeal). Until then the `watcher` user's own `gh` login is still what the floor page, the hygiene timer, the detector and the deployer's check-run read use: they run outside a lane, without the shim | nothing new from a lane. An older card, PR or comment from one of them is a report or a proposal, never the owner's answer |
+
+A GitHub App cannot reach a user-owned Projects board — only an organization-level Projects
+permission exists — so the repo and the board live in the `lonestarprod` organization:
+`lonestarprod/watcher` and the [Watcher board](https://github.com/orgs/lonestarprod/projects/1).
+`BOARD_OWNER` in `projects/<name>.env` is the organization and `bin/board.py` reads either kind
+of owner (`repositoryOwner`); `OWNER_LOGIN` names the human a `Needs @<login>:` comment
+addresses, because the board's owner is no longer a person. With no Apps set up (no
+`/etc/watcher/apps/<project>/config`) the shim leaves `gh` alone, so a fork on a single bot
+account works exactly as before, and the reviewer's verdict is a `🤖 reviewer:` PR comment
+instead of a review. `deploy/app-setup.py` creates a project's pair through GitHub's manifest
+flow; `deploy/install.sh`'s `install_apps` sets the owners and modes (`/etc/watcher` is 751 so
+`watcher-reviewer` can reach its key; `author.pem` root:watcher 640, `reviewer.pem`
+root:watcher-reviewer 640).
 
 ## The board
 
@@ -172,7 +199,9 @@ queries. `--interval 60` is the fix there — the same wait, a tenth of the poin
    --max-budget-usd 15`, with a 150 minute watchdog that kills the whole process group.
 5. **The tick** claims the card (comment first, label second), reads the card and the
    project's `CLAUDE.md`, does the work, opens a PR with `Closes #<n>`, waits for CI, runs
-   the reviewer once, merges. Or it moves the card to In review, or Stuck, or labels it
+   the reviewer once (its verdict lands on the PR as the reviewer App's review — see "Who
+   acts as whom on GitHub" — and the `review-receipt` check reads it back), merges. Or it
+   moves the card to In review, or Stuck, or labels it
    `awaiting-rebuild` and leaves it In progress because the fix is merged but a known
    downstream rebuild has to finish first, or leaves it in In progress if it got nowhere.
    It removes `in-flight` on every one of those exits.
@@ -529,8 +558,8 @@ In progress or Waiting. `READY_PULL=1` in a project file makes **Ready** a third
 - **Backlog has no exception.** It used to have one — the weekly hygiene sweep's card, filed
   by a GitHub-hosted job whose token could not move a project item, so the lane pulled it
   out of Backlog once. `bin/hygiene-run.sh` (card #196) runs that sweep on the box itself
-  now, with the bot's own `gh` login, and files the card straight into Ready — so the
-  exception is gone, and every Backlog card, without exception, is the owner's.
+  now, with the `watcher` user's own `gh` login, and files the card straight into Ready — so
+  the exception is gone, and every Backlog card, without exception, is the owner's.
 - **`WIP_MAX` (default 2) is board-wide,** not per lane: it counts every open card in the
   In progress column, because that column *is* the work in flight. A lane stops promoting
   when the column is full, whoever filled it. It costs no extra API call — the count comes
@@ -714,6 +743,14 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   touch a project's secrets, never relax a hard rule to make a card pass.
 - Never wait on an external reviewer. There is none. The reviewer runs in the session and
   returns.
+- Never file the review yourself. The `reviewer` subagent's first line reaches the PR only
+  through the guard mod's receipts hook, which runs `bin/review-submit.sh` as the
+  `watcher-reviewer` user and files a real review from the project's reviewer App on the
+  PR's current head (card [#255](https://github.com/lonestarprod/watcher/issues/255)); with
+  no reviewer App it posts the `🤖 reviewer:` comment instead. `sudo` in any form, and that
+  helper by hand, are refused from a tick's shell. The `review-receipt` check
+  (`bin/receipt-check.sh`) reads only the PR's own reviews and comments against its current
+  head SHA, so a review you did not get, or a commit you pushed after it, does not merge.
 - Remove `in-flight` on every exit. A leaked label strands the card.
 - An incident that is a command adds its deny to the guard mod (`mods/guard/hooks/register.ts`) in the
   same PR as its replay case, with the one-line lesson as the deny message (`curl` on the floor
