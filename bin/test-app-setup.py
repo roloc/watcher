@@ -223,6 +223,10 @@ env = dict(os.environ, GH_APP_API=mod.API, GH_APP_WEB=mod.WEB, WATCHER_ROOT=root
 script = os.path.join(HERE, "..", "deploy", "app-setup.py")
 out = subprocess.run([sys.executable, script, "demo", "other", "--repos", "x/y", "--apps-dir", apps_dir], env=env, capture_output=True, text=True)
 check("--repos with several projects is refused", out.returncode != 0 and "one project" in out.stderr, out.stderr)
+open(os.path.join(root, "projects", "demo-triage.env"), "w").write('. "$(dirname "${BASH_SOURCE[0]}")/demo.env"\nPROJECT_NAME=demo-triage\n')
+out = subprocess.run([sys.executable, script, "demo-triage", "--apps-dir", apps_dir], env=env, capture_output=True, text=True, timeout=30)
+check("a lane file's name (an env with no PROJECT_REPO) is refused, not given Apps of its own",
+      out.returncode != 0 and "lane file" in out.stderr and not os.path.exists(os.path.join(apps_dir, "demo-triage")), out.stderr)
 out = subprocess.run([sys.executable, script, "demo", "other", "--apps-dir", apps_dir, "--roles", "author,reviewer", "--port", "0"],
                      env=env, capture_output=True, text=True, timeout=30)
 check("every App already installed: reports each, flags the one with missing permissions, creates nothing, exits 0",

@@ -355,6 +355,10 @@ def main(argv=None):
     projects = []
     for name in a.projects:
         repo = project_repo(name)
+        env_path = os.path.join(ROOT, "projects", f"{name}.env")
+        if repo is None and os.path.exists(env_path) and not repos_flag:
+            sys.exit(f"app-setup: projects/{name}.env has no PROJECT_REPO, so it is a lane file (it sources its project's); "
+                     f"name the project itself — its Apps serve every lane of that project")
         repos = repos_flag or ([repo] if repo else [])
         if not repos:
             print(f"app-setup: no projects/{name}.env with PROJECT_REPO under {ROOT}; the install step will not name the repo"
