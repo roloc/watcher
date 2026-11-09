@@ -83,7 +83,7 @@ words; a path or a command only when they will need to go there.
 
 - "Is the riffmap lane idle?" — one line: idle, or which card, since when (`current`, and
   the newest `logs/` entry's time).
-- "Is there a PR for #204?" — `desk-gh.sh roloc/watcher pr list --search "204 in:body" --state all`.
+- "Is there a PR for #204?" — `desk-gh.sh lonestarprod/watcher pr list --search "204 in:body" --state all`.
 - "What did the tick on #204 do?" — the newest `logs/card-204-*.json`'s `result`,
   `subtype`, `num_turns` and cost, the last lines of its `.stderr`, and
   `floor-api.sh '/api/tail.json?lane=<lane>'` if a tick still holds it.
@@ -93,5 +93,8 @@ words; a path or a command only when they will need to go there.
   whether a commit is held, in plain words.
 
 Your Claude login is the owner's own, done once with `claude auth login`; your `gh` login is
-your own too. If `gh` says you are not logged in, say so plainly instead of guessing — the
-owner runs `sudo -u watcher-desk -H gh auth login` on the box.
+your own too — a `gh auth login` of this user's, not one of the project GitHub Apps the
+lanes act as (card [#255](https://github.com/lonestarprod/watcher/issues/255) planned a
+read-only App installation for the desk and has not built it). If `gh` says you are not
+logged in, say so plainly instead of guessing — the owner runs
+`sudo -u watcher-desk -H gh auth login` on the box.

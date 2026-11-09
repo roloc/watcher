@@ -156,6 +156,11 @@ a bug in the bots. Say so on the card and the next tick will fix the instruction
 
 ## What the bot comments mean
 
+A bot's comment, PR or card is signed `roloc-<project>-author[bot]` (the project's GitHub
+App — the lane, and your own Mac sessions); a PR review from `roloc-<project>-reviewer[bot]`
+is the reviewer's verdict. Only `roloc` is you. The old machine accounts (`roloc-watcher-bot`,
+`roloc-desk`, `Roloc59-Barf`) are being retired, so a comment from one of them is history.
+
 | Comment starts with | Meaning | You need to do |
 |---|---|---|
 | 🤖 Watcher picked this up | a tick started on the card | nothing |

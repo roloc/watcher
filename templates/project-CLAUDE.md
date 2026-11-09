@@ -69,11 +69,13 @@ though a human reading the file would say it obviously does.
   anything that weakens it (drops a check, loosens a condition, makes a test easier to
   pass) is a blocking finding, never a nit. Add its own `review-receipt` CI job, running
   `bin/receipt-check.sh` (card #142): a required check, alongside the one named above,
-  that a code PR cannot merge without — it reads the `🤖 reviewer:`/`🤖 usability:`
-  comments `commands/watch.md` §3 posts and fails a PR whose newest one does not name the
-  exact commit about to merge. `RECEIPT_GATE_PATHS` and `RECEIPT_SCREEN_PATHS` (its own
-  header) are what point it at this project's own gate and screen paths if they differ
-  from the watcher's own defaults.
+  that a code PR cannot merge without — it reads the project's reviewer GitHub App's
+  review on the PR (Approve on the exact commit about to merge passes; Request changes on
+  it fails) and, where there is no reviewer App, the `🤖 reviewer:`/`🤖 usability:`
+  comments `commands/watch.md` §3 posts, and fails a PR whose newest one does not name
+  that commit. `RECEIPT_GATE_PATHS`, `RECEIPT_SCREEN_PATHS` and `RECEIPT_REVIEWER_APPS`
+  (its own header) are what point it at this project's own gate paths, screen paths and
+  reviewer App name if they differ from the watcher's own defaults.
 
 - **Contracts a builder must not touch.** <Name anything a tick is never allowed to decide
   for itself — a data contract between services, a pricing rule, a migration, a public API

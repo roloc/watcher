@@ -20,7 +20,7 @@ WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
 # Same default deploy/autodeploy.sh's own DEPLOY_CANARY_DIR and bin/spawn.sh's own
 # WATCHER_CANARY_DIR already use (card #46).
 WATCHER_CANARY_DIR="${WATCHER_CANARY_DIR:-/opt/watcher-canary}"
-# Card #157: no fork should ever clone `roloc/watcher` by default. When $WATCHER_DIR is
+# Card #157: no fork should ever clone the upstream (`lonestarprod/watcher`) by default. When $WATCHER_DIR is
 # already a git checkout (the ordinary by-hand install: clone your own fork there first,
 # per README, then run this), its own `origin` IS the fork's URL, so that is read instead
 # of asked for. Only when there is no checkout to read one from — nothing at $WATCHER_DIR

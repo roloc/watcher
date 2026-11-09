@@ -14,9 +14,12 @@
 #   PROJECT_ROOT                the project's checkout, for its CLAUDE.md
 # WATCHER_GH is overridable the same way spawn.sh's is, so this is stubbable offline.
 #
-# Runs AS THE BOT: write access to the repo, and whatever the board's owner granted it on
-# the board (deploy/add-project.sh's ask-first list). Reading a branch's full protection
-# detail needs admin, which the bot does not have — GitHub answers that request with a 404
+# Runs as the lane's own GitHub identity — the project's author App through bin/shim/gh
+# under spawn.sh, or the watcher user's own `gh` login under install.sh and on a fork with
+# no Apps (card #255): write access to the repo, and whatever the board's owner granted it
+# on the board (an App owned by the organization reaches its boards by itself;
+# deploy/add-project.sh's ask-first list covers a bot account). Reading a branch's full
+# protection detail needs admin, which neither has — GitHub answers that request with a 404
 # whether or not the branch is protected at all, so this check is best-effort: a 404 there
 # is reported as a WARNING ("cannot verify"), never a failure. add-project.sh is what
 # actually sets the protection, run by whoever owns the repo.

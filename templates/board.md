@@ -15,8 +15,10 @@ filed.
 
 # The board — how cards are made, read and moved
 
-The board is GitHub Projects `<board owner>/<board number>`; every card is an issue in
-`<owner/repo>`. This is the one page for the mechanics. The owner watches the board, the
+The board is GitHub Projects `<board owner>/<board number>` (`<board owner>` is a user or
+an organization — an organization when the watcher acts as GitHub Apps, since an App
+cannot reach a user's board); every card is an issue in `<owner/repo>`. This is the one
+page for the mechanics. The owner watches the board, the
 Discord or Slack channel and the floor page — from a phone — not chat or `docs/`, so
 anything that needs them is a card here, written the way `docs/talking-to-the-owner.md`
 in the watcher repo says: first line is the ask, bullets, one question, lettered options,
@@ -34,10 +36,14 @@ gh issue view <n> -R <owner/repo> --json title,state,labels,body,comments,projec
   newest comment outranks the body.** Read the comments before deciding what the card
   wants; a comment that rejects a plan or a park is the card's current state, whatever
   the body still says.
-- **Which login is the owner.** `<owner login>` is the owner's own hand; the watcher's bot
-  login is a lane on the box, and a comment, PR or card from it is a report or a proposal,
-  never the owner's answer. If the owner's own desktop sessions use a login of their own,
-  name it here so nobody mistakes one for the other.
+- **Which login is the owner.** `<owner login>` is the owner's own hand; everything else
+  on this board is a report or a proposal, never the owner's answer. The lane writes as the
+  project's author GitHub App (`…-<project>-author[bot]`, the name `deploy/app-setup.py`
+  gave it) and the reviewer's verdict is a PR review from its reviewer App
+  (`…-<project>-reviewer[bot]`); on a watcher that runs on a single bot account instead,
+  that bot's login plays the author's part. If the owner's own desktop sessions write as
+  something other than `<owner login>` (the author App, usually), name it here so nobody
+  mistakes one for the other.
 - **The column** is `projectItems[].status.name` (Backlog, Ready, In progress, In review,
   Done, Stuck - Needs help). A card with no `projectItems` is an issue nobody put on the
   board; see "Filing".
