@@ -5,9 +5,16 @@ permissions skipped there and nowhere else, and what actually stops a bad PR fro
 
 ## What the box holds
 
-- A bot GitHub login (`gh auth login`, run once as the `watcher` user) — write access to
-  whatever repo you granted it, and whatever the board's owner granted it on the board.
-  Nothing on your own personal account.
+- GitHub App keys, one author and one reviewer per project, in `/etc/watcher/apps/<project>/`
+  (written by `deploy/app-setup.py`, never in git or a transcript). Each App is installed on
+  that project's repos only, so a leaked or revoked key touches one project. The author key is
+  readable by the `watcher` user; the reviewer key only by the separate `watcher-reviewer`
+  user, and `watcher` may run exactly one program as it (`bin/review-submit.sh`, a root-owned
+  copy, one sudoers line) that files a review on a PR's current head. A tick therefore cannot
+  approve its own PR, and the guard refuses that helper and `sudo` to that user from its shell.
+  Tokens are minted per call and last an hour; none is stored. Nothing on your own personal
+  account. (A fork on one bot account instead: a `gh auth login` for that bot, run once as the
+  `watcher` user — write access to whatever repo you granted it, and the board.)
 - A Claude **subscription** token, `CLAUDE_CODE_OAUTH_TOKEN` in `/etc/watcher/env` — never
   an API key; that file is never allowed to carry `ANTHROPIC_API_KEY`, because the key
   would outrank the login and bill your API account instead of spending the subscription's
@@ -44,7 +51,7 @@ throwaway: a tick can now reach something worth protecting, unsupervised, with n
 in its way. Don't add one. If a project needs to call something with real stakes, that
 call belongs in the project's own deploy pipeline, off this box, not in a tick.
 
-## What the bot account can do
+## What the bot (the author App, or a fallback bot account) can do
 
 - Push a branch, open a PR, comment on a card or a PR, move a card on the board, merge its
   own PR — but only once the gate below agrees to the merge.

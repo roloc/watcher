@@ -37,6 +37,9 @@
 //         a program that writes a path it computes (python, perl), a heredoc into a script. The
 //         Write/Edit fence is the robust half; the Bash list is the second wall's second wall.
 //
+//   Bash  review-submit (the reviewer App's helper, card #255) run from a tick, or any `sudo`/`doas`
+//         naming watcher-reviewer: only hooks/receipts.ts files a review, from the reviewer
+//         subagent's own first line — a tick that runs it itself could approve its own PR
 //   Bash  curl or wget on the floor page (a URL on port 8787): a page is looked at with browse.py,
 //         never fetched (card #212, from #71)
 //         a redirect, tee or --body-file whose target is a fixed name directly under /tmp or
@@ -340,6 +343,17 @@ export function judgeBash(command: string, r: Pick<Roots, 'home' | 'stateRoot'>)
       const hit = w.slice(1).find((x) => FLOOR_URL.test(x.replace(/^--url=/, '')))
       if (hit) return `${base} on the floor page (${hit}) says what the server sent, not what was drawn — a page is looked at with python3 $WATCHER_HOME/bin/browse.py check <url>, never fetched.`
     }
+
+    // the reviewer App's helper: reached only from hooks/receipts.ts, never from a tick's shell
+    const REVIEW_SUBMIT = /(^|\/)review-submit(\.sh)?$/
+    if (REVIEW_SUBMIT.test(w[0])) return `never review-submit from a tick — the reviewer's verdict is filed by the guard from the reviewer's own first line (card #255).`
+    if (base === 'sh' || base === 'bash' || base === 'zsh' || base === 'dash') {
+      const k = w.slice(1).findIndex((x) => !x.startsWith('-'))
+      const script = k < 0 ? undefined : w[k + 1]
+      const noexec = w.slice(1, k < 0 ? w.length : k + 1).some((x) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(x))
+      if (script && !noexec && REVIEW_SUBMIT.test(script)) return `never review-submit from a tick — the reviewer's verdict is filed by the guard from the reviewer's own first line (card #255).`
+    }
+    if (words.some((x) => x === 'sudo' || x === 'doas') && words.some((x) => x === 'watcher-reviewer' || REVIEW_SUBMIT.test(x))) return `never sudo to the reviewer user from a tick — its key is why a tick cannot approve its own PR (card #255).`
 
     if (base === 'systemctl') return `never systemctl from a tick (CLAUDE.md: deploying and the services are the deployer's).`
 

@@ -2,7 +2,7 @@
 
 Fork this repo, set up one box, and watch it merge its first card. Read
 `docs/threat-model.md` first if you want to know exactly what the box can touch before you
-give it write access to anything — short version: a bot GitHub login and a Claude
+give it write access to anything — short version: two GitHub Apps' keys and a Claude
 subscription token, nothing else, on a box you can rebuild if it ever misbehaves.
 
 Each step below says what to run and what tells you it worked. Steps marked **by hand**
@@ -23,17 +23,42 @@ there by itself, so nothing after step 4 is a manual deploy.
 
 **Check:** `git remote -v` shows your fork, not this one.
 
-## 2. Make a bot GitHub account
+## 2. An organization and two GitHub Apps
 
-**By hand:** create a second GitHub account at `https://github.com/join` — never your own,
-and never share one across projects. This is the account that pushes branches, opens PRs,
-comments and merges. Give it write access to the repo you'll run it against (that repo's
-**Settings → Collaborators → Add people**).
+GitHub's terms allow one machine account per person, and a lane, a desk and a few sessions
+each wanting their own login is how an owner ends up suspended (the watcher's own owner was,
+November 8, 2026). The sanctioned shape is a **GitHub App**: free, unlimited, and with its
+own 5,000-requests-per-hour budget per installation. So the watcher acts as Apps, not as a
+user. A user-owned Projects board is out of an App's reach, which is why the repos and boards
+live in an **organization**.
 
-It will also own the board grants `deploy/add-project.sh` asks for in step 5 — nothing else
-to do here yet.
+**By hand:** create a free organization at `https://github.com/organizations/plan` and move
+(or create) the repo there. Then, per project, on the box as root:
 
-**Check:** nothing yet to run — step 4 confirms it's logged in on the box.
+```
+python3 /opt/watcher/deploy/app-setup.py myproject --org myorg --repos myorg/myproject
+```
+
+and open the address it prints. The page has two buttons, **Create roloc-myproject-author**
+and **Create roloc-myproject-reviewer**; click each, then click **Install** on the repos it
+names. The helper receives each App's ID and private key and writes them under
+`/etc/watcher/apps/myproject/` itself. You never download or paste a key. About thirty seconds.
+
+- The **author** App pushes, opens PRs, comments and moves cards.
+- The **reviewer** App files the review verdict as a real GitHub review. Its key is read by a
+  separate system user (`watcher-reviewer`), so a tick cannot approve its own PR.
+
+On a Mac the same command (as yourself, `--roles author`) writes under
+`~/.config/roloc-apps/myproject/`. There is no reviewer App there: no process boundary.
+
+**Fallback, one machine account.** Not everyone wants an organization. A single bot account
+(`https://github.com/join`, never your own, one per person) still works: skip this step's
+helper and do `su - watcher; gh auth login; gh auth setup-git` in step 4. The box notices
+that `/etc/watcher/apps/myproject/` is absent and leaves `gh` alone. The reviewer's verdict is
+then a PR comment instead of a review.
+
+**Check:** `bin/gh-app-token.sh myproject author --identity`, run on the box, prints
+`roloc-myproject-author[bot]` and an address.
 
 ## 3. The Claude login
 
@@ -79,8 +104,8 @@ user, the systemd units, `/etc/watcher/env` and the floor page.
 
 **Check:** `install.sh`'s own last lines. It prints `Next, by hand:` with a list, or
 `Nothing left by hand` once everything is set. Fill in what it lists — the token from
-step 3 goes in `/etc/watcher/env`; the bot's GitHub login goes in with
-`su - watcher; gh auth login; gh auth setup-git` — then run `/opt/watcher/deploy/install.sh`
+step 3 goes in `/etc/watcher/env`; with the fallback single bot account, its GitHub login goes
+in with `su - watcher; gh auth login; gh auth setup-git` (Apps need no login) — then run `/opt/watcher/deploy/install.sh`
 again. It is safe to re-run, and this time it should print `Nothing left by hand`.
 
 **Any Linux host with systemd will do.** Proxmox is what the original box runs on, and it

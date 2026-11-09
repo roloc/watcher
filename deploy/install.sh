@@ -204,6 +204,61 @@ install_desk() {
   fi
 }
 
+# install_apps — GitHub Apps instead of machine accounts (card #255). A no-op, silently, when
+# there is no /etc/watcher/apps folder: a box on one bot account's `gh auth login` is exactly
+# as it was. Otherwise, for each project folder deploy/app-setup.py wrote there:
+#   config (App and installation IDs, no secret) is world-readable; author.pem is
+#   root:watcher 640 — the lane and its ticks mint the author token from it; reviewer.pem is
+#   root:watcher-reviewer 640 — only the separate watcher-reviewer user can read it. That user
+#   exists so a tick can ask for a review of its PR's head but never sign as the reviewer
+#   (bin/review-submit.sh, the one thing the sudoers line lets `watcher` run as it, from a
+#   root-owned copy: the watcher user owns the release folders, so a copy in them could be
+#   rewritten into anything). A function so bin/test-install-apps.sh can call it with
+#   INSTALL_LIB_ONLY=1; APPS_DIR, REVIEW_LIB_DIR, REVIEW_HOME and SUDOERS_DIR exist for that test.
+install_apps() {
+  local root="${WATCHER_APPS_DIR:-/etc/watcher/apps}" lib="${REVIEW_LIB_DIR:-/usr/local/lib/watcher-review}"
+  local rhome="${REVIEW_HOME:-/var/lib/watcher-review}" sudoers="${SUDOERS_DIR:-/etc/sudoers.d}"
+  [ -d "$root" ] || return 0
+  local d have_reviewer=0
+  for d in "$root"/*/; do
+    [ -f "${d}reviewer.pem" ] && have_reviewer=1
+  done
+  if [ "$have_reviewer" = 1 ] && ! id watcher-reviewer >/dev/null 2>&1; then
+    useradd -r -m -d "$rhome" -s /usr/sbin/nologin watcher-reviewer \
+      || { echo "warning: could not create the watcher-reviewer user; reviews stay comments" >&2; have_reviewer=0; }
+  fi
+  for d in "$root"/*/; do
+    d="${d%/}"
+    [ -d "$d" ] || continue
+    chown root:root "$d" && chmod 755 "$d"
+    [ -f "$d/config" ] && chown root:root "$d/config" && chmod 644 "$d/config"
+    [ -f "$d/author.pem" ] && chown root:watcher "$d/author.pem" && chmod 640 "$d/author.pem"
+    if [ -f "$d/reviewer.pem" ]; then
+      if [ "$have_reviewer" = 1 ]; then chown root:watcher-reviewer "$d/reviewer.pem"; else chown root:root "$d/reviewer.pem"; fi
+      chmod 640 "$d/reviewer.pem"
+    fi
+  done
+  [ "$have_reviewer" = 1 ] || return 0
+  install -d -o root -g root -m 755 "$lib"
+  install -m 755 -o root -g root "$WATCHER_DIR/bin/review-submit.sh" "$lib/review-submit"
+  install -m 755 -o root -g root "$WATCHER_DIR/bin/gh-app-token.sh" "$lib/gh-app-token"
+  install -d -o watcher-reviewer -g watcher-reviewer -m 700 "$rhome/cache"
+  # One line: `watcher` may run that one program as watcher-reviewer, and GH_REPO (the only
+  # thing the program takes from the environment) survives the switch. Checked by visudo
+  # before it is installed, so a bad line can never lock sudo.
+  local want
+  want="$(mktemp)"
+  printf 'Defaults>watcher-reviewer env_keep += "GH_REPO"\nwatcher ALL=(watcher-reviewer) NOPASSWD: %s/review-submit\n' "$lib" > "$want"
+  if ! cmp -s "$want" "$sudoers/watcher-review-submit"; then
+    if visudo -cf "$want" >/dev/null 2>&1; then
+      install -m 440 -o root -g root "$want" "$sudoers/watcher-review-submit"
+    else
+      echo "warning: the review-submit sudoers line did not pass visudo; not installed, reviews stay comments" >&2
+    fi
+  fi
+  rm -f "$want"
+}
+
 # bin/test-deploy.sh sources this file with INSTALL_LIB_ONLY=1 to call canary_clone directly,
 # with no root, no watcher user and no network — stopping here is what makes that possible.
 # bin/test-install-hygiene.sh does the same to call hygiene_opts_in, bin/test-install-desk.sh
@@ -353,6 +408,7 @@ systemctl enable --now watcher-floor.service >/dev/null 2>&1 \
 # The desk (card #205): one per box, beside the floor page. Unlike the floor it is only
 # restarted when its own files changed (install_desk, above).
 install_desk || true
+install_apps || true
 
 NOT_STARTED=()
 for p in "$@"; do
@@ -396,7 +452,9 @@ grep -qE '^DISCORD_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  
               (and DISCORD_MENTION=<@your-id> to get pinged on Stuck alerts)")
 grep -qE '^SLACK_WEBHOOK_URL=.+' /etc/watcher/env 2>/dev/null || MISSING+=("  Slack:      optional; same alerts, to a channel's incoming webhook as SLACK_WEBHOOK_URL=…
               (and SLACK_MENTION=<@your-id> to get pinged on Stuck alerts)")
-su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su - watcher; gh auth login   (the bot account); gh auth setup-git")
+# With GitHub Apps set up (install_apps above) there is no `gh auth login` to ask for.
+[ -n "$(ls -A "${WATCHER_APPS_DIR:-/etc/watcher/apps}" 2>/dev/null)" ] \
+  || su - watcher -c "gh auth status" >/dev/null 2>&1 || MISSING+=("  GitHub:     su - watcher; gh auth login   (the bot account); gh auth setup-git")
 # A browser for bin/browse.py: how a tick on any project looks at a page (the reviewer
 # too). Asked of browse.py itself, as the user the ticks run as, so this looks where a
 # tick's own call will look.

@@ -32,6 +32,7 @@ export BOARD_REAL="$HERE/board.py"
 REPO_ROOT="$(dirname "$HERE")"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+export WATCHER_APPS_DIR="$TMP/no-apps"  # hermetic: never the real /etc/watcher/apps
 BIN="$TMP/bin"
 mkdir -p "$BIN"
 
@@ -243,6 +244,7 @@ echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
 echo "claude-env background-tasks-disabled=${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-unset}" >> "$TEST_LOG"
 echo "claude-env path-head=${PATH%%:*} real=${WATCHER_REAL_CLAUDE:-unset}" >> "$TEST_LOG"
 echo "claude-env watcher-home=${WATCHER_HOME:-unset}" >> "$TEST_LOG"
+echo "claude-env app project=${WATCHER_APP_PROJECT:-unset} author=${GIT_AUTHOR_NAME:-unset} <${GIT_AUTHOR_EMAIL:-unset}> helpers=${GIT_CONFIG_COUNT:-0}:${GIT_CONFIG_VALUE_1:-none}" >> "$TEST_LOG"
 # CLAUDE_FLIP_POINTER="<symlink>:<new target>" (card #106 test only): flips the pointer as
 # a side effect of this tick running, standing in for a deploy landing while the tick (in
 # the real world, a whole lane's process) is still going.
@@ -2456,6 +2458,20 @@ fresh_state
 board_list $'24\tP2\tbuilder\t-\tCard twenty-four'
 OUT="$(LANE_COMMAND=/triage run --dry-run 2>/dev/null)"
 if printf '%s' "$OUT" | grep -q -- '-p "/watcher:triage 24"'; then pass "a /triage lane is launched as /watcher:triage"; else flunk "triage lane command" "$OUT"; fi
+
+# 39. Card #255: with GitHub Apps set up for the project, the tick's git is the App's.
+fresh_state
+board_list $'25\tP2\tbuilder\t-\tCard twenty-five'
+board_show '{"number":25,"state":"OPEN","status":"In progress","labels":[]}'
+run --once >/dev/null 2>&1
+if grepped "claude-env app project=unset author=unset <unset> helpers=0:none"; then pass "no /etc/watcher/apps/<project>: the tick's git and gh environment is untouched"; else flunk "app env leaked into a box with no Apps" "$(grep 'claude-env app' "$TESTLOG")"; fi
+mkdir -p "$TMP/apps/proj"
+printf 'AUTHOR_APP_ID=1\nAUTHOR_INSTALLATION_ID=2\nAUTHOR_SLUG=roloc-proj-author\nAUTHOR_BOT_ID=99\n' > "$TMP/apps/proj/config"
+fresh_state
+board_list $'25\tP2\tbuilder\t-\tCard twenty-five'
+board_show '{"number":25,"state":"OPEN","status":"In progress","labels":[]}'
+WATCHER_APPS_DIR="$TMP/apps" run --once >/dev/null 2>&1
+if grepped "claude-env app project=proj author=roloc-proj-author[bot] <99+roloc-proj-author[bot]@users.noreply.github.com> helpers=2:!$HERE/shim/gh-credential"; then pass "Apps set up: the tick commits as the author App's bot and pushes through the credential helper"; else flunk "app env" "$(grep 'claude-env app' "$TESTLOG")"; fi
 
 echo "$n cases, $( [ $fail = 0 ] && echo all passed || echo SOME FAILED )"
 exit $fail

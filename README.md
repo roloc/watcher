@@ -204,8 +204,8 @@ on. Details in `docs/how-it-works.md`, "Watching the product".
 
 ## Set up a box (Debian 12 LXC, unprivileged, 4 cores / 8 GB)
 
-`docs/getting-started.md` is the numbered, step-by-step version — fork, bot account,
-your own Claude subscription token, the box, a first project, a first card. Short form:
+`docs/getting-started.md` is the numbered, step-by-step version — fork, organization and
+GitHub Apps, your own Claude subscription token, the box, a first project, a first card. Short form:
 
     apt install git
     git clone <your fork's clone URL> /opt/watcher   # or rsync it in
@@ -224,9 +224,18 @@ Then by hand, once:
    That one file logs in the tick *and* anything the tick runs from its shell: Claude Code
    strips the token from every Bash tool call's environment, so `bin/shim/claude` — first
    on the tick's `PATH` — reads it back from this file before exec'ing the real binary.
-2. **GitHub:** `su - watcher`, `gh auth login` as the bot account, `gh auth setup-git`. The bot
-   needs write access to the repo and access to the Projects board.
-3. **Project:** `BOT_LOGIN=<the bot's login> deploy/add-project.sh riffmap yourorg/riffmap`
+2. **GitHub:** an organization that owns the repo and its board, and two GitHub Apps per
+   project: `python3 deploy/app-setup.py riffmap --org yourorg --repos yourorg/riffmap`
+   serves a page with a Create button per App, receives each App's ID and private key and
+   writes them into `/etc/watcher/apps/riffmap/` (`deploy/install.sh` sets owners; the
+   reviewer's key goes to its own system user, so a tick cannot approve its own PR).
+   `bin/shim/gh` and `bin/shim/gh-credential` mint a short-lived token per call
+   (`bin/gh-app-token.sh`); nothing is stored with `gh auth login`. *Fallback:* one bot
+   account, `su - watcher`, `gh auth login`, `gh auth setup-git` — with no
+   `/etc/watcher/apps/<project>/` the box leaves `gh` alone, and the verdict is a PR comment
+   instead of a review. GitHub's terms allow one machine account per person; more is what got
+   the watcher's own owner suspended.
+3. **Project:** `BOT_LOGIN=<the author App's login, or the fallback bot's> deploy/add-project.sh riffmap yourorg/riffmap`
    (from your own machine, see "Add a project" below) sets up the board, the labels, and
    `projects/riffmap.env`; commit and push that file, then `deploy/install.sh riffmap`
    clones the repo under `/home/watcher/projects/` and drop its `.env.local` and any
@@ -244,7 +253,7 @@ Then by hand, once:
    hand-editing `bin/floor.py` outside the normal deploy path.
 
 **What this box can and cannot do** is `docs/threat-model.md` — read it before granting
-the bot account write access to anything.
+the box write access to anything.
 
 ## Looking at pages
 

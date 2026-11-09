@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# The `gh` a tick's shell (and board.py, which calls `gh`) finds first (card #255). When the
+# project has GitHub Apps set up (bin/gh-app-token.sh finds its config), this exports a fresh
+# author-App installation token as GH_TOKEN and execs the real gh; otherwise it execs the real
+# gh untouched, so a box or fork on a single bot account's `gh auth login` is unchanged.
+#
+# The token is minted per invocation (cached an hour by the token script), never stored with
+# `gh auth login`: a tick can outlive a 60-minute token. A `gh pr checks --watch` that outlives
+# its token fails and the tick re-runs it, as commands/watch.md already says.
+# WATCHER_APP_ROLE=reviewer asks for the reviewer App instead (bin/review-submit.sh only).
+# A token the caller already set in GH_TOKEN is kept.
+set -u
+self="${BASH_SOURCE[0]}"
+here="$(cd "$(dirname "$self")" && pwd)"
+real="${WATCHER_REAL_GH:-}"
+case "$real" in */*) ;; *) real="" ;; esac
+[ -n "$real" ] && [ "$real" -ef "$self" ] && real=""
+if [ -z "$real" ]; then
+  IFS=: read -r -a dirs <<< "$PATH"
+  for d in "${dirs[@]}"; do
+    [ -n "$d" ] && [ -x "$d/gh" ] || continue
+    [ "$d/gh" -ef "$self" ] && continue
+    real="$d/gh"; break
+  done
+fi
+[ -n "$real" ] || { echo "gh shim: no real gh found on PATH" >&2; exit 127; }
+
+if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+  minter="${WATCHER_APP_TOKEN:-$here/../gh-app-token.sh}"
+  role="${WATCHER_APP_ROLE:-author}"
+  # On success the minter prints only the token; on failure only one line of why. "No App set
+  # up" and "no project" are the fallback path (today's gh login); anything else is loud, so a
+  # revoked key never quietly turns into the old machine account.
+  if out="$("$minter" "$role" 2>&1)"; then
+    [ -n "$out" ] && export GH_TOKEN="$out"
+  else
+    case "$out" in
+      *"no App set up"*|*"no project"*) ;;
+      *) printf '%s\n' "$out" >&2; exit 1 ;;
+    esac
+  fi
+fi
+exec "$real" "$@"
