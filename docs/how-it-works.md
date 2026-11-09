@@ -364,7 +364,7 @@ Stuck instead. The owner moving a parked card back to In progress resets the cou
 ## The watcher's own board
 
 The watcher is also a project: `watcher@watcher` (`projects/watcher.env`) is one lane,
-with no `LANE_AGENTS`, over the [Watcher board](https://github.com/users/roloc/projects/2)
+with no `LANE_AGENTS`, over the [Watcher board](https://github.com/orgs/lonestarprod/projects/1)
 and this repo. Nothing about the spawner or `/watch` is special-cased for it; what differs
 lives where every project's differences live, in its `CLAUDE.md` ("When the watcher works
 its own board"). The three things that make a loop editing itself safe enough:

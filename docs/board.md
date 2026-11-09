@@ -1,7 +1,7 @@
 # The board — how cards are made, read and moved
 
-The board is GitHub Projects <https://github.com/users/roloc/projects/2> (board number 2,
-owner `roloc`); every card is an issue in `roloc/watcher`. This is the one page for the
+The board is GitHub Projects <https://github.com/orgs/lonestarprod/projects/1> (board number 1,
+owner `lonestarprod`); every card is an issue in `lonestarprod/watcher`. This is the one page for the
 mechanics — `templates/board.md` filled in for this board, the same page every project
 on the watcher gets — so a session
 told "file a card" or "take a look at #n" knows what to run without going to look. The
@@ -13,7 +13,7 @@ is a card here.
 One call gives the whole card: body, every comment, labels, and which column it is in.
 
 ```bash
-gh issue view <n> -R roloc/watcher --json title,state,labels,body,comments,projectItems
+gh issue view <n> -R lonestarprod/watcher --json title,state,labels,body,comments,projectItems
 ```
 
 - **The ask is the body's first line** — unless the owner commented later. **The owner's
@@ -42,7 +42,7 @@ gh issue view <n> -R roloc/watcher --json title,state,labels,body,comments,proje
   card: a desk per lane, and Peek for the tick's own session. `in-flight` on the card means
   a tick holds it right now; never add or remove that label by hand from a Mac session
   (`bin/board.py unclaim <n>` is for a leaked one, after the tick is gone).
-- **Its PR**, if any: `gh pr list -R roloc/watcher --search "<n> in:body" --state all`
+- **Its PR**, if any: `gh pr list -R lonestarprod/watcher --search "<n> in:body" --state all`
   (a tick's PR says `Closes #<n>`).
 
 `bin/board.py show <n>` (live, bypasses the cache) and `list "<column>"` need the lane's
@@ -62,14 +62,14 @@ Write the body in a scratch file and pass `--body-file`: bodies are long and ful
 backticks. Then one command:
 
 ```bash
-gh issue create -R roloc/watcher --title "<what ships, in one line>" --body-file card.md
+gh issue create -R lonestarprod/watcher --title "<what ships, in one line>" --body-file card.md
 ```
 
 To file a card **and** put it on the board in one step (it lands in Backlog), use
 `board file` instead — it needs no board workflow:
 
 ```bash
-board file -R roloc/watcher --title "<what ships, in one line>" --body-file card.md
+board file -R lonestarprod/watcher --title "<what ships, in one line>" --body-file card.md
 ```
 
 It prints the card's URL; exit 3 means the issue exists but is not on the board. A bare
@@ -77,11 +77,11 @@ It prints the card's URL; exit 3 means the issue exists but is not on the board.
 be on, so confirm, because a card that is not on the board is invisible to the lane:
 
 ```bash
-gh issue view <n> -R roloc/watcher --json projectItems --jq '.projectItems[].status.name'
+gh issue view <n> -R lonestarprod/watcher --json projectItems --jq '.projectItems[].status.name'
 ```
 
 If that prints nothing, put it on by hand:
-`gh project item-add 2 --owner roloc --url https://github.com/roloc/watcher/issues/<n>`.
+`gh project item-add 1 --owner lonestarprod --url https://github.com/lonestarprod/watcher/issues/<n>`.
 
 **It stays in Backlog unless the owner says otherwise.** Backlog is never pulled from — it
 is where a card waits for the owner to move it (the weekly hygiene sweep's own card is the
@@ -96,8 +96,8 @@ starting the work, not scheduling it.
 owner, the field is what the lane reads before it picks any card:
 
 ```bash
-id="$(gh api repos/roloc/watcher/issues/<m> --jq .id)"
-gh api -X POST repos/roloc/watcher/issues/<n>/dependencies/blocked_by -F issue_id="$id"
+id="$(gh api repos/lonestarprod/watcher/issues/<m> --jq .id)"
+gh api -X POST repos/lonestarprod/watcher/issues/<n>/dependencies/blocked_by -F issue_id="$id"
 ```
 
 ### Labels

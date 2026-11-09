@@ -14,7 +14,7 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   round trip, so still run it here first.
 - `.claude-plugin/` — the watcher as one installable plugin (card #209): `plugin.json` names
   `commands/`, `agents/` and the guard mod's hooks; `marketplace.json` makes
-  `/plugin install watcher --marketplace roloc/watcher` work. `bin/spawn.sh` and `bin/eval.sh`
+  `/plugin install watcher --marketplace lonestarprod/watcher` work. `bin/spawn.sh` and `bin/eval.sh`
   load it with `--plugin-dir "$WATCHER_HOME"` and run `/watcher:watch` and `/watcher:triage`; its
   agents are `watcher:reviewer` and `watcher:usability`. `claude plugin validate .` checks it
   (its one warning, the root `CLAUDE.md`, is this repo's own file and is expected).
@@ -229,7 +229,7 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
 ## When the watcher works its own board
 
 The `watcher@watcher` lane (`projects/watcher.env`) works the
-[Watcher board](https://github.com/users/roloc/projects/2) with this repo as its project, so
+[Watcher board](https://github.com/orgs/lonestarprod/projects/1) with this repo as its project, so
 a tick on that board reads this file as the project's `CLAUDE.md`. On top of everything
 above:
 

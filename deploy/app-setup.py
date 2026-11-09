@@ -3,7 +3,12 @@
 
 Creates a project's GitHub Apps through GitHub's manifest flow and files their keys where
 bin/gh-app-token.sh reads them. Standard library only, like bin/browse.py. Run on the box (as
-root) or on a Mac, then open the printed address in a browser:
+root) or on a Mac, then open the printed address in a browser. The address is localhost, and
+GitHub sends the browser back to it, so on the box first open a tunnel from the Mac:
+
+  ssh -L 8799:127.0.0.1:8799 root@<box>
+
+(the port is --port, 8799 by default), and open http://localhost:8799/ on the Mac:
 
   1. The page has one prefilled form per App. Click Create (twice, once per App); GitHub sends
      the browser back here with a one-time code.
