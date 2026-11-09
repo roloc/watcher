@@ -37,7 +37,7 @@ one machine account per person; the owner had three, and GitHub suspended one of
 | `roloc` | the owner's own hand | moves cards, answers Stuck cards, owns every product decision. The only identity whose comment is the owner's answer |
 | `roloc-<project>-author[bot]` | the lane and its ticks (`bin/shim/gh`, `bin/shim/gh-credential`, a token minted per call by `bin/gh-app-token.sh` from `/etc/watcher/apps/<project>/author.pem`); also the owner's own Mac sessions, from `~/.config/roloc-apps/<project>/` | pushes, opens PRs, comments, moves cards. Commits are authored as this bot |
 | `roloc-<project>-reviewer[bot]` | `bin/review-submit.sh`, run as the separate `watcher-reviewer` system user, the only one that can read `reviewer.pem`; called only by the guard mod's receipts hook | files the `reviewer` subagent's verdict as a real PR review — Approve or Request changes — on the PR's exact head commit. A stale SHA is refused |
-| `roloc-watcher-bot`, `roloc-desk`, `Roloc59-Barf` | machine accounts, being retired (the last step of [#255](https://github.com/lonestarprod/watcher/issues/255), after the appeal). Until then the `watcher` user's own `gh` login is still what the floor page, the hygiene timer, the detector and the deployer's check-run read use: they run outside a lane, without the shim | nothing new from a lane. An older card, PR or comment from one of them is a report or a proposal, never the owner's answer |
+| `roloc-watcher-bot`, `roloc-desk`, `Roloc59-Barf` | machine accounts, being retired: the last step of [#255](https://github.com/lonestarprod/watcher/issues/255), after the appeal, once [#273](https://github.com/lonestarprod/watcher/issues/273) has moved the box's out-of-lane readers onto the App. Until then the `watcher` user's own `gh` login is still what the floor page, the hygiene timer, the detector and the deployer's check-run read use: they run outside a lane, without the shim | nothing new from a lane. An older card, PR or comment from one of them is a report or a proposal, never the owner's answer |
 
 A GitHub App cannot reach a user-owned Projects board — only an organization-level Projects
 permission exists — so the repo and the board live in the `lonestarprod` organization:
@@ -743,12 +743,14 @@ same way the deployer closes its own: a small script on a timer, no model, deter
   touch a project's secrets, never relax a hard rule to make a card pass.
 - Never wait on an external reviewer. There is none. The reviewer runs in the session and
   returns.
-- Never file the review yourself. The `reviewer` subagent's first line reaches the PR only
-  through the guard mod's receipts hook, which runs `bin/review-submit.sh` as the
-  `watcher-reviewer` user and files a real review from the project's reviewer App on the
-  PR's current head (card [#255](https://github.com/lonestarprod/watcher/issues/255)); with
-  no reviewer App it posts the `🤖 reviewer:` comment instead. `sudo` in any form, and that
-  helper by hand, are refused from a tick's shell. The `review-receipt` check
+- Never file the review yourself. The `reviewer` subagent's first line becomes a GitHub
+  review only through the guard mod's receipts hook, which runs `bin/review-submit.sh` as
+  the `watcher-reviewer` user and files it from the project's reviewer App on the PR's
+  current head (card [#255](https://github.com/lonestarprod/watcher/issues/255)); the hook
+  is best effort, and the `🤖 reviewer:` comment `commands/watch.md` §3 has the tick post is
+  the receipt when there is no reviewer App or the hook could not file. `sudo` that names
+  `watcher-reviewer` or `review-submit`, and that helper by hand, are refused from a tick's
+  shell. The `review-receipt` check
   (`bin/receipt-check.sh`) reads only the PR's own reviews and comments against its current
   head SHA, so a review you did not get, or a commit you pushed after it, does not merge.
 - Remove `in-flight` on every exit. A leaked label strands the card.

@@ -118,7 +118,7 @@ against the commit that is actually about to merge. The review itself is signed 
 the tick cannot read: `reviewer.pem` belongs to the `watcher-reviewer` user, and the one
 road to it is `bin/review-submit.sh` through a single sudoers line — a program that takes
 the PR, the SHA, the verdict and the body on stdin, validates each, and refuses a SHA that
-is not the PR's head right now. The guard mod refuses `sudo` and that helper from a tick's
+is not the PR's head right now. The guard mod refuses `sudo` to that user and that helper from a tick's
 shell, so only the receipts hook, with the reviewer subagent's own first line, ever calls
 it. A tick that skips the review, or whose branch moves after the review ran, cannot
 merge, regardless of what it claims in its own report.

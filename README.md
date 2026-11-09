@@ -355,9 +355,10 @@ scripts, and a redirect, `tee`, `rm`, `cp`, `sed -i` or `git pull` aimed at `/op
 `/etc/watcher` or a lane's state directory are refused with a one-line reason the model
 reads as the tool's error. A `Write`, `Edit` or `NotebookEdit` whose path resolves (every
 symlink followed) outside the worktree, `$TMPDIR` or `~/.claude` is refused the same way.
-So is `sudo` in any form from a tick's shell, and `review-submit` run by hand (card
-[#255](https://github.com/lonestarprod/watcher/issues/255)): the reviewer's verdict reaches
-GitHub only through the mod's own receipts hook (`mods/guard/hooks/receipts.ts`, card
+So is any `sudo` or `doas` that names `watcher-reviewer` or `review-submit` (card
+[#255](https://github.com/lonestarprod/watcher/issues/255); any other `sudo` is stripped as
+a wrapper and the command inside it judged on its own): the reviewer's verdict reaches
+GitHub as a review only through the mod's own receipts hook (`mods/guard/hooks/receipts.ts`, card
 [#211](https://github.com/lonestarprod/watcher/issues/211)), which takes the `reviewer`
 subagent's first line from the tool result and hands it to `bin/review-submit.sh` as the
 separate `watcher-reviewer` user — the one program `watcher` may sudo, from a root-owned
