@@ -282,6 +282,9 @@ ROUNDS = {778: [{"when": "2026-10-09T08:00:00Z", "images": [
 ASKS = {778: "**Needs Steve: pick a direction for the earlier thing**"}
 
 
+BOARD_ADDRS = {("roloc", 2): "https://github.com/orgs/lonestarprod/projects/1"}
+
+
 class LiveCache:
     """Builds on every request, so a case can change the files and see the page follow."""
     broken = False
@@ -306,7 +309,10 @@ class LiveCache:
                                  # Card #165: the same two directories tail_lookup (below)
                                  # already searches for Peek — the desk's own "Waiting"
                                  # line reads the identical session, never a second lookup.
-                                 claude_projects_dir=[CLAUDE, CANARY])
+                                 claude_projects_dir=[CLAUDE, CANARY],
+                                 # Card #265: alpha's board is a user board (no address
+                                 # cached: the fallback), beta's an organization's.
+                                 board_url_fn=lambda o, n: BOARD_ADDRS.get((o, n), ""))
 
 
 def tail_lookup(lane, card, file, pos):
@@ -1532,6 +1538,19 @@ try:
         check("'plan posted' reads at phone width too", "plan posted" in b.text(), b.text())
         check("no uncaught exception", b.errors == [], b.errors)
         shot(b, "floor-plan-posted-phone.png")
+
+    print("20. card #265: a room's name opens its board — orgs/ for an organization's, users/ for a user's")
+    with browse.Browser() as b:
+        b.goto(URL)
+        b.wait_for(DESKS_DRAWN)
+        hrefs = b.eval("Object.fromEntries([...document.querySelectorAll('a.room-name')]"
+                       ".map(a => [a.textContent.trim(), a.href]))")
+        check("the organization-owned project's heading links to orgs/…",
+              hrefs.get("beta") == "https://github.com/orgs/lonestarprod/projects/1", hrefs)
+        check("the user-owned project's heading still links to users/…",
+              hrefs.get("alpha") == "https://github.com/users/roloc/projects/1", hrefs)
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "floor-board-links.png")
 except browse.BrowseError as e:
     print(e, file=sys.stderr)
     fails = 1

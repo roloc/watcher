@@ -360,7 +360,8 @@ def org_stub_run(cmd, **kwargs):
         return stub_run(cmd, **kwargs)
     kv = _graphql_kv(cmd)
     org_queries.append(kv["query"])
-    inner = {"projectV2": {"id": "PVT_ORG", "title": "t", "fields": {"nodes": [
+    inner = {"projectV2": {"id": "PVT_ORG", "title": "t",
+                           "url": "https://github.com/orgs/lonestarprod/projects/7", "fields": {"nodes": [
         {"name": "Status", "id": "F_STATUS", "options": PROJECT_STATUS_OPTIONS}]}}}
     return FakeResult(json.dumps({"data": {"repositoryOwner": inner}}))
 
@@ -372,6 +373,19 @@ check("an org's board is found through repositoryOwner",
       p["id"] == "PVT_ORG" and "Status" in fields, p)
 check("the query names ProjectV2Owner, so one query serves users and organizations",
       "repositoryOwner(login:$owner)" in org_queries[0] and "ProjectV2Owner" in org_queries[0], org_queries)
+check("the query asks for the board's own url (card #265)", " url" in org_queries[0], org_queries)
+import io, contextlib
+_out = io.StringIO()
+with contextlib.redirect_stdout(_out):
+    board.cmd_board_url()
+check("board-url prints the cached address: orgs/ for an organization's board",
+      _out.getvalue().strip() == "https://github.com/orgs/lonestarprod/projects/7", _out.getvalue())
+board.OWNER, board.NUMBER = "lonestarprod", 8  # nothing cached under this one
+_out = io.StringIO()
+with contextlib.redirect_stdout(_out):
+    board.cmd_board_url()
+check("board-url with nothing cached prints nothing (the floor falls back)", _out.getvalue().strip() == "")
+board.OWNER, board.NUMBER = "lonestarprod", 7
 check("_owner_node still reads the older `user` and `organization` keys",
       board._owner_node({"user": {"a": 1}}) == {"a": 1} and board._owner_node({"organization": {"b": 2}}) == {"b": 2}
       and board._owner_node({"repositoryOwner": None}) is None)

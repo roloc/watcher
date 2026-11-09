@@ -462,7 +462,7 @@ def project(fresh=False):
                 return cached["project"], cached["fields"]
         q = """query($owner:String!,$number:Int!){ rateLimit{ remaining resetAt limit cost }
           repositoryOwner(login:$owner){ ... on ProjectV2Owner{ projectV2(number:$number){
-          id title
+          id title url
           fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } } }"""
         try:
             u = _owner_node(gh(q, owner=OWNER, number=NUMBER))
@@ -1541,10 +1541,21 @@ def cmd_images(issue, *rest):
     return 0
 
 
+def cmd_board_url():
+    """The board's own address (`projectV2.url`: `orgs/…` or `users/…`, whichever kind of
+    owner holds it — card #265), read from the project cache of any age and never fetched,
+    so the floor page pays no GraphQL for it. Empty when nothing is cached yet, or the
+    cache predates the `url` field; the caller then falls back to its own guess."""
+    _require_owner()
+    cached = _cache_read_any_age(_project_cache_name()) or {}
+    print((cached.get("project") or {}).get("url") or "")
+    return 0
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] not in ("list", "move", "file", "show", "unclaim", "stage", "sweep-stages", "sweep-waiting", "blockers", "queue", "notify",
-                            "dump", "ask", "images", "plan", "ratelimit", "ledger"):
+                            "dump", "ask", "images", "plan", "ratelimit", "ledger", "board-url"):
         sys.exit(__doc__)
     try:
         sys.exit({"list": lambda: cmd_list(*a[1:2]),
@@ -1561,6 +1572,7 @@ if __name__ == "__main__":
                   "ratelimit": lambda: cmd_ratelimit(),
                   "ledger": lambda: cmd_ledger(),
                   "dump": lambda: cmd_dump(),
+                  "board-url": lambda: cmd_board_url(),
                   "ask": lambda: cmd_ask(a[1]),
                   "images": lambda: cmd_images(a[1], *a[2:]),
                   "plan": lambda: cmd_plan(a[1])}[a[0]]())

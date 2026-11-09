@@ -303,15 +303,18 @@ def agent_of(labels):
     return "-"
 
 
-def group_by_project(lanes):
+def group_by_project(lanes, board_url_fn=None):
     projects = {}
     for lane in lanes:
         key = (lane["board_owner"], lane["board_number"])
+        # Card #265: the board says where it lives (`orgs/` or `users/`); the `users/` form
+        # is only the fallback for a cache that has no address yet.
+        known = board_url_fn(*key) if board_url_fn and key not in projects else ""
         p = projects.setdefault(key, {
             "name": lane["project_repo"].split("/")[-1],
             "board_owner": lane["board_owner"],
             "board_number": lane["board_number"],
-            "board_url": f"https://github.com/users/{lane['board_owner']}/projects/{lane['board_number']}",
+            "board_url": known or f"https://github.com/users/{lane['board_owner']}/projects/{lane['board_number']}",
             "project_repo": lane["project_repo"],
             "lanes": [],
         })
@@ -336,6 +339,20 @@ def fetch_board(owner, number, board_py=None, timeout=60):
     if r.returncode != 0:
         raise RuntimeError((r.stderr or "board.py dump failed").strip()[:300])
     return json.loads(r.stdout)
+
+
+def fetch_board_url(owner, number, board_py=None, timeout=20):
+    """`board.py board-url`: the board's address from its cache, "" when it has none yet.
+    A cache read, never a GraphQL call; any failure is "" and the page uses its fallback."""
+    board_py = board_py or os.path.join(HERE, "board.py")
+    env = dict(os.environ, BOARD_OWNER=owner, BOARD_NUMBER=str(number))
+    try:
+        r = subprocess.run([sys.executable, board_py, "board-url"], capture_output=True,
+                           text=True, env=env, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    url = r.stdout.strip() if r.returncode == 0 else ""
+    return url if url.startswith("https://github.com/") else ""
 
 
 def project_counts(items):
@@ -1336,11 +1353,12 @@ def make_card_lookup(repos_fn, fetcher=fetch_card, cache_sec=60, clock=time.time
 def build_state(projects_dir, state_root, board_fetcher, unit_active_fn=None, ask_fn=None,
                  images_fn=None, rounds_fn=None, now=None, box_name=None, ci_fetcher=None,
                  deploy_fn=None, deploy_repo=None, ratelimit_fn=None, box_stats_fn=None,
-                 proxmox_fn=None, ledger_fn=None, plan_fn=None, claude_projects_dir=None):
+                 proxmox_fn=None, ledger_fn=None, plan_fn=None, claude_projects_dir=None,
+                 board_url_fn=None):
     now = now or datetime.now(timezone.utc)
     box_name = box_name or socket.gethostname()
     lanes = discover_lanes(projects_dir, state_root)
-    projects = group_by_project(lanes)
+    projects = group_by_project(lanes, board_url_fn)
 
     out_projects = []
     needs_steve_total = 0
@@ -4355,7 +4373,8 @@ def main(argv):
                             ci_fetcher=fetch_ci, deploy_repo=deploy_repo,
                             deploy_fn=deploy_lookup,
                             ratelimit_fn=board_ratelimit, ledger_fn=board_ledger, box_stats_fn=box_stats,
-                            proxmox_fn=fetch_proxmox, claude_projects_dir=claude_projects_dir)
+                            proxmox_fn=fetch_proxmox, claude_projects_dir=claude_projects_dir,
+                            board_url_fn=fetch_board_url)
 
     idle_after_sec = max(refresh_sec * 5, 300)
     cache = Cache(build, refresh_sec, idle_after_sec=idle_after_sec)
