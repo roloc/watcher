@@ -60,6 +60,9 @@ then a PR comment instead of a review.
 **Check:** `bin/gh-app-token.sh myproject author --identity`, run on the box, prints
 `roloc-myproject-author[bot]` and an address.
 
+`gh api user` is not a check here: an installation token has no user, so GitHub answers 403
+("Resource not accessible by integration"). That 403 is the App working, not broken.
+
 ## 3. The Claude login
 
 Your own Claude **subscription**, never a shared one.
