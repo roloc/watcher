@@ -61,6 +61,11 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   reviewer App's review on the head SHA as the receipt. `bash bin/test-gh-app-token.sh`,
   `bash bin/test-review-submit.sh`, `bash bin/test-install-apps.sh`, `python3 bin/test-app-setup.py`
   are the offline suites (CI runs all four); run them after touching any of these files.
+- `deploy/move-project.py` — moves a project the watcher already works (repo, board, every card in its
+  column, main's protection, `projects/<name>.env`) into an organization in one idempotent run, from the
+  owner's Mac as themselves (card #268). `--dry-run` writes nothing; the 403 a Free organization gives
+  a private repo's protection stops it before the env file. `python3 bin/test-move-project.py` is its
+  offline suite against a stub `gh` (CI runs it); run it after touching the file.
 - `bin/floor.py` — the floor page (`watcher-floor.service`, port 8787): what every lane is
   doing, and a Peek at each one's session. **It has two suites, and they check different
   things.** `python3 bin/test-floor.py` checks the Python that builds the page's data.

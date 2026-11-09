@@ -90,6 +90,9 @@ jobs:
       - name: The App setup helper suite
         run: python3 bin/test-app-setup.py
 
+      - name: The project-move helper suite
+        run: python3 bin/test-move-project.py
+
       - name: The replay suite's ledger
         run: bash bin/test-eval-ledger.sh
 
