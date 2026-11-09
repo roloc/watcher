@@ -50,6 +50,17 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   reached from the floor page instead of the command line — it imports `bin/tail.py`
   directly rather than re-implementing it, so touching either file's decode logic means
   running both `bash bin/test-tail.sh` and `python3 bin/test-floor.py`.
+- `bin/gh-app-token.sh`, `bin/shim/gh`, `bin/shim/gh-credential`, `bin/review-submit.sh`,
+  `deploy/app-setup.py` — GitHub Apps instead of machine accounts (card #255). The token script
+  mints a short-lived installation token from an App's key in `/etc/watcher/apps/<project>/`
+  (a Mac: `~/.config/roloc-apps/<project>/`); the `gh` shim (first on a tick's `PATH`) and the
+  git credential helper call it per invocation, and with no Apps set up they change nothing, so
+  a fork on one bot account works as before. `review-submit.sh` is the one program `watcher`
+  may sudo to `watcher-reviewer` (a root-owned copy; `deploy/install.sh`'s `install_apps`), and
+  `mods/guard/hooks/receipts.ts` is its only caller. `bin/receipt-check.sh` accepts the
+  reviewer App's review on the head SHA as the receipt. `bash bin/test-gh-app-token.sh`,
+  `bash bin/test-review-submit.sh`, `bash bin/test-install-apps.sh`, `python3 bin/test-app-setup.py`
+  are the offline suites (CI runs all four); run them after touching any of these files.
 - `bin/floor.py` — the floor page (`watcher-floor.service`, port 8787): what every lane is
   doing, and a Peek at each one's session. **It has two suites, and they check different
   things.** `python3 bin/test-floor.py` checks the Python that builds the page's data.

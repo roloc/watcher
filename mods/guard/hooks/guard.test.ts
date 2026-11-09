@@ -115,6 +115,11 @@ const REFUSED: Array<[string, RegExp]> = [
   ['cd /opt/watcher; git reset --hard', /protected checkout/],
   ['true && (cd /opt/watcher-canary && git fetch)', /protected checkout/],
   ['curl -s http://localhost:8787/', /browse\.py check/],
+  ['/usr/local/lib/watcher-review/review-submit 7 0123456789abcdef0123456789abcdef01234567 approve -', /review-submit/],
+  ['sudo -n -u watcher-reviewer /usr/local/lib/watcher-review/review-submit 7 abc approve body.md', /review-submit/],
+  ['sudo -u watcher-reviewer cat /etc/watcher/apps/watcher/reviewer.pem', /sudo to the reviewer/],
+  ['bash bin/review-submit.sh 7 abc approve body.md', /review-submit/],
+  ['GH_REPO=a/b ./review-submit.sh 7 abc approve -', /review-submit/],
   ['curl -sL http://127.0.0.1:8787/api/floor', /browse\.py check/],
   ['wget -qO- http://localhost:8787', /browse\.py check/],
   ['curl --url=http://box.local:8787/ -o x', /browse\.py check/],
@@ -129,6 +134,10 @@ const REFUSED: Array<[string, RegExp]> = [
 ]
 
 const ALLOWED = [
+  'bash -n bin/review-submit.sh',
+  'bash bin/test-review-submit.sh',
+  'git add bin/review-submit.sh && git commit -m "review-submit"',
+  'cat bin/review-submit.sh',
   'python3 $WATCHER_HOME/bin/browse.py check http://localhost:8787/',
   'curl -s https://api.github.com/repos/roloc/watcher',
   'curl -sL -o "$scratch/card-1.png" https://github.com/user-attachments/assets/abc',

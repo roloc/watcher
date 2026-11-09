@@ -42,6 +42,7 @@ case "$1 $2" in
     case "$*" in
       *"/files"*) cat "$S/files" ;;
       *"/comments"*) cat "$S/comments" ;;
+      *"/reviews"*) [ -f "$S/reviews" ] && cat "$S/reviews" ;;
       *) echo "stub gh: unhandled api call: $*" >&2; exit 1 ;;
     esac
     ;;
@@ -64,6 +65,7 @@ scenario() {
   printf '%s\n' "$3" > "$TMP/scenario/comments"
 }
 
+reviews() { printf '%s\n' "$1" > "$TMP/scenario/reviews"; }
 run() {
   OUT="$(TEST_RECEIPT_SCENARIO="$TMP/scenario" RECEIPT_GATE_PATHS="${RECEIPT_GATE_PATHS:-}" RECEIPT_SCREEN_PATHS="${RECEIPT_SCREEN_PATHS:-}" bash "$SCRIPT" 7 2>&1)"
   RC=$?
@@ -153,6 +155,43 @@ if [ "$RC" = 0 ]; then pass "newest receipt wins over an older blocking one"; el
 RECEIPT_GATE_PATHS="only/this/path" scenario "$SHA" "commands/watch.md" ""
 RECEIPT_GATE_PATHS="only/this/path" run
 if [ "$RC" = 0 ]; then pass "RECEIPT_GATE_PATHS override: a non-gate .md file is exempt"; else flunk "RECEIPT_GATE_PATHS override: a non-gate .md file is exempt" "rc=$RC: $OUT"; fi
+
+# 10. Card #255: a real GitHub review from the project's reviewer App on the head SHA is the
+# receipt, with no comment at all.
+TAB="$(printf '\t')"
+scenario "$SHA" "bin/spawn.sh" ""
+reviews "roloc-watcher-reviewer[bot]${TAB}${SHA}${TAB}APPROVED"
+run
+if [ "$RC" = 0 ]; then pass "App review: an Approve on the head SHA passes with no comment"; else flunk "App review: an Approve on the head SHA passes with no comment" "rc=$RC: $OUT"; fi
+
+# 11. The same Approve on a stale SHA (an amend after the review) is nothing.
+reviews "roloc-watcher-reviewer[bot]${TAB}${OLD_SHA}${TAB}APPROVED"
+run
+if [ "$RC" != 0 ]; then pass "App review on a stale SHA: exits non-zero"; else flunk "App review on a stale SHA: exits non-zero" "rc=$RC: $OUT"; fi
+
+# 12. An approval from a login that is not a reviewer App (a person, the author App) is nothing.
+reviews "$(printf '%s\n%s' "roloc-watcher-author[bot]${TAB}${SHA}${TAB}APPROVED" "roloc-watcher-reviewer${TAB}${SHA}${TAB}APPROVED")"
+run
+if [ "$RC" != 0 ]; then pass "an Approve from the author App, or from a login with no [bot], is not a receipt"; else flunk "an Approve from the author App, or from a login with no [bot], is not a receipt" "rc=$RC: $OUT"; fi
+
+# 13. The reviewer App's newest review on the head SHA is Request changes: it fails even with a
+# clean comment line, and an older Request changes followed by a newer Approve passes.
+scenario "$SHA" "bin/spawn.sh" "🤖 reviewer: Reviewed $SHA: no blocking findings"
+reviews "roloc-watcher-reviewer[bot]${TAB}${SHA}${TAB}CHANGES_REQUESTED"
+run
+if [ "$RC" != 0 ]; then pass "App Request changes on the head SHA beats a clean comment"; else flunk "App Request changes on the head SHA beats a clean comment" "rc=$RC: $OUT"; fi
+scenario "$SHA" "bin/spawn.sh" ""
+reviews "$(printf '%s\n%s' "roloc-watcher-reviewer[bot]${TAB}${SHA}${TAB}CHANGES_REQUESTED" "roloc-watcher-reviewer[bot]${TAB}${SHA}${TAB}APPROVED")"
+run
+if [ "$RC" = 0 ]; then pass "a newer App Approve on the same SHA replaces an older Request changes"; else flunk "a newer App Approve on the same SHA replaces an older Request changes" "rc=$RC: $OUT"; fi
+
+# 14. RECEIPT_REVIEWER_APPS: a fork names its own App; the default prefix no longer counts.
+reviews "forkbot-reviewer[bot]${TAB}${SHA}${TAB}APPROVED"
+run
+if [ "$RC" != 0 ]; then pass "a fork's reviewer App is not trusted by the default pattern"; else flunk "a fork's reviewer App is not trusted by the default pattern" "rc=$RC: $OUT"; fi
+OUT="$(TEST_RECEIPT_SCENARIO="$TMP/scenario" RECEIPT_REVIEWER_APPS="forkbot-reviewer" bash "$SCRIPT" 7 2>&1)"; RC=$?
+if [ "$RC" = 0 ]; then pass "RECEIPT_REVIEWER_APPS names the fork's own reviewer App"; else flunk "RECEIPT_REVIEWER_APPS names the fork's own reviewer App" "rc=$RC: $OUT"; fi
+rm -f "$TMP/scenario/reviews"
 
 echo
 if [ "$fail" = 0 ]; then

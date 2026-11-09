@@ -192,6 +192,23 @@ export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}" SLACK_MENTION="${SLACK_MENTION
 # (watcher#3). GH_REPO pins every repo-scoped gh call here AND in board.py (a child).
 PROJECT_REPO="${PROJECT_REPO:-$(git -C "$WATCHER_ROOT" remote get-url origin 2>/dev/null | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')}"
 [ -n "$PROJECT_REPO" ] && export GH_REPO="$PROJECT_REPO"
+# GitHub Apps instead of a machine account (card #255). When /etc/watcher/apps/<project>/
+# exists — the project is the repo's name, which is what deploy/app-setup.py keys it on — every
+# `gh` the lane or its tick runs goes through bin/shim/gh (first on the tick's PATH, below),
+# which mints the author App's installation token; git pushes ask bin/shim/gh-credential the
+# same way, and commits are authored by the App's bot identity. The empty credential.helper
+# first resets the list, so a leftover `gh auth setup-git` helper for the old bot account is
+# never asked. With no such folder nothing here runs and the box is exactly as it was.
+WATCHER_APPS_DIR="${WATCHER_APPS_DIR:-/etc/watcher/apps}"
+if [ -n "$PROJECT_REPO" ] && [ -d "$WATCHER_APPS_DIR/${PROJECT_REPO##*/}" ]; then
+  export WATCHER_APP_PROJECT="${PROJECT_REPO##*/}" GH_APP_DIR="$WATCHER_APPS_DIR/${PROJECT_REPO##*/}"
+  if app_id="$("$WATCHER_HERE/gh-app-token.sh" "$WATCHER_APP_PROJECT" author --identity 2>/dev/null)" && [ -n "$app_id" ]; then
+    export GIT_AUTHOR_NAME="${app_id%% <*}" GIT_COMMITTER_NAME="${app_id%% <*}"
+    app_mail="${app_id#*<}"; export GIT_AUTHOR_EMAIL="${app_mail%>}" GIT_COMMITTER_EMAIL="${app_mail%>}"
+  fi
+  export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
+         GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1="!$WATCHER_HERE/shim/gh-credential"
+fi
 WATCHER_CLAUDE="${WATCHER_CLAUDE:-claude}"
 # What a tick's SHELL finds as `claude` is bin/shim/claude, not the binary: Claude Code strips
 # CLAUDE_CODE_OAUTH_TOKEN from the environment of every Bash tool call, so a `claude` the tick
@@ -207,6 +224,10 @@ WATCHER_SHIM_DIR="${WATCHER_SHIM_DIR:-$WATCHER_HERE/shim}"
 # 127 per tick; now it is one journal line and systemd's restart, until someone fixes PATH.
 WATCHER_REAL_CLAUDE="$(command -v -- "$WATCHER_CLAUDE" 2>/dev/null || true)"
 [ -n "$WATCHER_REAL_CLAUDE" ] || { echo "spawn.sh: claude not found: '$WATCHER_CLAUDE' is not an executable on PATH ($PATH); nothing can be launched" >&2; exit 69; }
+# With Apps set up, the lane's own `gh` calls (and board.py's, a child) go through the same shim
+# as the tick's — here, after the real claude is resolved above, so the shim directory's own
+# `claude` can never be what WATCHER_REAL_CLAUDE names.
+[ -n "${WATCHER_APP_PROJECT:-}" ] && export PATH="$WATCHER_SHIM_DIR:$PATH"
 WATCHER_GH="${WATCHER_GH:-gh}"
 WATCHER_DOCTOR="${WATCHER_DOCTOR:-$WATCHER_HERE/doctor.sh}"
 WATCHER_BOARD="${WATCHER_BOARD:-python3 $WATCHER_HERE/board.py}"

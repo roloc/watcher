@@ -350,6 +350,33 @@ board.project()
 check("two project() calls inside the TTL make exactly one real gh() call",
       len(GRAPHQL_CALLS) == 1, GRAPHQL_CALLS)
 
+print("14b. an organization-owned board (card #255): the query asks repositoryOwner, which answers "
+      "for a user and an org alike, and reads either reply shape")
+org_queries = []
+
+
+def org_stub_run(cmd, **kwargs):
+    if cmd[:3] != ["gh", "api", "graphql"]:
+        return stub_run(cmd, **kwargs)
+    kv = _graphql_kv(cmd)
+    org_queries.append(kv["query"])
+    inner = {"projectV2": {"id": "PVT_ORG", "title": "t", "fields": {"nodes": [
+        {"name": "Status", "id": "F_STATUS", "options": PROJECT_STATUS_OPTIONS}]}}}
+    return FakeResult(json.dumps({"data": {"repositoryOwner": inner}}))
+
+
+board.subprocess.run = org_stub_run
+board.OWNER, board.NUMBER = "lonestarprod", 7
+p, fields = board.project(fresh=True)
+check("an org's board is found through repositoryOwner",
+      p["id"] == "PVT_ORG" and "Status" in fields, p)
+check("the query names ProjectV2Owner, so one query serves users and organizations",
+      "repositoryOwner(login:$owner)" in org_queries[0] and "ProjectV2Owner" in org_queries[0], org_queries)
+check("_owner_node still reads the older `user` and `organization` keys",
+      board._owner_node({"user": {"a": 1}}) == {"a": 1} and board._owner_node({"organization": {"b": 2}}) == {"b": 2}
+      and board._owner_node({"repositoryOwner": None}) is None)
+board.subprocess.run = graphql_stub_run
+
 board.OWNER, board.NUMBER = "roloc", 99  # a fresh cache namespace for the miss-retry case
 renamed_column_calls = []
 

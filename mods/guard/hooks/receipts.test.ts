@@ -2,7 +2,7 @@
 // answered from memory and every command it was asked is kept, so each test reads off what
 // the hook ran: the Stage set, the comment posted, the rerun.
 import { expect, mock, test } from 'claude-code/testing'
-import { cardFromPrompt, prFromCreate, receiptLine } from './receipts'
+import { cardFromPrompt, prFromCreate, receiptLine, verdictOf, REVIEW_SUBMIT } from './receipts'
 
 const HOME = '/home/watcher'
 const WORKTREE = '/home/watcher/projects/watcher-worktrees/card-211'
@@ -14,7 +14,7 @@ const USABILITY = `Usability ${SHA}: no blocking findings`
 type On = Parameters<Parameters<typeof test>[1] extends (...a: infer A) => unknown ? (...a: A) => unknown : never>[1]
 
 // What each tool gives back, and how `process.run` answers: by the first words of the command.
-function engine(on: On, opts: { failRun?: boolean } = {}) {
+function engine(on: On, opts: { failRun?: boolean; reviewerApp?: boolean } = {}) {
   mock.env(on, { HOME, TMPDIR: '/tmp' })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: WORKTREE }))
@@ -28,7 +28,9 @@ function engine(on: On, opts: { failRun?: boolean } = {}) {
       : cmd.startsWith('gh run list') ? '777'
       : cmd.startsWith('gh pr view') ? '55'
       : ''
-    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // The reviewer App's helper (card #255): absent (sudo refuses) unless the test sets reviewerApp.
+    const code = cmd.startsWith('sudo') && !opts.reviewerApp ? 1 : 0
+    return { value: { exitCode: code, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   return ran
 }
@@ -76,6 +78,40 @@ test('a clean reviewer line is posted verbatim, then the failed checks are rerun
   expect(ran).toContain(`gh pr comment 55 --body 🤖 reviewer: ${CLEAN}`)
   expect(ran).toContain('gh run list --branch card-211 --workflow CI --limit 1 --json databaseId --jq .[0].databaseId')
   expect(ran).toContain('gh run rerun 777 --failed')
+})
+
+test('card #255: with the reviewer App, the verdict is a real review and no comment goes up', async ($, on) => {
+  const ran = engine(on, { reviewerApp: true })
+  withResult(on, agentResult(`${CLEAN}\n\nNothing else.`))
+  await $.session.start({ cwd: WORKTREE, surface: null, isInteractive: false })
+  await $.tool.call(reviewer())
+  expect(ran).toContain(`sudo -n -u watcher-reviewer ${REVIEW_SUBMIT} 55 ${SHA} approve -`)
+  expect(ran.filter((c) => c.startsWith('gh pr comment'))).toEqual([])
+  expect(ran).toContain('gh run rerun 777 --failed')
+})
+
+test('card #255: a blocking verdict asks for changes', async ($, on) => {
+  const ran = engine(on, { reviewerApp: true })
+  withResult(on, agentResult(`${BLOCKING}\n\n- x`))
+  await $.session.start({ cwd: WORKTREE, surface: null, isInteractive: false })
+  await $.tool.call(reviewer())
+  expect(ran).toContain(`sudo -n -u watcher-reviewer ${REVIEW_SUBMIT} 55 ${SHA} request-changes -`)
+  expect(ran.filter((c) => c.startsWith('gh pr comment'))).toEqual([])
+})
+
+test('card #255: a usability line is never a review, only a comment', async ($, on) => {
+  const ran = engine(on, { reviewerApp: true })
+  withResult(on, agentResult(`${USABILITY}\n\nok`))
+  await $.session.start({ cwd: WORKTREE, surface: null, isInteractive: false })
+  await $.tool.call({ tool: 'Agent' as const, description: 'u', prompt: 'p', subagent_type: 'watcher:usability' })
+  expect(ran.filter((c) => c.startsWith('sudo'))).toEqual([])
+  expect(ran).toContain(`gh pr comment 55 --body 🤖 usability: ${USABILITY}`)
+})
+
+test('verdictOf reads the SHA and the verdict from the receipt line', () => {
+  expect(verdictOf(CLEAN)).toEqual({ sha: SHA, verdict: 'approve' })
+  expect(verdictOf(BLOCKING)).toEqual({ sha: SHA, verdict: 'request-changes' })
+  expect(verdictOf('Reviewed abc: no blocking findings')).toBeUndefined()
 })
 
 test('a blocking reviewer line is posted too, as watch.md says', async ($, on) => {

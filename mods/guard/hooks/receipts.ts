@@ -10,6 +10,10 @@
 //   Agent                `reviewer` / `usability` returned: its first line, verbatim, as
 //                        `🤖 reviewer: …` / `🤖 usability: …` on the remembered PR (the PR of this branch
 //                        when none is remembered). The receipt goes up whatever the verdict. For the
+//                        reviewer it goes up first as a real GitHub review from the reviewer App
+//                        (card #255: `sudo -u watcher-reviewer review-submit`, Approve for a clean
+//                        verdict, Request changes otherwise) and as the comment only when that
+//                        helper is not there or fails — a fork with no reviewer App. For the
 //                        reviewer, then `gh run rerun <latest CI run on the branch> --failed`, the
 //                        step that makes review-receipt look again.
 //   Bash                 `gh pr merge` that succeeded: `board stage <card> Merging`.
@@ -25,6 +29,10 @@ type Engine = EngineInterface
 
 const NAME = 'guard'
 const RUN_MS = 20_000
+// The root-owned copy deploy/install.sh makes of bin/review-submit.sh, and the one sudoers line
+// that lets the watcher user run it as watcher-reviewer. Only this hook calls it; the guard
+// refuses it from a tick's own Bash.
+export const REVIEW_SUBMIT = '/usr/local/lib/watcher-review/review-submit'
 
 // The little this module remembers. A reload of the worker forgets it; each step then asks
 // git or gh for the same fact instead.
@@ -89,6 +97,25 @@ async function post($: Engine, number: string, kind: 'reviewer' | 'usability', l
   if (!r.ok) throw new Error(`gh pr comment ${number} exited non-zero`)
 }
 
+// The reviewer App's review for the line's own SHA. false when the helper is absent or refused
+// (no sudoers line, no reviewer App, a stale head): the caller then posts the comment instead.
+export const verdictOf = (line: string): { sha: string; verdict: 'approve' | 'request-changes' } | undefined => {
+  const m = /^Reviewed ([0-9a-f]{40}): (.*)$/.exec(line)
+  if (!m) return undefined
+  return { sha: m[1], verdict: m[2] === 'no blocking findings' ? 'approve' : 'request-changes' }
+}
+
+async function submitReview($: Engine, number: string, line: string): Promise<boolean> {
+  const v = verdictOf(line)
+  if (!v) return false
+  try {
+    const r = await $.process.run(['sudo', '-n', '-u', 'watcher-reviewer', REVIEW_SUBMIT, number, v.sha, v.verdict, '-'], { timeoutMs: RUN_MS, stdin: line })
+    return r.exitCode === 0
+  } catch {
+    return false
+  }
+}
+
 // §3: the push started a CI run; review-receipt failed on it before this comment existed.
 async function rerun($: Engine) {
   const branch = await run($, ['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
@@ -147,7 +174,8 @@ export const register: Register = (on) => {
       if (kind === 'usability') heldUsability = line
       return ran
     }
-    await step(`${kind} receipt`, () => post($, number, kind, line))
+    const filed = kind === 'reviewer' && (await submitReview($, number, line))
+    if (!filed) await step(`${kind} receipt`, () => post($, number, kind, line))
     if (kind === 'reviewer') await step('rerun of the failed checks', () => rerun($))
     return ran
   }).catch(($, e, next) => next(e))

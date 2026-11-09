@@ -435,6 +435,15 @@ def gh(query, **vars):
     return data
 
 
+def _owner_node(data):
+    """The board owner's node from a projectV2 query. `repositoryOwner` answers for a user and
+    an organization alike (card #255: an App can only reach an organization's board); `user`
+    is the shape the older queries and the offline suite's payloads use."""
+    if not isinstance(data, dict):
+        return None
+    return data.get("repositoryOwner") or data.get("organization") or data.get("user")
+
+
 def project(fresh=False):
     _require_owner()
     name = _project_cache_name()
@@ -452,18 +461,18 @@ def project(fresh=False):
             if cached is not None:
                 return cached["project"], cached["fields"]
         q = """query($owner:String!,$number:Int!){ rateLimit{ remaining resetAt limit cost }
-          user(login:$owner){ projectV2(number:$number){
+          repositoryOwner(login:$owner){ ... on ProjectV2Owner{ projectV2(number:$number){
           id title
-          fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } }"""
+          fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } } }"""
         try:
-            u = gh(q, owner=OWNER, number=NUMBER).get("user")
+            u = _owner_node(gh(q, owner=OWNER, number=NUMBER))
         except RateLimitError as e:
             stale = _stale_or_die(name, e, "project fields")
             return stale["project"], stale["fields"]
         p = u.get("projectV2") if u else None
         if not p:
-            sys.exit(f"board.py: no project {OWNER}/#{NUMBER} — if it moved to an org, "
-                     "this script's user(login:) query needs to become organization(login:)")
+            sys.exit(f"board.py: no project {OWNER}/#{NUMBER} — BOARD_OWNER is the user or "
+                     "organization that owns the board, and the token must be able to read it")
         fields = {f["name"]: f for f in p["fields"]["nodes"] if f.get("name")}
         _cache_write(name, {"project": p, "fields": fields})
         return p, fields
@@ -535,16 +544,16 @@ def items(fresh=False):
 
 def _items_live():
     q = """query($owner:String!,$number:Int!,$cursor:String){ rateLimit{ remaining resetAt limit cost }
-      user(login:$owner){ projectV2(number:$number){
+      repositoryOwner(login:$owner){ ... on ProjectV2Owner{ projectV2(number:$number){
       items(first:100, after:$cursor){ pageInfo{ hasNextPage endCursor }
         nodes{ id
           fieldValues(first:20){ nodes{ ... on ProjectV2ItemFieldSingleSelectValue{
             name field{ ... on ProjectV2SingleSelectField{ name } } } } }
           content{ ... on Issue{ number title url state
-            labels(first:20){ nodes{ name } } } } } } } } }"""
+            labels(first:20){ nodes{ name } } } } } } } } } }"""
     out, cursor = [], None
     while True:
-        u = gh(q, owner=OWNER, number=NUMBER, cursor=cursor or "").get("user")
+        u = _owner_node(gh(q, owner=OWNER, number=NUMBER, cursor=cursor or ""))
         p = u.get("projectV2") if u else None
         if not p:
             sys.exit(f"board.py: no project {OWNER}/#{NUMBER} (see `project()`)")

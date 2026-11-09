@@ -21,12 +21,16 @@ gh issue view <n> -R roloc/watcher --json title,state,labels,body,comments,proje
   [#185](https://github.com/roloc/watcher/pull/185), October 17, 2026: five ticks answered
   the body and repeated a park he had already rejected). Read the comments before deciding
   what the card wants.
-- **Three logins act on this board, and only one is the owner.** `roloc` is the owner's own
-  hand. `roloc-desk` is a Claude Code session on the owner's Mac, and `roloc-watcher-bot` is
-  a lane on the box (`riffmap-bot` before October 30, 2026). A comment, PR or card from
-  either bot is a report or a proposal, never the owner's answer; the rule above is about
-  `roloc` alone. Before October 30, 2026, Mac sessions also wrote as `roloc`, so an older
-  `roloc` comment that reads like a write-up may be one of theirs.
+- **Several identities act on this board, and only one is the owner.** `roloc` is the owner's
+  own hand. Everything else is a report or a proposal, never the owner's answer: the
+  author Apps (`roloc-<project>-author[bot]`, the lane and the owner's Mac sessions), the
+  reviewer Apps (`roloc-<project>-reviewer[bot]`, a verdict filed as a PR review) and, until
+  they are decommissioned, the machine accounts they replace (`roloc-watcher-bot`, `roloc-desk`;
+  `riffmap-bot` before October 30, 2026). The rule above is about `roloc` alone. Before October
+  30, 2026, Mac sessions also wrote as `roloc`, so an older `roloc` comment that reads like a
+  write-up may be one of theirs. The boards live in the `lonestarprod` organization, because a
+  GitHub App can reach an organization's Projects board and not a user's; `BOARD_OWNER` is the
+  organization and `bin/board.py` reads either kind of owner.
 - **The column** is `projectItems[].status.name` (Backlog, Ready, In progress, In review,
   Done, Stuck - Needs help). A card with no `projectItems` is an issue nobody put on the
   board; see "Filing".
