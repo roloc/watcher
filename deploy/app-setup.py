@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""deploy/app-setup.py <project> [--org ORG] [--repos owner/a,owner/b] [--roles author,reviewer]  (card #255)
+"""deploy/app-setup.py <project> [<project>…] [--org ORG] [--repos owner/a] [--roles author,reviewer]  (cards #255, #261)
 
-Creates a project's GitHub Apps through GitHub's manifest flow and files their keys where
+Creates each project's GitHub Apps through GitHub's manifest flow and files their keys where
 bin/gh-app-token.sh reads them. Standard library only, like bin/browse.py. Run on the box (as
 root) or on a Mac, then open the printed address in a browser. The address is localhost, and
 GitHub sends the browser back to it, so on the box first open a tunnel from the Mac:
@@ -10,20 +10,31 @@ GitHub sends the browser back to it, so on the box first open a tunnel from the 
 
 (the port is --port, 8799 by default), and open http://localhost:8799/ on the Mac:
 
-  1. The page has one prefilled form per App. Click Create (twice, once per App); GitHub sends
-     the browser back here with a one-time code.
+  1. The page has one section per project and one prefilled form per App. Click Create (once
+     per App); GitHub sends the browser back here with a one-time code.
   2. This helper trades the code for the App's ID and private key and writes them straight into
      place — the key is never printed, never in a URL, a page or a log.
-  3. The page then sends the browser to the App's install screen: pick the project's repos
-     and click Install. The helper sees the installation by itself and writes its ID.
+  3. The page then links the App's install screen, pointed at the organization: choose "Only
+     select repositories", pick the project's repo, click Install. The helper sees the
+     installation by itself and writes its ID. It exits once every App of every project is in.
 
-  box (root)   /etc/watcher/apps/<project>/{author,reviewer}.pem and config   (install.sh sets owners)
-  Mac          ~/.config/roloc-apps/<project>/                                (author only: no process
+Each <project> is a projects/<name>.env name (riffmap, nulltrader); the helper reads PROJECT_REPO
+from that file, names the Apps and the key folder after the repo's own name (the folder
+bin/spawn.sh looks under: `${PROJECT_REPO##*/}`, so NullTrader, not nulltrader), and shows that
+repo on the install step. A name with no env file is used as it is, with --repos for the repo
+(one project only). A project whose Apps already exist is listed as done and its Apps checked:
+an App installed with fewer permissions than a tick needs (the shape before card #261) is called
+out with the two links that fix it, because App permissions cannot be changed through the API.
+
+  box (root)   /etc/watcher/apps/<repo name>/{author,reviewer}.pem and config   (install.sh sets owners)
+  Mac          ~/.config/roloc-apps/<repo name>/                                (author only: no process
                boundary on a Mac, so no reviewer App there)
 
-App names are roloc-<project>-<role>; the author gets Contents, Pull requests, Workflows, Issues
-and Projects (organization) write, the reviewer Pull requests write, Contents read, Actions write.
-GH_APP_API and GH_APP_WEB point the helper somewhere else (bin/test-app-setup.py).
+App names are roloc-<repo name>-<role>. The author gets Contents, Pull requests, Workflows,
+Issues, Actions and Projects (organization) write, Checks and Commit statuses read — what a tick
+needs to push, open and merge a PR, read its checks and rerun a failed job. The reviewer gets
+Pull requests write and Contents read: it reads the PR's head and files one review, nothing
+else. GH_APP_API and GH_APP_WEB point the helper somewhere else (bin/test-app-setup.py).
 """
 import argparse
 import html
@@ -42,24 +53,26 @@ import urllib.request
 
 API = os.environ.get("GH_APP_API", "https://api.github.com")
 WEB = os.environ.get("GH_APP_WEB", "https://github.com")
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.environ.get("WATCHER_ROOT") or os.path.dirname(HERE)
 
 PERMISSIONS = {
-    "author": {"contents": "write", "pull_requests": "write", "workflows": "write",
-               "issues": "write", "organization_projects": "write"},
-    "reviewer": {"pull_requests": "write", "contents": "read", "actions": "write"},
+    "author": {"contents": "write", "pull_requests": "write", "workflows": "write", "issues": "write",
+               "organization_projects": "write", "actions": "write", "checks": "read", "statuses": "read"},
+    "reviewer": {"pull_requests": "write", "contents": "read"},
 }
 
 
-def app_name(project, role):
-    return f"roloc-{project}-{role}"
+def app_name(key, role):
+    return f"roloc-{key}-{role}"
 
 
-def build_manifest(project, role, org, port):
+def build_manifest(key, role, org, port):
     return {
-        "name": app_name(project, role),
+        "name": app_name(key, role),
         "url": f"{WEB}/{org}",
         "hook_attributes": {"url": "https://example.invalid/unused", "active": False},
-        "redirect_url": f"http://localhost:{port}/created?role={role}",
+        "redirect_url": f"http://localhost:{port}/created?project={urllib.parse.quote(key)}&role={role}",
         "public": False,
         "default_permissions": PERMISSIONS[role],
         "default_events": [],
@@ -126,32 +139,71 @@ def jwt_for(app_id, key_path):
     return f"{head}.{body}.{b64(sig)}"
 
 
-class Setup:
-    def __init__(self, project, org, repos, roles, directory, port):
-        self.project, self.org, self.repos, self.roles = project, org, repos, roles
-        self.dir, self.port = directory, port
-        self.state = secrets.token_urlsafe(16)
-        self.lock = threading.Lock()
-        self.done = threading.Event()
-        os.makedirs(self.dir, exist_ok=True)
+def project_repo(name, root=ROOT):
+    """PROJECT_REPO from projects/<name>.env, or None when there is no such file or line."""
+    path = os.path.join(root, "projects", f"{name}.env")
+    try:
+        for line in open(path):
+            k, sep, v = line.strip().partition("=")
+            if sep and k.strip() == "PROJECT_REPO":
+                return v.strip().strip('"').strip("'") or None
+    except FileNotFoundError:
+        return None
+    return None
+
+
+class Project:
+    def __init__(self, name, repos, apps_dir):
+        self.name = name
+        self.repos = repos
+        # The folder bin/spawn.sh looks under is the repo's own name (`${PROJECT_REPO##*/}`).
+        self.key = repos[0].rsplit("/", 1)[-1] if repos else name
+        self.dir = os.path.join(apps_dir, self.key)
         self.config_path = os.path.join(self.dir, "config")
 
-    # -- state on disk
     def config(self):
         return read_config(self.config_path)
 
     def has(self, role, field):
         return bool(self.config().get(f"{role.upper()}_{field}"))
 
+
+class Setup:
+    def __init__(self, org, projects, roles, port):
+        self.org, self.projects, self.roles, self.port = org, projects, roles, port
+        self.state = secrets.token_urlsafe(16)
+        self.lock = threading.Lock()
+        self.done = threading.Event()
+        self._org_id = None
+        for p in projects:
+            os.makedirs(p.dir, exist_ok=True)
+
+    def project(self, key):
+        return next((p for p in self.projects if p.key == key), None)
+
     def finished(self):
-        return all(self.has(r, "INSTALLATION_ID") for r in self.roles)
+        return all(p.has(r, "INSTALLATION_ID") for p in self.projects for r in self.roles)
+
+    def org_id(self):
+        """The organization's numeric id, so the install link lands on it instead of asking where."""
+        if self._org_id is None:
+            try:
+                self._org_id = http_json(f"{API}/orgs/{urllib.parse.quote(self.org)}").get("id") or 0
+            except (urllib.error.URLError, ValueError, KeyError):
+                self._org_id = 0
+        return self._org_id
+
+    def install_url(self, slug):
+        base = f"{WEB}/apps/{slug}/installations/new"
+        oid = self.org_id()
+        return f"{base}/permissions?target_id={oid}" if oid else base
 
     # -- the steps
-    def convert(self, role, code):
+    def convert(self, p, role, code):
         data = http_json(f"{API}/app-manifests/{urllib.parse.quote(code)}/conversions", "POST")
         pem = data.pop("pem")
-        write_key(os.path.join(self.dir, f"{role}.pem"), pem, "watcher-reviewer" if role == "reviewer" else "watcher")
-        values = self.config()
+        write_key(os.path.join(p.dir, f"{role}.pem"), pem, "watcher-reviewer" if role == "reviewer" else "watcher")
+        values = p.config()
         pre = role.upper()
         values.update({f"{pre}_APP_ID": str(data["id"]), f"{pre}_SLUG": data["slug"]})
         try:
@@ -159,46 +211,81 @@ class Setup:
             values[f"{pre}_BOT_ID"] = str(bot["id"])
         except (urllib.error.URLError, KeyError, ValueError):
             pass
-        write_config(self.config_path, values)
+        write_config(p.config_path, values)
         return data["slug"]
 
-    def find_installation(self, role):
+    def find_installation(self, p, role):
         """The installation on the organization, once the owner has clicked Install."""
-        cfg = self.config()
+        cfg = p.config()
         pre = role.upper()
         if cfg.get(f"{pre}_INSTALLATION_ID"):
             return True
         if not cfg.get(f"{pre}_APP_ID"):
             return False
-        jwt = jwt_for(cfg[f"{pre}_APP_ID"], os.path.join(self.dir, f"{role}.pem"))
+        jwt = jwt_for(cfg[f"{pre}_APP_ID"], os.path.join(p.dir, f"{role}.pem"))
         found = http_json(f"{API}/app/installations", headers={"Authorization": f"Bearer {jwt}"})
         for inst in found:
             if (inst.get("account") or {}).get("login", "").lower() == self.org.lower():
                 cfg[f"{pre}_INSTALLATION_ID"] = str(inst["id"])
-                write_config(self.config_path, cfg)
+                write_config(p.config_path, cfg)
                 return True
         return False
 
+    def missing_permissions(self, p, role):
+        """Permissions a tick needs that this installed App does not have (an App made before
+        card #261, or one trimmed by hand). None when the App is not installed or GitHub did
+        not answer; [] when it has every one."""
+        cfg = p.config()
+        pre = role.upper()
+        if not cfg.get(f"{pre}_INSTALLATION_ID") or not cfg.get(f"{pre}_APP_ID"):
+            return None
+        try:
+            jwt = jwt_for(cfg[f"{pre}_APP_ID"], os.path.join(p.dir, f"{role}.pem"))
+            inst = http_json(f"{API}/app/installations/{cfg[f'{pre}_INSTALLATION_ID']}",
+                             headers={"Authorization": f"Bearer {jwt}"})
+        except (urllib.error.URLError, ValueError, subprocess.CalledProcessError, OSError):
+            return None
+        have = inst.get("permissions") or {}
+        rank = {"read": 1, "write": 2, "admin": 3}
+        return [k for k, v in PERMISSIONS[role].items() if rank.get(have.get(k), 0) < rank[v]]
+
     # -- the page
+    def row(self, p, role):
+        if not p.has(role, "APP_ID"):
+            manifest = html.escape(json.dumps(build_manifest(p.key, role, self.org, self.port)), quote=True)
+            target = f"{WEB}/organizations/{urllib.parse.quote(self.org)}/settings/apps/new?state={self.state}"
+            return (f'<li><form action="{target}" method="post"><input type="hidden" name="manifest" value="{manifest}">'
+                    f'<button>Create {html.escape(app_name(p.key, role))}</button></form></li>')
+        slug = p.config().get(f"{role.upper()}_SLUG", app_name(p.key, role))
+        if not p.has(role, "INSTALLATION_ID"):
+            where = html.escape(", ".join(p.repos) or "the project's repos")
+            return (f'<li><b>{html.escape(slug)}</b> created. '
+                    f'<a href="{html.escape(self.install_url(slug))}" target="_blank">Install it</a>: '
+                    f'choose <i>Only select repositories</i>, pick {where}, click Install. '
+                    f'<span class="st" data-project="{html.escape(p.key, quote=True)}" data-role="{role}">waiting for the install…</span></li>')
+        missing = self.missing_permissions(p, role)
+        if missing:
+            fix = f"{WEB}/organizations/{urllib.parse.quote(self.org)}/settings/apps/{html.escape(slug)}/permissions"
+            accept = f"{WEB}/organizations/{urllib.parse.quote(self.org)}/settings/installations"
+            want = ", ".join(f"{k} {PERMISSIONS[role][k]}" for k in missing)
+            return (f'<li><b>{html.escape(slug)}</b> installed, <b>missing permissions</b>: {html.escape(want)}. '
+                    f'<a href="{fix}" target="_blank">Add them</a> under Repository permissions and save, then '
+                    f'<a href="{accept}" target="_blank">accept them</a> on the installation (Configure).</li>')
+        return f'<li><b>{html.escape(slug)}</b> installed ✓</li>'
+
     def page(self):
-        rows = []
-        for role in self.roles:
-            if self.has(role, "APP_ID"):
-                slug = self.config().get(f"{role.upper()}_SLUG", app_name(self.project, role))
-                where = html.escape(", ".join(self.repos) or "the project's repos")
-                rows.append(f'<li><b>{html.escape(slug)}</b> created. '
-                            f'<a href="{WEB}/apps/{html.escape(slug)}/installations/new" target="_blank">Install it</a> '
-                            f'on {where} '
-                            f'<span class="st" data-role="{role}">waiting for the install…</span></li>')
-            else:
-                manifest = html.escape(json.dumps(build_manifest(self.project, role, self.org, self.port)), quote=True)
-                target = f"{WEB}/organizations/{urllib.parse.quote(self.org)}/settings/apps/new?state={self.state}"
-                rows.append(f'<li><form action="{target}" method="post"><input type="hidden" name="manifest" value="{manifest}">'
-                            f'<button>Create {html.escape(app_name(self.project, role))}</button></form></li>')
-        script = ("<script>setInterval(()=>document.querySelectorAll('.st').forEach(e=>fetch('/status?role='+e.dataset.role)"
-                  ".then(r=>r.json()).then(j=>{if(j.installed)e.textContent='installed ✓'})),2500)</script>")
-        return (f"<!doctype html><meta charset=utf-8><title>Apps for {html.escape(self.project)}</title>"
-                f"<h1>GitHub Apps for {html.escape(self.project)}</h1><ul>{''.join(rows)}</ul>{script}")
+        sections = []
+        for p in self.projects:
+            rows = "".join(self.row(p, role) for role in self.roles)
+            repos = html.escape(", ".join(p.repos)) if p.repos else "repo not known here (no projects/%s.env)" % html.escape(p.name)
+            sections.append(f"<h2>{html.escape(p.key)}</h2><p>{repos}</p><ul>{rows}</ul>")
+        script = ("<script>setInterval(()=>document.querySelectorAll('.st:not([data-done])').forEach(e=>"
+                  "fetch('/status?project='+encodeURIComponent(e.dataset.project)+'&role='+e.dataset.role)"
+                  ".then(r=>r.json()).then(j=>{if(j.installed){e.textContent='installed ✓';e.dataset.done='1';"
+                  "if(j.missing&&j.missing.length)e.textContent+=' — reload this page: permissions to add'}})),2500)</script>")
+        title = ", ".join(p.key for p in self.projects)
+        return (f"<!doctype html><meta charset=utf-8><title>Apps for {html.escape(title)}</title>"
+                f"<h1>GitHub Apps for {html.escape(self.org)}</h1>{''.join(sections)}{script}")
 
 
 def handler(setup):
@@ -222,47 +309,71 @@ def handler(setup):
             role = (q.get("role") or [""])[0]
             if u.path == "/":
                 return self.send(200, setup.page())
-            if role not in setup.roles:
-                return self.send(404, "no such role")
+            p = setup.project((q.get("project") or [""])[0])
+            if p is None or role not in setup.roles:
+                return self.send(404, "no such project or role")
             if u.path == "/created":
                 if (q.get("state") or [""])[0] != setup.state or not q.get("code"):
                     return self.send(400, "the state did not match this run; start again from the main page")
                 with setup.lock:
                     try:
-                        setup.convert(role, q["code"][0])
+                        setup.convert(p, role, q["code"][0])
                     except (urllib.error.URLError, KeyError, ValueError, OSError) as e:
                         return self.send(502, f"GitHub would not hand over the App: {html.escape(str(e))}")
                 return self.send(302, "", location="/")
             if u.path == "/status":
                 with setup.lock:
                     try:
-                        ok = setup.find_installation(role)
+                        ok = setup.find_installation(p, role)
                     except (urllib.error.URLError, ValueError, subprocess.CalledProcessError, OSError):
                         ok = False
+                    missing = setup.missing_permissions(p, role) if ok else None
                     if setup.finished():
                         setup.done.set()
-                return self.send(200, json.dumps({"installed": ok}), "application/json")
+                return self.send(200, json.dumps({"installed": ok, "missing": missing}), "application/json")
             return self.send(404, "not found")
     return H
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Create a project's GitHub Apps and file their keys.")
-    ap.add_argument("project")
+    ap = argparse.ArgumentParser(description="Create each project's GitHub Apps and file their keys.")
+    ap.add_argument("projects", nargs="+", metavar="project", help="projects/<name>.env names; all on one page")
     ap.add_argument("--org", default="lonestarprod")
-    ap.add_argument("--repos", default="", help="comma-separated owner/name list, shown on the install step")
+    ap.add_argument("--repos", default="", help="comma-separated owner/name list for a project with no env file (one project only)")
     ap.add_argument("--roles", help="default: author,reviewer as root on the box; author alone elsewhere")
-    ap.add_argument("--dir", help="default: /etc/watcher/apps/<project> as root, else ~/.config/roloc-apps/<project>")
+    ap.add_argument("--apps-dir", help="default: /etc/watcher/apps as root, else ~/.config/roloc-apps; each project under it by repo name")
     ap.add_argument("--port", type=int, default=8799)
     a = ap.parse_args(argv)
     root = os.geteuid() == 0
     roles = (a.roles or ("author,reviewer" if root else "author")).split(",")
     if any(r not in PERMISSIONS for r in roles):
         sys.exit("app-setup: roles are author and reviewer")
-    directory = a.dir or (f"/etc/watcher/apps/{a.project}" if root else os.path.expanduser(f"~/.config/roloc-apps/{a.project}"))
-    setup = Setup(a.project, a.org, [r for r in a.repos.split(",") if r], roles, directory, a.port)
+    repos_flag = [r for r in a.repos.split(",") if r]
+    if repos_flag and len(a.projects) > 1:
+        sys.exit("app-setup: --repos names one project's repo; with several projects each comes from its projects/<name>.env")
+    apps_dir = a.apps_dir or ("/etc/watcher/apps" if root else os.path.expanduser("~/.config/roloc-apps"))
+    projects = []
+    for name in a.projects:
+        repo = project_repo(name)
+        env_path = os.path.join(ROOT, "projects", f"{name}.env")
+        if repo is None and os.path.exists(env_path) and not repos_flag:
+            sys.exit(f"app-setup: projects/{name}.env has no PROJECT_REPO, so it is a lane file (it sources its project's); "
+                     f"name the project itself — its Apps serve every lane of that project")
+        repos = repos_flag or ([repo] if repo else [])
+        if not repos:
+            print(f"app-setup: no projects/{name}.env with PROJECT_REPO under {ROOT}; the install step will not name the repo"
+                  + ("" if len(a.projects) > 1 else " (pass --repos owner/name)"), file=sys.stderr)
+        projects.append(Project(name, repos, apps_dir))
+    setup = Setup(a.org, projects, roles, a.port)
+    already = [p.key for p in projects if all(p.has(r, "INSTALLATION_ID") for r in roles)]
+    if already:
+        print(f"app-setup: already set up, listed for a permissions check only: {', '.join(already)}", flush=True)
+    if setup.finished():
+        report(setup)
+        print("app-setup: nothing to create", flush=True)
+        return
     server = http.server.ThreadingHTTPServer(("127.0.0.1", a.port), handler(setup))
-    print(f"app-setup: open http://localhost:{a.port}/ in your browser (writing to {directory})", flush=True)
+    print(f"app-setup: open http://localhost:{a.port}/ in your browser (writing under {apps_dir})", flush=True)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     try:
@@ -271,10 +382,21 @@ def main(argv=None):
     except KeyboardInterrupt:
         sys.exit("app-setup: stopped before every App was installed")
     server.shutdown()
-    cfg = setup.config()
-    for r in roles:
-        print(f"app-setup: {r}: App {cfg.get(r.upper() + '_APP_ID')}, installation {cfg.get(r.upper() + '_INSTALLATION_ID')}")
-    print(f"app-setup: done. Check with: GH_APP_DIR={directory} bin/gh-app-token.sh {a.project} author --identity")
+    report(setup)
+    print(f"app-setup: done. Check with: GH_APP_DIR={projects[0].dir} bin/gh-app-token.sh {projects[0].key} author --identity")
+
+
+def report(setup):
+    for p in setup.projects:
+        cfg = p.config()
+        for r in setup.roles:
+            R = r.upper()
+            line = f"app-setup: {p.key} {r}: App {cfg.get(R + '_APP_ID')}, installation {cfg.get(R + '_INSTALLATION_ID')}"
+            missing = setup.missing_permissions(p, r)
+            if missing:
+                line += " — MISSING permissions: " + ", ".join(f"{k} {PERMISSIONS[r][k]}" for k in missing) \
+                        + f" (add at {WEB}/organizations/{setup.org}/settings/apps/{cfg.get(R + '_SLUG')}/permissions, then accept at {WEB}/organizations/{setup.org}/settings/installations)"
+            print(line)
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ A headless Claude Code loop that turns a GitHub Projects board into merged PRs. 
   directly rather than re-implementing it, so touching either file's decode logic means
   running both `bash bin/test-tail.sh` and `python3 bin/test-floor.py`.
 - `bin/gh-app-token.sh`, `bin/shim/gh`, `bin/shim/gh-credential`, `bin/review-submit.sh`,
-  `deploy/app-setup.py` — GitHub Apps instead of machine accounts (card #255). The token script
+  `deploy/app-setup.py` — GitHub Apps instead of machine accounts (cards #255, #261). The token script
   mints a short-lived installation token from an App's key in `/etc/watcher/apps/<project>/`
   (a Mac: `~/.config/roloc-apps/<project>/`); the `gh` shim (first on a tick's `PATH`) and the
   git credential helper call it per invocation, and with no Apps set up they change nothing, so

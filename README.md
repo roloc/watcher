@@ -240,8 +240,9 @@ Then by hand, once:
    strips the token from every Bash tool call's environment, so `bin/shim/claude` — first
    on the tick's `PATH` — reads it back from this file before exec'ing the real binary.
 2. **GitHub:** an organization that owns the repo and its board, and two GitHub Apps per
-   project: `python3 deploy/app-setup.py riffmap --org yourorg --repos yourorg/riffmap`
-   serves a page with a Create button per App, receives each App's ID and private key and
+   project: `python3 deploy/app-setup.py riffmap --org yourorg` (several names at once put
+   every project on the one page; each repo comes from its `projects/<name>.env`) serves a
+   page with a Create button per App, receives each App's ID and private key and
    writes them into `/etc/watcher/apps/riffmap/` (`deploy/install.sh` sets owners; the
    reviewer's key goes to its own system user, so a tick cannot approve its own PR). The
    page answers on `localhost`, so from the box open `ssh -L 8799:127.0.0.1:8799 root@<box>`
@@ -601,8 +602,8 @@ writes `projects/<name>.env`.
 account's login — refuses to start until that login has write access to the repo, and
 pauses once more, as an ask-first checklist waiting for a yes, for the one thing GitHub
 gives no API for: granting that account access to the new board. On the GitHub Apps path
-there is no such login: `deploy/app-setup.py <name> --org <org> --repos <owner/repo>`
-creates the project's author and reviewer Apps and installing each on the repo *is* the
+there is no such login: `deploy/app-setup.py <name> [<name>…] --org <org>`
+creates each project's author and reviewer Apps and installing each on the repo *is* the
 grant, and an App owned by the organization reaches the organization's boards with no
 board-level grant at all. The script does not know that yet and still insists on a
 `BOT_LOGIN` with write access — a leftover from before the Apps, open as a card. For a
