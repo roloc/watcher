@@ -110,17 +110,21 @@ check("named roloc-<repo name>-<role>, private, no webhook, back to this helper 
 print("2. a project's repo comes from its env file; the key folder is the repo's own name")
 root = os.path.join(tmp, "root")
 os.makedirs(os.path.join(root, "projects"))
-open(os.path.join(root, "projects", "demo.env"), "w").write("# a project\nBOARD_OWNER=lonestarprod\nPROJECT_REPO=lonestarprod/Demo\nREADY_PULL=1\n")
+open(os.path.join(root, "projects", "demo.env"), "w").write("# a project\nBOARD_OWNER=lonestarprod\nPROJECT_REPO=lonestarprod/demo\nREADY_PULL=1\n")
+open(os.path.join(root, "projects", "nulltrader.env"), "w").write("PROJECT_REPO=lonestarprod/NullTrader\n")
 open(os.path.join(root, "projects", "noline.env"), "w").write("BOARD_OWNER=lonestarprod\n")
-check("PROJECT_REPO read from projects/<name>.env", mod.project_repo("demo", root) == "lonestarprod/Demo", mod.project_repo("demo", root))
+check("PROJECT_REPO read from projects/<name>.env", mod.project_repo("demo", root) == "lonestarprod/demo", mod.project_repo("demo", root))
 check("no file, or no PROJECT_REPO line: None", mod.project_repo("missing", root) is None and mod.project_repo("noline", root) is None)
 apps_dir = os.path.join(tmp, "apps")
-demo = mod.Project("demo", ["lonestarprod/Demo"], apps_dir)
+cased = mod.Project("nulltrader", [mod.project_repo("nulltrader", root)], apps_dir)
 other = mod.Project("other", [], apps_dir)
 check("the folder and App name follow the repo's case (bin/spawn.sh's ${PROJECT_REPO##*/}), not the env name",
-      demo.key == "Demo" and demo.dir == os.path.join(apps_dir, "Demo") and other.key == "other", (demo.key, demo.dir))
-# the stub's slugs are lower-case; name the fixture projects to match what GitHub would return
-demo = mod.Project("demo", ["lonestarprod/demo"], apps_dir)
+      cased.key == "NullTrader" and cased.dir == os.path.join(apps_dir, "NullTrader") and mod.app_name(cased.key, "author") == "roloc-NullTrader-author"
+      and other.key == "other", (cased.key, cased.dir))
+# the flow's project: its env file names lonestarprod/demo, the slug the stub answers with. The command-line
+# case below builds the same Project from that file in a fresh process, so the two must agree on the folder
+# on a case-sensitive filesystem too (CI is Linux; a Mac would hide a Demo/demo mismatch).
+demo = mod.Project("demo", [mod.project_repo("demo", root)], apps_dir)
 
 print("3. the whole flow, two projects on one page")
 setup = mod.Setup("lonestarprod", [demo, other], ["author", "reviewer"], 0)
