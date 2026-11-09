@@ -2463,7 +2463,7 @@ if printf '%s' "$OUT" | grep -q -- '-p "/watcher:triage 24"'; then pass "a /tria
 fresh_state
 board_list $'25\tP2\tbuilder\t-\tCard twenty-five'
 board_show '{"number":25,"state":"OPEN","status":"In progress","labels":[]}'
-WATCHER_APPS_DIR="$TMP/no-apps" run --once >/dev/null 2>&1
+run --once >/dev/null 2>&1
 if grepped "claude-env app project=unset author=unset <unset> helpers=0:none"; then pass "no /etc/watcher/apps/<project>: the tick's git and gh environment is untouched"; else flunk "app env leaked into a box with no Apps" "$(grep 'claude-env app' "$TESTLOG")"; fi
 mkdir -p "$TMP/apps/proj"
 printf 'AUTHOR_APP_ID=1\nAUTHOR_INSTALLATION_ID=2\nAUTHOR_SLUG=roloc-proj-author\nAUTHOR_BOT_ID=99\n' > "$TMP/apps/proj/config"
