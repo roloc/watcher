@@ -8,7 +8,9 @@ a user-owned Projects board; card #255). Standard library only, like deploy/app-
 from a checkout of this repo, authenticated as YOURSELF (`gh auth login`: the account that
 owns the repo and the old board and is an owner of the organization), never as a bot or an
 App. Every step checks first and does only what is missing, so a run that stops partway, or
-one you simply run again later, is safe to run again.
+one you simply run again later, is safe to run again. A 502 or 504 from GitHub mid-batch is
+retried on the spot (card #274); a timeout GitHub reports as HTTP 200 with an `errors` body
+("Something went wrong while executing your query") still stops the run — run it again.
 
   1. the repo        POST /repos/<old>/transfer to the organization; waits until GitHub says the
                      repo is the organization's. Issues, labels, PRs, secrets and runners come
@@ -330,7 +332,8 @@ def wanted_values(old_item, new_fields):
 
 
 def pause(seconds):
-    """MOVE_PROJECT_SLEEP overrides the wait between read-back passes (the offline suite sets 0)."""
+    """MOVE_PROJECT_SLEEP overrides every wait: between read-back passes and before a retried
+    GraphQL call (the offline suite sets 0; a person setting it shortens the 5/15/30 s retries too)."""
     time.sleep(float(os.environ.get("MOVE_PROJECT_SLEEP", seconds)))
 
 
