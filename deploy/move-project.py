@@ -484,7 +484,8 @@ def main(argv=None):
   - Commit and push projects/{a.name}.env (this script does not). The deployer ships it; the lane
     reads the new board on its next idle poll.
   - The project's Apps, on the box as root (then open the printed address through
-    `ssh -L 8799:127.0.0.1:8799 root@<box>`): two Create clicks, two Install clicks, on {new_repo} only:
+    `ssh -L 8799:127.0.0.1:8799 root@<box>`): two Create clicks, two Install clicks, on {new_repo} only
+    (several project names at once share the one page; --repos is only needed before the env file is deployed):
       python3 /opt/watcher/deploy/app-setup.py {a.name} --org {org} --repos {new_repo}
   - In {new_repo}: docs/board.md and CLAUDE.md name the board and repo —
       sed -i.bak -e 's|{old_repo}|{new_repo}|g' -e 's|users/{old_owner}/projects/{old_number}|orgs/{org}/projects/{new_number or '<new>'}|g' docs/board.md CLAUDE.md && rm -f docs/board.md.bak CLAUDE.md.bak

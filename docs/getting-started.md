@@ -33,18 +33,26 @@ user. A user-owned Projects board is out of an App's reach, which is why the rep
 live in an **organization**.
 
 **By hand:** create a free organization at `https://github.com/organizations/plan` and move
-(or create) the repo there. Then, per project, on the box as root:
+(or create) the repo there. Then, on the box as root, naming every project you want Apps
+for (each is a `projects/<name>.env`; the repo comes from that file):
 
 ```
-python3 /opt/watcher/deploy/app-setup.py myproject --org myorg --repos myorg/myproject
+python3 /opt/watcher/deploy/app-setup.py myproject otherproject --org myorg
 ```
 
 The address it prints is `localhost`, and GitHub sends your browser back to it, so on a box
 open a tunnel from your own machine first: `ssh -L 8799:127.0.0.1:8799 root@<box>`. Then open
-the address in your browser. The page has two buttons, **Create roloc-myproject-author**
-and **Create roloc-myproject-reviewer**; click each, then click **Install** on the repos it
-names. The helper receives each App's ID and private key and writes them under
-`/etc/watcher/apps/myproject/` itself. You never download or paste a key. About thirty seconds.
+the address in your browser. The page has a section per project with two buttons, **Create
+roloc-myproject-author** and **Create roloc-myproject-reviewer**; click each, then click the
+**Install it** link, choose *Only select repositories*, pick the repo it names and click
+Install. The helper receives each App's ID and private key and writes them under
+`/etc/watcher/apps/myproject/` itself (the folder is the repo's own name), and exits when every
+App of every project is installed. You never download or paste a key. About thirty seconds a
+project. A project whose Apps already exist is listed as done, and an App that was created
+with fewer permissions than a tick needs is flagged with the two links that fix it: GitHub
+gives no API for changing an App's permissions, so that is a click in the organization's App
+settings and one more to accept it on the installation. A project with no env file yet takes
+`--repos owner/name` (one project at a time).
 
 - The **author** App pushes, opens PRs, comments and moves cards.
 - The **reviewer** App files the review verdict as a real GitHub review. Its key is read by a
