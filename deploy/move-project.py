@@ -157,7 +157,8 @@ def board_items(pid):
 
 
 def protection(repo):
-    """('none', None) for no protection, ('ok', checks) for a protected main."""
+    """('none', None) for no protection, ('ok', its checks) for a protected main, ('denied', None) for
+    the 403 a private repo in a Free organization gives a read as well as a write."""
     ok, d, err = api(f"repos/{repo}/branches/main/protection")
     if ok:
         rsc = (d or {}).get("required_status_checks") or {}
@@ -166,6 +167,8 @@ def protection(repo):
         return "ok", {"checks": sorted(checks), "pr": prr is not None, "approvals": (prr or {}).get("required_approving_review_count")}
     if "404" in err or "not protected" in err.lower():
         return "none", None
+    if "403" in err:
+        return "denied", None
     raise Stop(f"could not read main's protection on {repo}: {err[:200]}")
 
 
@@ -305,6 +308,15 @@ def step_cards(a, old, new):
         say("   not carried (no such field or option on the new board): " + ", ".join(sorted(skipped)))
 
 
+def protection_denied(a, new_repo, checks):
+    return Stop(
+        f"GitHub will not protect main on {new_repo} (403: a private repo in a Free organization cannot).\n"
+        f"  The repo, board and cards are moved; projects/{a.name}.env is NOT yet rewritten. Choose:\n"
+        f"  A. Upgrade the organization's plan (or make the repo public), then rerun this command.\n"
+        f"  B. Rerun with --no-protection: main stays unprotected, and merges rely on the lane's own rules.\n"
+        f"  The checks the old repo required were: {', '.join(checks) if checks else 'not readable'}.", 3)
+
+
 def step_protection(a, new_repo, captured):
     say("4. main's protection")
     if a.no_protection:
@@ -312,7 +324,9 @@ def step_protection(a, new_repo, captured):
         return
     state, cur = protection(new_repo) if not a.dry_run or a.transferred else ("none", None)
     checks = sorted(set(a.required_checks.split(",")) - {""}) if a.required_checks else (captured or {}).get("checks")
-    if checks is None and a.transferred and state != "ok":
+    if state == "denied":
+        raise protection_denied(a, new_repo, checks)
+    if checks is None and (a.transferred or a.captured_denied) and state != "ok":
         # An earlier run moved the repo, and the protection did not come with it: what the old
         # repo required can no longer be read, so a guess here would be the script's, not the owner's.
         raise Stop(f"main on {new_repo} is unprotected and the checks the old repo required are gone with the move.\n"
@@ -335,12 +349,7 @@ def step_protection(a, new_repo, captured):
         say(f"   set: {', '.join(checks) or 'no checks'}, PR required, 0 approvals")
         return
     if "403" in err:
-        raise Stop(
-            f"GitHub will not protect main on {new_repo} (403: a private repo in a Free organization cannot).\n"
-            f"  The repo, board and cards are moved; projects/{a.name}.env is NOT yet rewritten. Choose:\n"
-            f"  A. Upgrade the organization's plan (or make the repo public), then rerun this command.\n"
-            f"  B. Rerun with --no-protection: main stays unprotected, and merges rely on the lane's own rules.\n"
-            f"  The checks the old repo required were: {', '.join(checks) or 'none'}.", 3)
+        raise protection_denied(a, new_repo, checks)
     raise Stop(f"setting main's protection failed: {err[:300]}")
 
 
@@ -393,7 +402,9 @@ def main(argv=None):
         # Read before the transfer: the protection moves with the repo or is lost to it.
         ok, d, _ = api(f"repos/{old_repo}")
         a.transferred = ok and (d or {}).get("full_name", "").lower() == new_repo.lower()
-        state, captured = protection(old_repo)
+        # --no-protection never reads it: a private repo in a Free organization answers 403 to a read too.
+        state, captured = ("none", None) if a.no_protection else protection(old_repo)
+        a.captured_denied = state == "denied"
         step_transfer(a, old_repo, new_repo)
         new = step_board(a, old, new_repo)
         step_cards(a, old, new)

@@ -103,6 +103,8 @@ if argv[0] == "api":
         out({"full_name": full})
     if rest == "/branches/main/protection":
         if method == "GET":
+            if S.get("read_403") == "all" or (S.get("read_403") == "new" and full.startswith("lonestarprod/")):
+                fail("gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)")
             if repo.get("protection") is None:
                 fail("gh: Branch not protected (HTTP 404)")
             out(repo["protection"])
@@ -250,6 +252,15 @@ check("a plain rerun then asks for --required-checks or --no-protection, never g
 r, st, env = go("--no-protection")
 check("rerun with --no-protection finishes: the env file written, no protection call", r.returncode == 0 and "PROJECT_REPO=lonestarprod/demo" in env and "protect" not in kinds(st), r.stderr)
 check("…and it did not transfer or copy again", kinds(st).count("transfer") == 1 and kinds(st).count("copy") == 1, kinds(st))
+
+print("3b. a 403 on the READ of protection (private repo, Free plan) is the same stop, and --no-protection gets past it")
+for where in ("new", "all"):
+    d, sp, ep, go = run_move(fresh(read_403=where))
+    r, st, env = go()
+    check(f"read refused ({where}): exit 3 with the choices, env file untouched, repo and cards moved",
+          r.returncode == 3 and "--no-protection" in r.stderr and env == ENV and kinds(st).count("add") == 3, (r.returncode, r.stderr))
+    r, st, env = go("--no-protection")
+    check(f"…and a rerun with --no-protection ({where}) writes the env file", r.returncode == 0 and "PROJECT_REPO=lonestarprod/demo" in env and "protect" not in kinds(st), (r.returncode, r.stderr))
 
 print("4. a dry run writes nothing")
 d, sp, ep, go = run_move(fresh())
