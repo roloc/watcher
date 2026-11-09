@@ -189,7 +189,7 @@ user mention (`<@your-id>`) or `@here`.
 ## The watcher's own board
 
 - **The watcher works its own cards too,** on the
-  [Watcher board](https://github.com/users/roloc/projects/2). Same columns, same rules.
+  [Watcher board](https://github.com/orgs/lonestarprod/projects/1). Same columns, same rules.
 - **One card at a time** there, separate from riffmap's two.
 - **What it merges goes live by itself** once the checks pass — within about five minutes,
   whatever any bot is doing at the time (next section).

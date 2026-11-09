@@ -134,7 +134,7 @@ The watcher is one Claude Code plugin (`.claude-plugin/plugin.json`: `commands/`
 mod's hooks, card [#209](https://github.com/roloc/watcher/issues/209)). The spawner loads it with
 `--plugin-dir "$WATCHER_HOME"` and runs `/watcher:watch <n>`, so a tick uses its own release's copy and the
 agents are `watcher:reviewer` and `watcher:usability`; a fork installs it with
-`/plugin install watcher --marketplace roloc/watcher`. A project-level `.claude/commands/watch.md` is
+`/plugin install watcher --marketplace lonestarprod/watcher`. A project-level `.claude/commands/watch.md` is
 the bare `/watch`, which a tick no longer runs; a project that needs different rules says so in its
 `CLAUDE.md`. The generic one reads
 the project's `CLAUDE.md` for the names it needs (the required CI check, contracts a builder

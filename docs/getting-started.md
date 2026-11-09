@@ -39,7 +39,9 @@ live in an **organization**.
 python3 /opt/watcher/deploy/app-setup.py myproject --org myorg --repos myorg/myproject
 ```
 
-and open the address it prints. The page has two buttons, **Create roloc-myproject-author**
+The address it prints is `localhost`, and GitHub sends your browser back to it, so on a box
+open a tunnel from your own machine first: `ssh -L 8799:127.0.0.1:8799 root@<box>`. Then open
+the address in your browser. The page has two buttons, **Create roloc-myproject-author**
 and **Create roloc-myproject-reviewer**; click each, then click **Install** on the repos it
 names. The helper receives each App's ID and private key and writes them under
 `/etc/watcher/apps/myproject/` itself. You never download or paste a key. About thirty seconds.
