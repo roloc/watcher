@@ -38,35 +38,39 @@ export GH_REPO=lonestarprod/demo
 echo "$SHA" > "$TMP/head"
 printf 'Reviewed %s: no blocking findings\n' "$SHA" > "$TMP/body"
 
-run() { : > "$CALLS"; OUT="$("$SCRIPT" "$@" 2>&1)"; RC=$?; }
+# run PR SHA VERDICT [BODYARG]: the body is whatever $BODY holds, on stdin.
+BODY="$(cat "$TMP/body")"
+run() { : > "$CALLS"; OUT="$(printf '%s\n' "$BODY" | "$SCRIPT" "$@" 2>&1)"; RC=$?; }
 
-run 7 "$SHA" approve "$TMP/body"
+run 7 "$SHA" approve -
 check "an approve on the PR's head: files an APPROVE review on that commit" '[ "$RC" = 0 ] && grep -q "commit_id=$SHA" "$CALLS" && grep -q "event=APPROVE" "$CALLS"' "rc=$RC $OUT $(cat "$CALLS")"
 check "…with the reviewer App's token, minted for the repo's project" 'grep -q "gh token=ghs_reviewer_token" "$CALLS" && grep -q "mint demo reviewer" "$CALLS"'
-check "…the body is the first line, and the review URL is printed" 'grep -q "body=Reviewed $SHA: no blocking findings" "$CALLS" && [ "${OUT#https://github.com/}" != "$OUT" ]' "$OUT"
+check "…the body (read from stdin) is the first line, and the review URL is printed" 'grep -q "body=Reviewed $SHA: no blocking findings" "$CALLS" && [ "${OUT#https://github.com/}" != "$OUT" ]' "$OUT"
 check "…GH_REPO is not passed on to gh (the path carries the repo)" '! grep -q "repo=lonestarprod" "$CALLS"'
-run 7 "$SHA" request-changes "$TMP/body"
+run 7 "$SHA" request-changes -
 check "request-changes files REQUEST_CHANGES" '[ "$RC" = 0 ] && grep -q "event=REQUEST_CHANGES" "$CALLS"' "$OUT"
-printf 'Reviewed %s: no blocking findings\n' "$SHA" | { : > "$CALLS"; OUT="$("$SCRIPT" 7 "$SHA" approve - 2>&1)"; RC=$?; }
-check "a body of - is read from stdin" '[ "$RC" = 0 ] && grep -q "body=Reviewed $SHA" "$CALLS"' "rc=$RC $OUT"
-
 echo "$OLD" > "$TMP/head"
-run 7 "$SHA" approve "$TMP/body"
+run 7 "$SHA" approve -
 check "a sha that is not the head now: refused, no review filed" '[ "$RC" = 1 ] && ! grep -q "X POST" "$CALLS" && printf "%s" "$OUT" | grep -q "not the head"' "rc=$RC $OUT"
 echo "$SHA" > "$TMP/head"
 
-run 7 "$SHA" merge "$TMP/body";                check "a verdict that is not approve/request-changes: usage error" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
-run 7 "${SHA%?}" approve "$TMP/body";          check "a short sha: usage error, nothing called" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
-run "7;id" "$SHA" approve "$TMP/body";         check "a PR number with anything else in it: usage error" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
+run 7 "$SHA" merge -;                check "a verdict that is not approve/request-changes: usage error" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
+run 7 "${SHA%?}" approve -;          check "a short sha: usage error, nothing called" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
+run "7;id" "$SHA" approve -;         check "a PR number with anything else in it: usage error" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
 run 7 "$SHA" approve;                          check "too few arguments: usage error" '[ "$RC" = 2 ]'
-run 7 "$SHA" approve "$TMP/nowhere";           check "a body file that is not there: refused before any call" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
-: > "$TMP/empty"; run 7 "$SHA" approve "$TMP/empty"; check "an empty body: refused" '[ "$RC" = 2 ]'
-GH_REPO="x;y/z" run 7 "$SHA" approve "$TMP/body"; check "a GH_REPO that is not owner/name: refused" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
-GH_REPO= run 7 "$SHA" approve "$TMP/body";     check "no GH_REPO: refused" '[ "$RC" = 2 ]'
-touch "$TMP/mint-fails"; run 7 "$SHA" approve "$TMP/body"
+# The helper runs as the user that can read the reviewer key: a path as the body would have
+# the key posted back as a review (found in review of #256). Only a literal - is accepted.
+printf 'PRIVATE KEY MATERIAL\n' > "$TMP/secret"
+run 7 "$SHA" approve "$TMP/secret"
+check "a file path as the body: usage error, the file is never read, nothing called" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ] && ! printf "%s" "$OUT" | grep -q "PRIVATE KEY"' "rc=$RC $OUT"
+BODY=""; run 7 "$SHA" approve -; check "an empty body: refused" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]' "rc=$RC $OUT"
+BODY="$(cat "$TMP/body")"
+GH_REPO="x;y/z" run 7 "$SHA" approve -; check "a GH_REPO that is not owner/name: refused" '[ "$RC" = 2 ] && [ ! -s "$CALLS" ]'
+GH_REPO= run 7 "$SHA" approve -;     check "no GH_REPO: refused" '[ "$RC" = 2 ]'
+touch "$TMP/mint-fails"; run 7 "$SHA" approve -
 check "no reviewer App for the project: exit 1, no review, no gh call" '[ "$RC" = 1 ] && ! grep -q "^gh" "$CALLS"' "rc=$RC $OUT"
 rm -f "$TMP/mint-fails"
-head -c 9000 /dev/zero | tr '\0' x > "$TMP/big"; run 7 "$SHA" approve "$TMP/big"
+BODY="$(head -c 9000 /dev/zero | tr '\0' x)"; run 7 "$SHA" approve -
 check "a huge body is cut at 4000 bytes" '[ "$(grep -o "body=x*" "$CALLS" | head -1 | wc -c | tr -d " ")" = 4006 ]'
 
 echo

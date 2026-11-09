@@ -31,13 +31,16 @@ if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
   # On success the minter prints only the token; on failure only one line of why. "No App set
   # up" and "no project" are the fallback path (today's gh login); anything else is loud, so a
   # revoked key never quietly turns into the old machine account.
-  if out="$("$minter" "$role" 2>&1)"; then
+  errf="$(mktemp 2>/dev/null)" || errf=/dev/null
+  if out="$("$minter" "$role" 2>"$errf")"; then
     [ -n "$out" ] && export GH_TOKEN="$out"
   else
+    out="$(cat "$errf" 2>/dev/null)"
     case "$out" in
       *"no App set up"*|*"no project"*) ;;
-      *) printf '%s\n' "$out" >&2; exit 1 ;;
+      *) printf '%s\n' "$out" >&2; rm -f "$errf"; exit 1 ;;
     esac
   fi
+  [ "$errf" = /dev/null ] || rm -f "$errf"
 fi
 exec "$real" "$@"

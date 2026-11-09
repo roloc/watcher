@@ -11,7 +11,7 @@ permissions skipped there and nowhere else, and what actually stops a bad PR fro
   readable by the `watcher` user; the reviewer key only by the separate `watcher-reviewer`
   user, and `watcher` may run exactly one program as it (`bin/review-submit.sh`, a root-owned
   copy, one sudoers line) that files a review on a PR's current head. A tick therefore cannot
-  approve its own PR, and the guard refuses that helper and `sudo` to that user from its shell.
+  approve its own PR, and the guard refuses that helper and `sudo` to that user from its shell. The helper reads its body from stdin only, never a path (it runs as the user that can read the key), and takes the repo from the caller, so it can review on any repo where some project's reviewer App is installed — the same trust as a `🤖 reviewer:` comment.
   Tokens are minted per call and last an hour; none is stored. Nothing on your own personal
   account. (A fork on one bot account instead: a `gh auth login` for that bot, run once as the
   `watcher` user — write access to whatever repo you granted it, and the board.)

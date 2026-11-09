@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# review-submit.sh <pr> <sha> <approve|request-changes> <body-file|->   (card #255)
+# review-submit.sh <pr> <sha> <approve|request-changes> -   (card #255)
 #
 # Files the reviewer's verdict as a real GitHub review from the project's reviewer App, on
 # exactly the commit named. It is the ONE thing the watcher user may run as the separate
@@ -15,16 +15,19 @@
 # through sudo for this one variable) and must be owner/name, the sha must be the PR's head
 # right now (a stale one is refused, never reviewed), and the body is cut at 4000 bytes.
 # Only the first line of a reviewer's answer is ever sent (hooks/receipts.ts), so the body
-# is that line. `-` reads the body from stdin.
+# is that line. The body is read from stdin (the last argument is a literal `-`) and NEVER from a
+# file: the helper runs as watcher-reviewer, which can read the reviewer key, so a path argument
+# would let a caller have the key posted back to it as a review body (found in review of #256).
 #
 # Test seams, none of which survives sudo's reset environment: WATCHER_REVIEW_GH (the gh),
 # WATCHER_REVIEW_MINT (the token script), WATCHER_REVIEW_CACHE (its token cache).
 set -euo pipefail
 PATH="/usr/local/bin:/usr/bin:/bin"
 
-usage() { echo "usage: review-submit.sh <pr> <sha> <approve|request-changes> <body-file|->" >&2; exit 2; }
+usage() { echo "usage: review-submit.sh <pr> <sha> <approve|request-changes> - (body on stdin)" >&2; exit 2; }
 [ $# -eq 4 ] || usage
-pr="$1"; sha="$2"; verdict="$3"; body_src="$4"
+pr="$1"; sha="$2"; verdict="$3"
+[ "$4" = - ] || usage
 [[ "$pr" =~ ^[0-9]{1,9}$ ]] || usage
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || usage
 case "$verdict" in approve) event=APPROVE ;; request-changes) event=REQUEST_CHANGES ;; *) usage ;; esac
@@ -39,10 +42,7 @@ if [ -z "$mint" ]; then
 fi
 gh_bin="${WATCHER_REVIEW_GH:-gh}"
 
-if [ "$body_src" = - ]; then body="$(head -c 4000)"; else
-  [ -f "$body_src" ] && [ -r "$body_src" ] || { echo "review-submit: cannot read $body_src" >&2; exit 2; }
-  body="$(head -c 4000 "$body_src")"
-fi
+body="$(head -c 4000)"
 [ -n "$body" ] || { echo "review-submit: empty body" >&2; exit 2; }
 
 export GH_APP_DIR="/etc/watcher/apps/$project"
