@@ -153,8 +153,20 @@ check("five projects (watcher, riffmap, second, third, fourth)",
 check("riffmap's board holds all three of its lanes",
       sorted(l["lane"] for l in by_pname["riffmap"]["lanes"])
       == ["riffmap", "riffmap-design", "riffmap-triage"])
-check("board_url is the owner/number GitHub Projects URL",
+check("board_url, with no address known, is the user form of owner/number (the fallback)",
       by_pname["riffmap"]["board_url"] == "https://github.com/users/roloc/projects/1")
+# Card #265: the board says where it lives. An organization-owned board links to orgs/, a
+# user-owned one (or one whose cache has no address yet) to users/.
+BOARD_URLS = {("roloc", 2): "https://github.com/orgs/lonestarprod/projects/1",
+              ("roloc", 1): "https://github.com/users/roloc/projects/1"}
+by_known = {p["name"]: p for p in floor.group_by_project(lanes, lambda o, n: BOARD_URLS.get((o, n), ""))}
+check("an organization-owned fixture board links to orgs/…",
+      by_known["watcher"]["board_url"] == "https://github.com/orgs/lonestarprod/projects/1",
+      by_known["watcher"]["board_url"])
+check("a user-owned fixture board still links to users/…",
+      by_known["riffmap"]["board_url"] == "https://github.com/users/roloc/projects/1")
+check("a board with no address cached falls back to users/…",
+      by_known["second"]["board_url"] == f"https://github.com/users/{by_known['second']['board_owner']}/projects/{by_known['second']['board_number']}")
 
 # --- state directories: one fixture per pill ---------------------------------------------
 
@@ -313,13 +325,15 @@ print("5. lane_desk: each of the five pills, from its own fixture")
 state = floor.build_state(PROJECTS, STATE, stub_board_fetcher, unit_active_fn=stub_unit_active,
                            ask_fn=stub_ask, images_fn=stub_images, rounds_fn=stub_rounds,
                            plan_fn=stub_plan,
-                           now=NOW, box_name="test-box", ratelimit_fn=stub_ratelimit)
+                           now=NOW, box_name="test-box", ratelimit_fn=stub_ratelimit,
+                           board_url_fn=lambda o, n: BOARD_URLS.get((o, n), ""))
 lanes_by_name = {(p["name"], l["lane"]): l for p in state["projects"] for l in p["lanes"]}
 
 d = lanes_by_name[("watcher", "watcher")]
 check("watcher: paused", d["pill"] == "paused", d)
 check("watcher: unit_active reported False", d.get("unit_active") is False)
-check("watcher: links to its board (no single card)", d["link"] == "https://github.com/users/roloc/projects/2")
+check("watcher: links to its board (no single card): an organization's, under orgs/",
+      d["link"] == "https://github.com/orgs/lonestarprod/projects/1", d["link"])
 
 d = lanes_by_name[("riffmap", "riffmap")]
 check("riffmap (build): working", d["pill"] == "working", d)
