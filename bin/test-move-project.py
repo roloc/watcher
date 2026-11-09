@@ -54,6 +54,13 @@ if args[0] == "api" and args[1] == "graphql":
         if a in ("-f", "-F") and i + 1 < len(args) and not args[i + 1].startswith("query="):
             k, _, v = args[i + 1].partition("="); var[k] = v
     if q.lstrip().startswith("mutation"):
+        left = load("fail-5xx.json", 0)   # answer this many mutations with a 502 before applying anything
+        if left:
+            save("fail-5xx.json", left - 1)
+            print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+        if load("fail-4xx.json", 0):
+            save("fail-4xx.json", 0)
+            print("gh: HTTP 422: Validation Failed", file=sys.stderr); sys.exit(1)
         result = {}
         for alias, cid in re.findall(r'(a\d+): addProjectV2ItemById\(input:\{projectId:"([^"]+)"', q):
             pass
@@ -361,6 +368,52 @@ def main():
     check("says it read back", "read-back pass" in r.stdout, r.stdout)
     new = {it["content"]["id"]: it["values"] for it in w.get("board-lonestarprod-9.json")["items"]}
     check("every Status ends where the old board had it", new["I_1"]["Status"] == "Done" and new["I_2"]["Status"] == "Ready", new)
+    w.close()
+
+    print("8. GitHub answers 502 to a mutation: the call is retried, the move finishes in one run")
+    w = World()
+    w.put("fail-5xx.json", 2)
+    r = w.run()
+    check("exits 0", r.returncode == 0, r.stderr[-300:] + r.stdout[-300:])
+    check("says it retried, once per 502", r.stdout.count("GitHub returned 502; retrying in") == 2, r.stdout)
+    check("ends in done", "== done ==" in r.stdout, r.stdout[-200:])
+    new = {it["content"]["id"]: it["values"] for it in w.get("board-lonestarprod-9.json")["items"]}
+    check("every card carried once, with its values", sorted(new) == ["I_1", "I_2", "I_3"]
+          and new["I_1"] == {"Status": "Done", "Priority": "P1"} and new["I_2"] == {"Status": "Ready", "Stage": "PR open"}, new)
+    check("env written", "BOARD_NUMBER=9\n" in w.env_text())
+    w.close()
+
+    print("8b. ... four 502s in a row is a failure, the same as before")
+    w = World()
+    w.put("fail-5xx.json", 4)
+    r = w.run()
+    check("exits 1 naming the 502", r.returncode == 1 and "HTTP 502" in r.stderr, r.stderr)
+    check("three retries, then stops", r.stdout.count("retrying in") == 3, r.stdout)
+    check("env untouched", w.env_text() == ENV_TEXT)
+    w.close()
+
+    print("8c. a 4xx is not retried")
+    w = World()
+    w.put("fail-4xx.json", 1)
+    r = w.run()
+    check("exits 1 at once", r.returncode == 1 and "HTTP 422" in r.stderr and "retrying" not in r.stdout, r.stderr + r.stdout[-200:])
+    w.close()
+
+    print("9. cards go five adds and ten sets to a request (the sizes a 375-card board survived)")
+    w = World()
+    many = {f"I_{n}": {"number": n, "repo": "roloc/thing"} for n in range(1, 13)}
+    contents = w.get("contents.json"); contents.update(many); w.put("contents.json", contents)
+    old = w.get("board-roloc-4.json")
+    old["items"] = [{"id": f"O_{n}", "type": "ISSUE", "content": {"__typename": "Issue", "id": f"I_{n}", "number": n,
+                     "repository": {"nameWithOwner": "roloc/thing"}}, "values": {"Status": "Backlog", "Priority": "P2"}} for n in range(1, 13)]
+    w.put("board-roloc-4.json", old)
+    r = w.run()
+    adds = [c for c in w.called() if "addProjectV2ItemById" in c]
+    sets = [c for c in w.called() if "updateProjectV2ItemFieldValue" in c]
+    check("exits 0", r.returncode == 0, r.stderr[-300:])
+    check("12 cards in 3 add requests", len(adds) == 3, len(adds))
+    check("24 values in 3 set requests", len(sets) == 3, len(sets))
+    check("all 12 carried", len(w.get("board-lonestarprod-9.json")["items"]) == 12)
     w.close()
 
     print("7. a wrong env file is refused before anything is touched")

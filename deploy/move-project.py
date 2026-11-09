@@ -78,14 +78,33 @@ def gh_json(*args):
     return json.loads(out) if out else None
 
 
+RETRY_PAUSES = (5, 15, 30)  # seconds before the 2nd, 3rd and 4th try of a GraphQL call GitHub answered 5xx
+
+
 def graphql(query, **variables):
+    """One GraphQL call. A 5xx from GitHub (a 502 or 504 while a batched mutation runs, card #274)
+    is retried three times with a growing pause; a 4xx is a real refusal and is raised at once.
+    Safe for the mutations this script sends: addProjectV2ItemById returns the existing item for
+    a card already on the board, and updateProjectV2ItemFieldValue sets the same value again."""
     args = ["api", "graphql", "-f", f"query={query}"]
     for k, v in variables.items():
         args += (["-F", f"{k}={v}"] if isinstance(v, int) else ["-f", f"{k}={v}"])
-    data = gh_json(*args)
-    if data is None or data.get("errors"):
-        raise RuntimeError(f"GraphQL: {json.dumps((data or {}).get('errors'))[:400]}")
-    return data["data"]
+    for attempt in range(len(RETRY_PAUSES) + 1):
+        r = gh(*args, check=False)
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "gh api graphql failed").strip()
+            code = re.search(r"\bHTTP (5\d\d)\b", err)
+            if code and attempt < len(RETRY_PAUSES):
+                wait = RETRY_PAUSES[attempt]
+                print(f"  GitHub returned {code.group(1)}; retrying in {wait}s", flush=True)
+                pause(wait)
+                continue
+            raise RuntimeError(err[:400])
+        out = r.stdout.strip()
+        data = json.loads(out) if out else None
+        if data is None or data.get("errors"):
+            raise RuntimeError(f"GraphQL: {json.dumps((data or {}).get('errors'))[:400]}")
+        return data["data"]
 
 
 def read_env(path):
@@ -262,11 +281,19 @@ def _lit(s):
     return json.dumps(s)
 
 
+# How many aliased mutations go in one request. Twenty adds and thirty sets looked fine on a
+# 21-card board and timed out (502, 504) on 32, 52 and 375 cards on November 9, 2026: GitHub
+# ran out of time with the batch part-applied, every run landing about one batch (card #274).
+# Five adds take a few seconds each; the retry in graphql() covers the rare one that still fails.
+ADD_BATCH = 5
+SET_BATCH = 10
+
+
 def add_items(board_id, content_ids, dry_run):
-    """addProjectV2ItemById for each, twenty per request; returns {content id: item id}."""
+    """addProjectV2ItemById for each, ADD_BATCH per request; returns {content id: item id}."""
     out = {}
-    for i in range(0, len(content_ids), 20):
-        chunk = content_ids[i:i + 20]
+    for i in range(0, len(content_ids), ADD_BATCH):
+        chunk = content_ids[i:i + ADD_BATCH]
         if dry_run:
             continue
         parts = [f"a{j}: addProjectV2ItemById(input:{{projectId:{_lit(board_id)}, contentId:{_lit(cid)}}}){{ item{{ id }} }}"
@@ -278,9 +305,9 @@ def add_items(board_id, content_ids, dry_run):
 
 
 def set_values(board_id, sets, dry_run):
-    """sets: [(item id, field id, option id)], thirty per request."""
-    for i in range(0, len(sets), 30):
-        chunk = sets[i:i + 30]
+    """sets: [(item id, field id, option id)], SET_BATCH per request."""
+    for i in range(0, len(sets), SET_BATCH):
+        chunk = sets[i:i + SET_BATCH]
         if dry_run:
             continue
         parts = [f"s{j}: updateProjectV2ItemFieldValue(input:{{projectId:{_lit(board_id)}, itemId:{_lit(item)}, "
