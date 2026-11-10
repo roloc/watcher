@@ -183,7 +183,8 @@ BOT_LOGIN=<a bot login> deploy/add-project.sh <name> <owner/repo>
 It builds the board (`BOARD_OWNER` defaults to the repo's owner — your organization, on the
 Apps path), then stops once and prints the one thing GitHub gives no API for — granting a
 bot account access to the new board — and asks you to confirm you did it. (The board's
-Auto-add workflow is optional now: every card the watcher files puts itself on the board.)
+Auto-add workflow is not needed: the watcher puts every open issue of the repo on the
+board itself, within five minutes.)
 Do it, answer yes, and it goes on to the labels, `main`'s branch protection and
 `projects/<name>.env`. Answering no, or piping it non-interactively, stops the script
 there; re-run the same command once it is done — everything it already built is left alone

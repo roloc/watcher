@@ -1105,5 +1105,65 @@ del os.environ["PROJECT_REPO"]
 del os.environ["WATCHER_GH"]
 board.subprocess.run = stub_run
 
+_saved = (board.gh, board.project, board.items, board.subprocess.run, dict(os.environ))
+os.environ["PROJECT_REPO"] = REPO
+os.environ["STAGE_SWEEP_SEC"] = "0"
+
+print("29. stray issues (card #267): sweep-strays adds what is off the board, once, never a PR")
+S = {"calls": [], "added": [], "set": [], "fail_on": None}
+
+
+def strays_gh(query, **v):
+    S["calls"].append(query)
+    if "addProjectV2ItemById" in query:
+        if v["c"] == S["fail_on"]:
+            sys.exit("board.py: gh failed: boom")
+        S["added"].append(v["c"])
+        return {"addProjectV2ItemById": {"item": {"id": "ITEM-" + v["c"]}}}
+    S["set"].append((v["i"], v["o"]))
+    return {}
+
+
+def strays_run(cmd, **kw):
+    if cmd[1] == "api" and "issues?state=open" in cmd[-1]:
+        page1 = [{"number": 1, "node_id": "N1"}, {"number": 2, "node_id": "N2"}]
+        page2 = [{"number": 3, "node_id": "N3", "pull_request": {}}]
+        return FakeResult(json.dumps(page1) + json.dumps(page2))
+    return FakeResult("")
+
+
+board.subprocess.run = strays_run
+board.gh = strays_gh
+board.project = lambda fresh=False: ({"id": "P"}, {board.STATUS_FIELD: {"id": "F", "options": [
+    {"name": "Backlog", "id": "OB"}, {"name": "Ready", "id": "OR"}]}})
+board.items = lambda fresh=False: W["board"]
+W["board"] = waits_cards((1, "OPEN", "Ready", []))
+_o = io.StringIO()
+with contextlib.redirect_stdout(_o):
+    board.cmd_sweep_strays()
+check("one issue on the board, one off it, one PR: exactly one add, for the one off the board",
+      S["added"] == ["N2"], S)
+check("…and its Status is set to Backlog", S["set"] == [("ITEM-N2", "OB")], S)
+check("…and the line says which card", "#2 added to the board in Backlog" in _o.getvalue(), _o.getvalue())
+W["board"] = waits_cards((1, "OPEN", "Ready", []), (2, "OPEN", "Backlog", []))
+S["added"].clear(); S["set"].clear()
+board.cmd_sweep_strays()
+check("a second run adds nothing", not S["added"] and not S["set"], S)
+W["board"] = waits_cards((1, "OPEN", "Ready", []))
+S["fail_on"] = "N2"
+_o, _e = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(_o), contextlib.redirect_stderr(_e):
+    rc = board.cmd_sweep_strays()
+check("an add that fails is one stderr line, never a crash",
+      rc == 0 and "#2" in _e.getvalue() and "added" not in _o.getvalue(), (_o.getvalue(), _e.getvalue()))
+S["fail_on"] = None
+os.environ.pop("PROJECT_REPO", None)
+os.environ.pop("GH_REPO", None)
+S["added"].clear()
+board.cmd_sweep_strays()
+check("no PROJECT_REPO: nothing to look up, nothing added", not S["added"], S)
+board.gh, board.project, board.items, board.subprocess.run = _saved[:4]
+os.environ.clear(); os.environ.update(_saved[4])
+
 print(f"{count} cases, {'all passed' if not fails else 'FAILURES ABOVE'}")
 sys.exit(fails)
