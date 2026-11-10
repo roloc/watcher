@@ -185,7 +185,7 @@ if [ -d /etc/watcher/apps/watcher ]; then
     app_id="$("$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
   fi
   if [ -n "$app_id" ]; then
-    echo "doctor: the floor page's gh mints as the App: $app_id"
+    echo "doctor: the watcher user's gh (floor page, timers, deployer) mints as the App: $app_id"
   else
     warn "the watcher user cannot mint the author App for the floor page, hygiene, detector, metrics and deployer (gh-app-token.sh watcher author --identity failed) — they fall back to its gh login"
   fi
