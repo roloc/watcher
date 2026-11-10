@@ -1639,6 +1639,18 @@ sweep_closed_stages() {
     log "board.py sweep-waiting failed; chips stay until the next sweep: $(cat "$errfile" 2>/dev/null)"
   fi
   rm -f "$errfile"
+  # Issues filed from the GitHub app reach the board here, with no Auto-add workflow on
+  # (card #267). Same clock, own stamp in board.py; a failure is one line, never the poll.
+  errfile="$(mktemp)"
+  if out="$($WATCHER_BOARD sweep-strays 2>"$errfile")"; then
+    while IFS= read -r line; do
+      if [ -n "$line" ]; then log "stray issue: $line"; fi
+    done <<< "$out"
+    if [ -s "$errfile" ]; then log "board.py sweep-strays: $(cat "$errfile")"; fi
+  else
+    log "board.py sweep-strays failed; strays stay off the board until the next sweep: $(cat "$errfile" 2>/dev/null)"
+  fi
+  rm -f "$errfile"
   return 0
 }
 

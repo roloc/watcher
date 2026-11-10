@@ -188,6 +188,9 @@ json.dump(d, open(path, "w"))
 ' "$BOARD_SHOW_FILE" 2>/dev/null || true
     fi
     ;;
+  sweep-strays)
+    if [ "${BOARD_STRAYS_FAIL:-0}" = 1 ]; then echo "board.py: sweep-strays: could not list o/r's open issues" >&2; exit 1; fi
+    ;;
   sweep-waiting)
     # Card #222: the `waits on #<m>` chip sweep; the real one is in test-board.py.
     ;;
@@ -2172,6 +2175,8 @@ if not_grepped "board.py notify"; then pass "…with no Discord post (a stale St
 
 if [ "$(grep -c '^board.py sweep-waiting$' "$TESTLOG" || true)" = 1 ]; then pass "…and the waits-on chips (card #222) are swept on the same clock, once"; else flunk "expected one sweep-waiting call" "$(cat "$TESTLOG")"; fi
 
+if [ "$(grep -c '^board.py sweep-strays$' "$TESTLOG" || true)" = 1 ]; then pass "…and stray issues (card #267) are swept onto the board on the same clock, once"; else flunk "expected one sweep-strays call" "$(cat "$TESTLOG")"; fi
+
 run --once >/dev/null 2>&1 || true
 if [ "$(sweeps)" = 1 ]; then pass "the next poll, inside STAGE_SWEEP_SEC, does not read the board again for it"; else flunk "swept twice inside the interval" "$(cat "$TESTLOG")"; fi
 
@@ -2192,6 +2197,13 @@ if grepped "/watcher:watch 950"; then pass "a failed sweep does not stop the pol
 if grep -q 'sweep-stages failed; stale Stages stay until the next sweep: board.py: transient API error' "$TMP/sweepfail.err"; then pass "…and says so once, with the board's own error"; else flunk "no log line for the failed sweep" "$(cat "$TMP/sweepfail.err")"; fi
 BOARD_SWEEP_FAIL=1 run --once >/dev/null 2>&1 || true
 if [ "$(sweeps)" = 1 ]; then pass "…and is not retried every poll: it waits for its next turn"; else flunk "a failed sweep was retried inside the interval" "$(cat "$TESTLOG")"; fi
+
+# A stray sweep that fails is one log line and the card is still picked (card #267).
+fresh_state; board_list $'951\tP1\tbuilder\t-\t-\tOrdinary card'
+board_show '{"number":951,"state":"CLOSED","status":"Done","labels":[]}'
+BOARD_STRAYS_FAIL=1 run --once >/dev/null 2>"$TMP/strayfail.err" || true
+if grepped "/watcher:watch 951"; then pass "a failed stray sweep does not stop the poll: the card is still picked"; else flunk "a failed stray sweep stopped the poll" "$(cat "$TESTLOG")"; fi
+if [ "$(grep -c 'sweep-strays failed; strays stay off the board until the next sweep' "$TMP/strayfail.err" || true)" = 1 ]; then pass "…and says so in exactly one log line"; else flunk "expected one log line for the failed stray sweep" "$(cat "$TMP/strayfail.err")"; fi
 
 # A paused lane touches nothing, the sweep included.
 fresh_state; board_list ""; : > "$STATE/PAUSE"

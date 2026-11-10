@@ -211,17 +211,16 @@ echo "  linked to $REPO"
 
 # --- ask first, part 2: only checkable now that the board exists --------------------------
 # Board collaborator access has no API (the same undocumented gap as above). The board's
-# Auto-add workflow used to be a second ask here and is not any more (card #200): every card
-# the watcher files goes on the board through `board file`, so nothing the loop does depends
-# on that workflow. It stays worth turning on for cards a person files from the GitHub UI.
+# Auto-add workflow used to be a second ask here and is not any more (cards #200, #267):
+# cards the watcher files go on the board through `board file`, and an issue a person files
+# from the GitHub UI or app is added by the watcher's own `board.py sweep-strays`.
 say "ask first — board access"
 cat <<EOF
   Board access: $BOARD_OWNER/#$BOARD_NUMBER → ⋯ menu → Settings → Manage access → add
   $BOT_LOGIN with Write.
 
-  Optional, not asked: the board's Auto-add workflow (⋯ menu → Workflows → Auto-add to
-  project, filter "is:issue is:open", NOT GitHub's "label:bug" example) puts a card you file
-  from the GitHub UI on the board by itself. Cards the watcher files never need it.
+  Not asked: the board's Auto-add workflow. The watcher puts every open issue of the repo
+  on the board itself, in Backlog, within five minutes.
 EOF
 confirm "Board access done?" || { echo "add-project.sh: stopping here — re-run once they are" >&2; exit 1; }
 

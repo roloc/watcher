@@ -621,12 +621,13 @@ refused with "insufficient collaborator seats" while the repo still lists a coll
 without a seat in the organization (a retired machine account, say) — remove them from the
 repo first. `docs/getting-started.md`, step 2, lists both before the first command.
 
-The board's **Auto-add to project** workflow is no longer asked for (card
-[#200](https://github.com/lonestarprod/watcher/issues/200)): every card the watcher files
+The board's **Auto-add to project** workflow is not asked for, and not needed (cards
+[#200](https://github.com/lonestarprod/watcher/issues/200) and
+[#267](https://github.com/lonestarprod/watcher/issues/267)): every card the watcher files
 goes through `board file`, which creates the issue, puts it on the board and sets its
-column. Auto-add stays worth turning on (filter `is:issue is:open`) only for cards a
-person files from the GitHub UI; `bin/doctor.sh` warns, and never refuses a lane, when it
-is off.
+column, and an issue a person files from the GitHub UI or app is put on the board in Backlog
+by the watcher itself (`board.py sweep-strays`, run from every lane's poll, at most once
+per five minutes per board).
 
 Then commit and push `projects/<name>.env` (the script writes it but does not push it;
 when `BOARD_OWNER` is an organization, add `OWNER_LOGIN=<the person who answers Stuck

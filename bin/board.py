@@ -10,6 +10,7 @@ copied to another project by changing OWNER/NUMBER.
     python3 scripts/board.py stage <issue> "<stage>"     # "-" empties it
     python3 scripts/board.py sweep-stages           # empty the Stage on closed cards
     python3 scripts/board.py sweep-waiting          # keep the `waits on #n` (card #222) and `holds up N cards` (card #244) labels true
+    python3 scripts/board.py sweep-strays          # add open issues of PROJECT_REPO that are not on the board, in Backlog (card #267)
     python3 scripts/board.py blockers <issue>       # open cards <issue> waits on: "<relationships|body>\t<n> <n>", or nothing
     python3 scripts/board.py file -R <owner/repo> --title "<t>" --body-file <f> [--status Backlog]
                                                     # create a card AND put it on the board; URL on stdout
@@ -1306,6 +1307,73 @@ def _target_open(repo, kind, num):
     return out.strip().lower() == "open"
 
 
+def _strays_stamp_name():
+    return f"sweep-strays-{OWNER}-{NUMBER}.stamp"
+
+
+ADD_ITEM = """mutation($p:ID!,$c:ID!){ addProjectV2ItemById(input:{projectId:$p,contentId:$c}){
+  item{ id } } }"""
+SET_STATUS = """mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{
+  projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item{ id } } }"""
+
+
+def cmd_sweep_strays():
+    """Put every open issue of PROJECT_REPO that is not on the board onto it, in Backlog
+    (card #267). An issue filed from the GitHub app reaches the board with no Auto-add
+    workflow turned on, which GitHub gives no API for and `gh project copy` cannot carry.
+    The issue list is REST (nothing against the GraphQL budget); the board side is the
+    shared items() cache. Pull requests are never added. The add is repeated against a
+    live read before anything is written, so a stale cache can never reset the Status of
+    a card that is already on the board. Prints one line per card added; a failure on one
+    card is one stderr line and the rest go on. Same clock and stamp style as the other
+    sweeps (STAGE_SWEEP_SEC)."""
+    _require_owner()
+    repo = os.environ.get("PROJECT_REPO") or os.environ.get("GH_REPO")
+    if not repo:
+        return 0
+    if not _sweep_gate(_strays_stamp_name()):
+        return 0
+    rc, out, err = _rest("--paginate", f"repos/{repo}/issues?state=open&per_page=100")
+    if rc:
+        sys.exit(f"board.py: sweep-strays: could not list {repo}'s open issues: {err.strip()[:200]}")
+    try:
+        # --paginate concatenates the pages' arrays: `[...][...]`
+        dec, pos, found = json.JSONDecoder(), 0, []
+        out = out.strip()
+        while pos < len(out):
+            page, pos = dec.raw_decode(out, pos)
+            found += page
+            while pos < len(out) and out[pos].isspace():
+                pos += 1
+    except ValueError:
+        sys.exit("board.py: sweep-strays: could not read the issue list")
+    issues = {i["number"]: i for i in found
+              if isinstance(i, dict) and "pull_request" not in i and i.get("node_id")}
+    on_board = {i["number"] for i in items()}
+    loose = sorted(n for n in issues if n not in on_board)
+    if not loose:
+        return 0
+    on_board = {i["number"] for i in items(fresh=True)}
+    loose = [n for n in loose if n not in on_board]
+    if not loose:
+        return 0
+    proj, fields = project()
+    f = fields.get(STATUS_FIELD)
+    opt = next((o for o in f["options"] if o["name"].lower() == "backlog"), None) if f else None
+    for n in loose[:SWEEP_MAX]:
+        try:
+            added = gh(ADD_ITEM, p=proj["id"], c=issues[n]["node_id"])
+            item = added["addProjectV2ItemById"]["item"]["id"]
+            if opt:
+                gh(SET_STATUS, p=proj["id"], i=item, f=f["id"], o=opt["id"])
+        except (SystemExit, KeyError, TypeError) as e:
+            print(f"board.py: sweep-strays: #{n}: {str(getattr(e, 'code', e))[:200]}", file=sys.stderr)
+            continue
+        print(f"#{n} added to the board in Backlog")
+    _cache_invalidate(_items_cache_name())
+    return 0
+
+
 def cmd_sweep_waiting():
     """Keep the `waits on #<m>` chips true, and the `holds up N cards` ones (card #244).
     For every open card not In progress and not Done: add `waits on #<m>` for each open
@@ -1563,7 +1631,7 @@ def cmd_board_url():
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("list", "move", "file", "show", "unclaim", "stage", "sweep-stages", "sweep-waiting", "blockers", "queue", "notify",
+    if not a or a[0] not in ("list", "move", "file", "show", "unclaim", "stage", "sweep-stages", "sweep-waiting", "sweep-strays", "blockers", "queue", "notify",
                             "dump", "ask", "images", "plan", "ratelimit", "ledger", "board-url"):
         sys.exit(__doc__)
     try:
@@ -1573,6 +1641,7 @@ if __name__ == "__main__":
                   "stage": lambda: cmd_stage(a[1], a[2]),
                   "sweep-stages": lambda: cmd_sweep_stages(),
                   "sweep-waiting": lambda: cmd_sweep_waiting(),
+                  "sweep-strays": lambda: cmd_sweep_strays(),
                   "blockers": lambda: cmd_blockers(a[1]),
                   "queue": lambda: cmd_queue(),
                   "show": lambda: cmd_show(a[1]),

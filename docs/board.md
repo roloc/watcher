@@ -73,8 +73,9 @@ board file -R lonestarprod/watcher --title "<what ships, in one line>" --body-fi
 ```
 
 It prints the card's URL; exit 3 means the issue exists but is not on the board. A bare
-`gh issue create` only reaches the board because this board's Auto-add workflow happens to
-be on, so confirm, because a card that is not on the board is invisible to the lane:
+`gh issue create` (or an issue filed from the GitHub app) reaches the board in Backlog
+within five minutes, because the watcher adds open issues the board lacks
+(`board.py sweep-strays`); to be sure a card is on the board and in which column:
 
 ```bash
 gh issue view <n> -R lonestarprod/watcher --json projectItems --jq '.projectItems[].status.name'

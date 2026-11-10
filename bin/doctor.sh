@@ -71,37 +71,6 @@ else
   problem "board $BOARD_OWNER/#$BOARD_NUMBER does not read: $(head -1 "$ERR")"
 fi
 
-# --- Auto-add workflow: a warning only (card #200) ----------------------------------------
-# Every card the watcher files itself goes on the board through `board file`, so no lane
-# depends on this workflow any more. It still catches one thing: a card a human files from
-# the GitHub UI without the helper, which lands on no board unless Auto-add is on. That is
-# worth saying, never worth refusing a lane over.
-AUTOADD_JSON=""
-for owner_type in user organization; do
-  q="query(\$login:String!,\$number:Int!){ $owner_type(login:\$login){ projectV2(number:\$number){ workflows(first:20){ nodes{ name enabled } } } } }"
-  AUTOADD_JSON="$($WATCHER_GH api graphql -f query="$q" -f login="$BOARD_OWNER" -F number="$BOARD_NUMBER" 2>/dev/null)" \
-    && [ -n "$AUTOADD_JSON" ] && break
-done
-AUTOADD_NOTE="a card filed by hand from the GitHub UI will not reach the board on its own (cards the watcher files itself are unaffected); turn it on with the filter \"is:issue is:open\" if you want those too"
-if [ -z "$AUTOADD_JSON" ]; then
-  warn "could not read the board's workflows (tried as a user and as an organization), so Auto-add was not checked; nothing the watcher files depends on it"
-else
-  python3 - "$AUTOADD_JSON" "$AUTOADD_NOTE" <<'PY' >&2
-import json, sys
-d = json.loads(sys.argv[1])
-owner = d.get("data", {}).get("user") or d.get("data", {}).get("organization")
-if not owner:
-    print("doctor: warning: could not parse the board's workflows, so Auto-add was not checked")
-    sys.exit(0)
-nodes = owner["projectV2"]["workflows"]["nodes"]
-wf = next((w for w in nodes if w["name"] == "Auto-add to project"), None)
-if not wf:
-    print("doctor: warning: the board has no \"Auto-add to project\" workflow: " + sys.argv[2])
-elif not wf["enabled"]:
-    print("doctor: warning: the board's \"Auto-add to project\" workflow is off: " + sys.argv[2])
-PY
-fi
-
 # --- labels on the repo ------------------------------------------------------------------
 if LABELS_JSON="$($WATCHER_GH label list --repo "$PROJECT_REPO" --json name --limit 200 2>"$ERR")"; then
   if ! python3 - "$LABELS_JSON" "$PROJECT_REPO" <<'PY' >&2
