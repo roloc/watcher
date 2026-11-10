@@ -174,6 +174,23 @@ if command -v systemctl >/dev/null 2>&1; then
   esac
 fi
 
+# --- the floor page's gh is the author App (card #273): a note, never a failure -----------
+# The floor page, the timers and the deployer take their `gh` from the units' PATH shim and
+# WATCHER_APP_PROJECT=watcher, as the watcher user. Said once, so the machine account can be
+# retired knowing nothing there still depends on it. Skipped where no App is set up at all.
+if [ -d /etc/watcher/apps/watcher ]; then
+  if id -u watcher >/dev/null 2>&1 && [ "$(id -un)" != watcher ] && command -v sudo >/dev/null 2>&1; then
+    app_id="$(sudo -n -u watcher "$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
+  else
+    app_id="$("$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
+  fi
+  if [ -n "$app_id" ]; then
+    echo "doctor: the watcher user's gh (floor page, timers, deployer) mints as the App: $app_id"
+  else
+    warn "the watcher user cannot mint the author App for the floor page, hygiene, detector, metrics and deployer (gh-app-token.sh watcher author --identity failed) — they fall back to its gh login"
+  fi
+fi
+
 if [ "$fail" = 0 ]; then
   echo "doctor: ok"
 fi

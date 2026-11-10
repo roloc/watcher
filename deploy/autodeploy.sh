@@ -113,6 +113,10 @@ say() {
   return 0
 }
 as_user() { su - "$RUN_AS" -c "$1"; }
+# as_gh <command line>: as_user, with gh going through the author App like a tick's does (card
+# #273). `su -` is a login shell and resets PATH, so the shim and the project are set again
+# inside it; with no Apps set up the shim changes nothing.
+as_gh() { as_user "export PATH='$WATCHER_DIR/bin/shim':\$PATH WATCHER_APP_PROJECT='${WATCHER_APP_PROJECT:-watcher}'; $1"; }
 # q <word>...: the words shell-quoted, for a command line that as_user runs.
 q() { local out="" w; for w in "$@"; do out+="$(printf '%q' "$w") "; done; printf '%s' "${out% }"; }
 wgit() { as_user "git -C '$WATCHER_DIR' $1"; }
@@ -221,7 +225,7 @@ overridden() {
   local n repo
   n="$(cat "$DSTATE/held/$1" 2>/dev/null)"; [ -n "$n" ] || return 1
   read -r repo _ _ <<< "$(self_env)"; [ -n "$repo" ] || return 1
-  as_user "$(q gh issue view "$n" -R "$repo" --json labels -q '.labels[].name')" 2>/dev/null \
+  as_gh "$(q gh issue view "$n" -R "$repo" --json labels -q '.labels[].name')" 2>/dev/null \
     | grep -qx 'deploy-anyway'
 }
 
@@ -278,7 +282,7 @@ EOF
   # held cards were filed and never reached Stuck. It never relies on Auto-add (card #200).
   # Exit 3 = filed but not on the board in Stuck.
   local filed_rc out
-  out="$(as_user "$(q env BOARD_OWNER="$owner" BOARD_NUMBER="$board" BOARD_FILE_RETRY_SEC="${DEPLOY_MOVE_RETRY_SEC:-10}" board file -R "$repo" --title "Deploy held: $short is not live, because $why" --body-file "$body" --status 'Stuck - Needs help')" 2>/dev/null)"; filed_rc=$?
+  out="$(as_gh "$(q env BOARD_OWNER="$owner" BOARD_NUMBER="$board" BOARD_FILE_RETRY_SEC="${DEPLOY_MOVE_RETRY_SEC:-10}" board file -R "$repo" --title "Deploy held: $short is not live, because $why" --body-file "$body" --status 'Stuck - Needs help')" 2>/dev/null)"; filed_rc=$?
   url="$(printf '%s\n' "$out" | tail -1)"
   rm -f "$body"
   n="${url##*/}"
@@ -302,7 +306,7 @@ close_held_except() {
     [ -f "$f" ] || continue
     s="$(basename "$f")"; n="$(cat "$f")"
     [ "$s" = "$1" ] && continue
-    [ -n "$n" ] && as_user "gh issue close $n -R '$repo' --comment '🤖 FYI: superseded. \`${1:0:7}\` is deployed, so \`${s:0:7}\` never will be.' >/dev/null 2>&1"
+    [ -n "$n" ] && as_gh "gh issue close $n -R '$repo' --comment '🤖 FYI: superseded. \`${1:0:7}\` is deployed, so \`${s:0:7}\` never will be.' >/dev/null 2>&1"
     rm -f "$f"
   done
 }
@@ -314,7 +318,7 @@ check_state() {
   local repo out
   read -r repo _ _ <<< "$(self_env)"
   [ -n "$repo" ] || repo="$(wgit 'remote get-url origin' | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
-  out="$(as_user "$(q gh api "repos/$repo/commits/$1/check-runs?check_name=$CHECK" -q '.check_runs[] | .status + " " + (.conclusion // "")')" 2>/dev/null)" \
+  out="$(as_gh "$(q gh api "repos/$repo/commits/$1/check-runs?check_name=$CHECK" -q '.check_runs[] | .status + " " + (.conclusion // "")')" 2>/dev/null)" \
     || { echo pending; return; }
   case "$out" in
     "") echo pending ;;

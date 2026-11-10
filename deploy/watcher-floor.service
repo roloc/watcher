@@ -14,7 +14,10 @@ User=watcher
 Group=watcher
 WorkingDirectory=/opt/watcher
 Environment=HOME=/home/watcher
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# gh through the author App like a tick (card #273): the shim first on PATH mints its token; the
+# box's own project is the one whose App is installed on every organization repo.
+Environment=PATH=/opt/watcher/bin/shim:/usr/local/bin:/usr/bin:/bin
+Environment=WATCHER_APP_PROJECT=watcher
 # The floor's own secrets, and only the floor's: the Proxmox API token for the server
 # room's lab readout (PROXMOX_URL, PROXMOX_TOKEN, PROXMOX_VERIFY). Never /etc/watcher/env —
 # that file is every lane's environment, which is to say every tick's, a Claude process

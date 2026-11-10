@@ -47,6 +47,7 @@ EOF
 cat > "$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$CALLS"
+echo "gh-env WATCHER_APP_PROJECT=${WATCHER_APP_PROJECT:-} shim_first=${PATH%%:*}" >> "$TMP/gh-env"
 case "$1 $2" in
   "api repos/"*) cat "$TMP/ci" 2>/dev/null ;;
   "issue create") echo "https://github.com/roloc/watcher/issues/$(cat "$TMP/next-issue" 2>/dev/null || echo 77)" ;;
@@ -268,6 +269,17 @@ check "a third run files no second card"               not_called "board file"
 echo deploy-anyway > "$TMP/labels"; run
 check "deploy-anyway: the held commit ships"           [ "$(head_)" = "$T" ]
 check "deploy-anyway: the step file is cleared once it lands" [ ! -e "$TMP/dstate/step" ]
+
+# 7. Card #273: gh goes through the author App's shim, as the watcher user, not that user's own
+# login. `su -` resets PATH, so autodeploy.sh sets the shim and the project inside it; the gh
+# stub logged what it saw on the CI-check read above.
+check "gh runs with WATCHER_APP_PROJECT=watcher"        grep -q 'WATCHER_APP_PROJECT=watcher ' "$TMP/gh-env"
+check "...and the shim first on PATH"                   grep -q "shim_first=$BOX/bin/shim\$" "$TMP/gh-env"
+# ...and every unit that talks to GitHub names the same two variables.
+for u in watcher-floor.service watcher-hygiene@.service watcher-detect@.service watcher-metrics.service watcher-deploy.service; do
+  check "$u: shim PATH and WATCHER_APP_PROJECT" bash -c \
+    "grep -qx 'Environment=PATH=/opt/watcher/bin/shim:.*' '$HERE/../deploy/$u' && grep -qx 'Environment=WATCHER_APP_PROJECT=watcher' '$HERE/../deploy/$u'"
+done
 
 # 7a. Card #131: the second attempt reruns only the case bin/eval.sh named as failed on the
 # first, not the whole suite.

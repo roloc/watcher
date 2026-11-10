@@ -31,6 +31,7 @@ export CALLS TMP
 cat > "$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$CALLS"
+echo "gh-env WATCHER_APP_PROJECT=${WATCHER_APP_PROJECT:-} shim_first=${PATH%%:*}" >> "$TMP/gh-env"
 case "$1 $2" in
   "issue list")
     cat "$TMP/existing-issue" 2>/dev/null
@@ -226,6 +227,11 @@ run
 check6() { [ "$(rc)" = 0 ] && out_has "clean"; }
 if check6; then pass "clean sweep: exit 0, says so"; else flunk "clean sweep" "$(cat "$TMP/out")"; fi
 not_called "gh" && pass "…and no gh calls at all" || flunk "gh called on a clean sweep" "$(cat "$CALLS")"
+
+# 6b. Card #273: gh is the author App's shim, with the box's own project named.
+fresh; hygiene_fixture bin; exitcode 1; report "- a finding"
+rm -f "$TMP/gh-env"; run
+if grep -q 'WATCHER_APP_PROJECT=watcher ' "$TMP/gh-env" 2>/dev/null && grep -q 'shim_first=.*/bin/shim$' "$TMP/gh-env"; then pass "gh runs with the shim first and WATCHER_APP_PROJECT=watcher"; else flunk "gh env" "$(cat "$TMP/gh-env" 2>&1)"; fi
 
 # 7. hygiene.sh could not run (exit 2): no card, says so
 fresh; hygiene_fixture bin; exitcode 2; report "boom"
