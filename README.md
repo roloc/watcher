@@ -666,6 +666,35 @@ and `LANE_AGENTS`, give `<name>.env` the complementary `!` list, and enable
 
 MIT. See `LICENSE.md`.
 
+## The Mac's own App
+
+Three identities write on a board, and each one means one thing (card
+[#288](https://github.com/lonestarprod/watcher/issues/288); `docs/how-it-works.md`, "Who acts
+as whom on GitHub", has the table):
+
+- `roloc` — the owner's own hand. The only comment that is the owner's answer.
+- `roloc-desk-author[bot]` — a Claude session on the owner's Mac, acting on his word.
+- `roloc-<project>-author[bot]` — the lane.
+
+The desk App is one App for every project, not one per project, so a Mac session's comment
+is never confused with the lane's. Two commands set it up, both run as yourself on the Mac:
+
+    python3 deploy/app-setup.py desk --all-repos      # create it; install it on All repositories
+    deploy/mac-setup.sh                               # point this Mac's Claude sessions at it
+
+The first writes the App's key under `~/.config/roloc-apps/desk/` and, when the installation
+covers selected repos only, says so with the link that fixes it (run it again any time for
+that check). The second writes the `env` of `~/.claude/settings.json` — `WATCHER_APP_PROJECT=desk`,
+so `bin/gh-app-token.sh` mints the desk App whatever checkout a session is in (its fallback is
+the git remote, which would pick that project's lane App), the App's identity for commits,
+`bin/shim/gh-credential` as git's credential helper — and removes `GH_CONFIG_DIR`, which named
+the suspended login. It also adds one guarded line to `~/.zshenv` that puts `bin/shim` first on
+`PATH` only when `WATCHER_APP_PROJECT` is set: a Claude session's `gh` is the shim, your own
+terminal's `gh` is untouched. Idempotent; `--dry-run` prints the changes and writes nothing.
+A session started after that writes as the App; the one you ran it from keeps its old
+environment until it is restarted. The check: a comment filed from a new session shows as
+`roloc-desk-author[bot]` on the card.
+
 ## The owner pane in a desktop session
 
 `mods/owner-pane/` (card [#214](https://github.com/roloc/watcher/issues/214)) is for the owner's own Claude sessions on the Mac, not the box. Load it with
@@ -674,7 +703,7 @@ checkout path (for `bin/board.py` and `projects/<name>.env`) and the default rep
 each lane's pill and the deploy line, refreshed every minute from `/api/state.json`. `/stuck` lists the questions; `/stuck <n> <reply>`
 posts the reply and moves the card to In progress; `/card <n>` reads a card; `/file-card <sentence>` drafts a card and files it
 in Backlog only after `/file-card yes`. It never touches a lane, a tick or `/opt/watcher`, and nothing deploys. Its reads and
-its two writes go out as whatever the Mac's own `gh` is: the project's author App, when `deploy/app-setup.py <name> --roles author`
-has written its key under `~/.config/roloc-apps/<name>/` and `gh` runs through `bin/shim/gh`, or the owner's own login. Never a
+its two writes go out as whatever the Mac's own `gh` is: the desk App, `roloc-desk-author[bot]`, once "The Mac's own App" above
+has been set up, or the owner's own login before that. Never a
 machine account — the Mac's, `roloc-desk`, is what GitHub suspended on November 8, 2026 (card
 [#255](https://github.com/lonestarprod/watcher/issues/255)).
