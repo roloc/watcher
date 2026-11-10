@@ -677,7 +677,9 @@ as whom on GitHub", has the table):
 - `roloc-<project>-author[bot]` — the lane.
 
 The desk App is one App for every project, not one per project, so a Mac session's comment
-is never confused with the lane's. Two commands set it up, both run as yourself on the Mac:
+is never confused with the lane's. Two commands set it up, both run as yourself on the Mac,
+from the main checkout and never a worktree (the second writes that folder's path into your
+settings and profile, and a worktree is deleted when its card closes):
 
     python3 deploy/app-setup.py desk --all-repos      # create it; install it on All repositories
     deploy/mac-setup.sh                               # point this Mac's Claude sessions at it
