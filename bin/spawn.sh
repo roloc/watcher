@@ -135,7 +135,7 @@ if [ -n "${WATCHER_PROJECT:-}" ]; then
 fi
 # LANE_CHANNEL=canary (card #46): this lane runs the box's canary checkout, never the
 # stable one every other lane shares — a bad prompt only reaches the board that opted in.
-# The project file is always read from the stable checkout (its path is fixed by the
+# The project file is read from the stable checkout first (its path is fixed by the
 # systemd unit), so this is the one place a canary lane's code diverges: re-exec into the
 # canary checkout's OWN spawn.sh, with its own docs (WATCHER_HOME) and its own Claude
 # config dir (CLAUDE_CONFIG_DIR — commands/ and agents/ resolve from there, the same trick
@@ -157,6 +157,12 @@ if [ "${LANE_CHANNEL:-stable}" = canary ] && [ "$WATCHER_HERE" != "${WATCHER_CAN
    && [ -x "$WATCHER_CANARY_DIR/bin/spawn.sh" ]; then
   export CLAUDE_CONFIG_DIR="${WATCHER_CANARY_CLAUDE_CONFIG_DIR:-/home/watcher/.claude-canary}"
   unset WATCHER_HOME
+  # Card #262: the commit under test brings its own copy of the project file, and the
+  # re-exec'd spawner reads that one, so a change to projects/<name>.env is soaked by the
+  # canary instead of hidden from it. No copy there: the stable path stays.
+  if [ -n "${WATCHER_PROJECT:-}" ] && [ -f "$WATCHER_CANARY_DIR/projects/$(basename "$WATCHER_PROJECT")" ]; then
+    export WATCHER_PROJECT="$WATCHER_CANARY_DIR/projects/$(basename "$WATCHER_PROJECT")"
+  fi
   exec "$WATCHER_CANARY_DIR/bin/spawn.sh" "$@"
 fi
 WATCHER_ROOT="${WATCHER_ROOT:-${PROJECT_ROOT:-}}"
