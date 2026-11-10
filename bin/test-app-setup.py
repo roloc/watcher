@@ -40,7 +40,8 @@ PEM = open(key).read()
 INSTALLED = {}             # slug -> installation id, once "the owner clicked Install"
 PERMS = {}                 # installation id -> permissions GitHub reports
 SEEN = {"jwt": None, "converted": []}
-APP_IDS = {"demo-author": 1111, "demo-reviewer": 4444, "other-author": 5555, "other-reviewer": 6666}
+APP_IDS = {"demo-author": 1111, "demo-reviewer": 4444, "other-author": 5555, "other-reviewer": 6666, "desk-author": 7777}
+SCOPE = {}                 # installation id -> repository_selection GitHub reports ("all" or "selected")
 
 
 class Stub(http.server.BaseHTTPRequestHandler):
@@ -78,7 +79,8 @@ class Stub(http.server.BaseHTTPRequestHandler):
             return self.reply([{"id": inst, "account": {"login": "LoneStarProd"}}] if inst else [])
         m = re.match(r"/app/installations/(\d+)$", self.path)
         if m:
-            return self.reply({"id": int(m.group(1)), "permissions": PERMS.get(int(m.group(1)), {})})
+            return self.reply({"id": int(m.group(1)), "permissions": PERMS.get(int(m.group(1)), {}),
+                               "repository_selection": SCOPE.get(int(m.group(1)), "selected")})
         self.reply({"message": "no"}, 404)
 
 
@@ -113,6 +115,7 @@ check("--prefix acme: named acme-<repo name>-<role>",
 mod.PREFIX = "roloc"
 out = subprocess.run([sys.executable, os.path.join(HERE, "..", "deploy", "app-setup.py"), "--help"], capture_output=True, text=True, timeout=30)
 check("the command line takes --prefix, default roloc", "--prefix" in out.stdout and "<prefix>-<repo name>-<role>" in out.stdout, out.stdout)
+check("…and --all-repos, for the desk App", "--all-repos" in out.stdout, out.stdout)
 
 print("2. a project's repo comes from its env file; the key folder is the repo's own name")
 root = os.path.join(tmp, "root")
@@ -168,7 +171,7 @@ status, page = get("/")
 check("one section per project, a Create form per App (four), each posting to the organization's new-App page",
       status == 200 and page.count("<h2>") == 2 and page.count("<form") == 4
       and page.count(f"https://github.test/organizations/lonestarprod/settings/apps/new?state={setup.state}") == 4, page[:300])
-check("…whose manifest fields carry the App names", all(f"roloc-{k}" in page for k in APP_IDS))
+check("…whose manifest fields carry the App names", all(f"roloc-{k}" in page for k in APP_IDS if not k.startswith("desk")))
 check("a project with no env file says so on the page", "repo not known here (no projects/other.env)" in page)
 
 status, body = get("/created?project=demo&role=author&code=x&state=wrong")
@@ -191,13 +194,13 @@ check("nothing the page says holds the key", "BEGIN" not in page)
 
 status, body = get("/status?project=demo&role=author")
 check("before the owner installs: not installed, a signed JWT was presented",
-      json.loads(body) == {"installed": False, "missing": None} and (SEEN["jwt"] or "").startswith("Bearer ey"), body)
+      json.loads(body) == {"installed": False, "missing": None, "scope": False} and (SEEN["jwt"] or "").startswith("Bearer ey"), body)
 INSTALLED["roloc-demo-author"] = 2222
 PERMS[2222] = {"contents": "write", "pull_requests": "write", "workflows": "write", "issues": "write",
                "organization_projects": "write", "metadata": "read"}   # the pre-#261 shape
 status, body = get("/status?project=demo&role=author")
 check("after: installed, the installation ID lands in config (login compared without case), and the gap is named",
-      json.loads(body) == {"installed": True, "missing": ["actions", "checks", "statuses"]}
+      json.loads(body) == {"installed": True, "missing": ["actions", "checks", "statuses"], "scope": False}
       and mod.read_config(demo.config_path).get("AUTHOR_INSTALLATION_ID") == "2222", body)
 status, page = get("/")
 check("the page names the gaps the way GitHub's settings page does and links where to add and accept them",
@@ -225,6 +228,47 @@ check("the finished page: three installed ✓, one still flagged", body_only.cou
 status, body = get("/created?project=demo&role=wizard&code=x&state=" + setup.state)
 check("an unknown role is a 404", status == 404)
 
+print("3b. the desk App (card #288): one App for the owner's Mac sessions, on every repo")
+desk = mod.Project("desk", [], apps_dir, all_repos=True)
+check("named after itself, keyed under its own folder, flagged all-repos", desk.key == "desk" and desk.dir == os.path.join(apps_dir, "desk") and desk.all_repos)
+check("a project from an env file is not all-repos", not demo.all_repos)
+dsetup = mod.Setup("lonestarprod", [desk], ["author"], 0)
+dsrv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), mod.handler(dsetup))
+threading.Thread(target=dsrv.serve_forever, daemon=True).start()
+dbase = f"http://127.0.0.1:{dsrv.server_port}"
+
+
+def dget(path):
+    try:
+        with urllib.request.urlopen(dbase + path, timeout=10) as resp:
+            return resp.status, resp.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+
+try:
+    opener.open(dbase + f"/created?project=desk&role=author&code=desk-author-code&state={dsetup.state}", timeout=10)
+except urllib.error.HTTPError as e:
+    check("the desk App is created like any other", e.code == 302 and "desk-author" in SEEN["converted"], e.code)
+status, page = dget("/")
+check("its install step says All repositories, never a repo to pick",
+      "choose <i>All repositories</i>, click Install" in page and "Only select repositories" not in page, page[:600])
+INSTALLED["roloc-desk-author"] = 2226
+SCOPE[2226] = "selected"
+PERMS[2226] = mod.PERMISSIONS["author"]
+status, body = dget("/status?project=desk&role=author")
+check("installed on selected repos only: the status says scope", json.loads(body) == {"installed": True, "missing": [], "scope": True}, body)
+status, page = dget("/")
+check("…and the page says so, linking the organization's installations page to fix it",
+      "installed on <b>selected repositories only</b>" in page and "Repository access → All repositories" in page
+      and "https://github.test/organizations/lonestarprod/settings/installations" in page and "installed ✓" not in page.split("<script>")[0], page[:700])
+check("…but the run counts it as installed (the fix is the owner's click, not a re-run)", dsetup.finished() and dsetup.done.is_set())
+SCOPE[2226] = "all"
+status, page = dget("/")
+check("on all repositories: installed ✓", "installed ✓" in page.split("<script>")[0] and "selected repositories" not in page, page[:600])
+check("a project that is not all-repos is never scoped, whatever GitHub says", dsetup.wrong_scope(demo, "author") is False)
+dsrv.shutdown()
+
 print("4. the command line")
 env = dict(os.environ, GH_APP_API=mod.API, GH_APP_WEB=mod.WEB, WATCHER_ROOT=root)
 script = os.path.join(HERE, "..", "deploy", "app-setup.py")
@@ -234,6 +278,13 @@ open(os.path.join(root, "projects", "demo-triage.env"), "w").write('. "$(dirname
 out = subprocess.run([sys.executable, script, "demo-triage", "--apps-dir", apps_dir], env=env, capture_output=True, text=True, timeout=30)
 check("a lane file's name (an env with no PROJECT_REPO) is refused, not given Apps of its own",
       out.returncode != 0 and "lane file" in out.stderr and not os.path.exists(os.path.join(apps_dir, "demo-triage")), out.stderr)
+SCOPE[2226] = "selected"
+out = subprocess.run([sys.executable, script, "desk", "--all-repos", "--apps-dir", apps_dir, "--roles", "author", "--port", "0"],
+                     env=env, capture_output=True, text=True, timeout=30)
+check("desk --all-repos, installed on selected repos: the report says so with the fix, no 'pass --repos' nag, exits 0",
+      out.returncode == 0 and "SELECTED repositories only" in out.stdout and "settings/installations: All repositories" in out.stdout
+      and "pass --repos" not in out.stderr, out.stdout + out.stderr)
+SCOPE[2226] = "all"
 out = subprocess.run([sys.executable, script, "demo", "other", "--apps-dir", apps_dir, "--roles", "author,reviewer", "--port", "0"],
                      env=env, capture_output=True, text=True, timeout=30)
 check("every App already installed: reports each, flags the one with missing permissions, creates nothing, exits 0",

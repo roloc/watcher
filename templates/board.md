@@ -40,9 +40,9 @@ gh issue view <n> -R <owner/repo> --json title,state,labels,body,comments,projec
   on this board is a report or a proposal, never the owner's answer. The lane writes as the
   project's author GitHub App (`…-<project>-author[bot]`, the name `deploy/app-setup.py`
   gave it) and the reviewer's verdict is a PR review from its reviewer App
-  (`…-<project>-reviewer[bot]`). If the owner's own desktop sessions write as
-  something other than `<owner login>` (the author App, usually), name it here so nobody
-  mistakes one for the other.
+  (`…-<project>-reviewer[bot]`). The owner's own desktop sessions write as the desk App
+  (`…-desk-author[bot]`, one App for every project; README, "The Mac's own App"), never as
+  `<owner login>` and never as a lane's App, so nobody mistakes one for the other.
 - **The column** is `projectItems[].status.name` (Backlog, Ready, In progress, In review,
   Done, Stuck - Needs help). A card with no `projectItems` is an issue nobody put on the
   board; see "Filing".

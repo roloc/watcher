@@ -23,7 +23,9 @@ gh issue view <n> -R lonestarprod/watcher --json title,state,labels,body,comment
   what the card wants.
 - **Several identities act on this board, and only one is the owner.** `roloc` is the owner's
   own hand. Everything else is a report or a proposal, never the owner's answer: the
-  author Apps (`roloc-<project>-author[bot]`, the lane and the owner's Mac sessions), the
+  author Apps (`roloc-<project>-author[bot]`, the lane), the desk App
+  (`roloc-desk-author[bot]`, the owner's own Mac sessions acting on his word, card
+  [#288](https://github.com/lonestarprod/watcher/issues/288)), the
   reviewer Apps (`roloc-<project>-reviewer[bot]`, a verdict filed as a PR review) and, until
   they are decommissioned, the machine accounts they replace (`roloc-watcher-bot`, `roloc-desk`;
   `riffmap-bot` before October 30, 2026). The rule above is about `roloc` alone. Before October

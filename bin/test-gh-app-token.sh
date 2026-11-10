@@ -102,6 +102,20 @@ OUT="$(cd "$TMP/repo" && GH_APP_DIR= HOME="$TMP/home" GH_APP_NOW=$NOW "$TOKEN" a
 check "a Mac's ~/.config/roloc-apps/<project> is found from the remote's repo name" '[ "$RC" = 0 ] && [ "${OUT#ghs_}" != "$OUT" ]' "$OUT"
 OUT="$(GH_APP_DIR= HOME="$TMP/home" PROJECT_NAME=demo GH_APP_NOW=$NOW "$TOKEN" author 2>&1)"
 check "PROJECT_NAME (the lane's) names it too" '[ "${OUT#ghs_}" != "$OUT" ]' "$OUT"
+# The Mac's desk App (card #288): WATCHER_APP_PROJECT wins over the checkout's remote, so a session
+# in the riffmap checkout still mints the desk App, never riffmap's lane App.
+mkdir -p "$TMP/home/.config/roloc-apps/desk"; cp "$APPS/author.pem" "$TMP/home/.config/roloc-apps/desk/author.pem"
+cat > "$TMP/home/.config/roloc-apps/desk/config" <<'EOC'
+AUTHOR_APP_ID=7777
+AUTHOR_INSTALLATION_ID=8888
+AUTHOR_SLUG=roloc-desk-author
+AUTHOR_BOT_ID=9999
+EOC
+OUT="$(cd "$TMP/repo" && GH_APP_DIR= HOME="$TMP/home" WATCHER_APP_PROJECT=desk GH_APP_NOW=$NOW "$TOKEN" author 2>&1)"; RC=$?
+check "WATCHER_APP_PROJECT=desk inside another project's checkout mints the desk App, not the remote's (card #288)" \
+  '[ "$RC" = 0 ] && [ "${OUT#ghs_}" != "$OUT" ] && grep -q "installations/8888/access_tokens" "$CALLS"' "rc=$RC $OUT"
+OUT="$(cd "$TMP/repo" && GH_APP_DIR= HOME="$TMP/home" WATCHER_APP_PROJECT=desk "$TOKEN" author --identity 2>&1)"
+check "…and signs as roloc-desk-author[bot]" '[ "$OUT" = "roloc-desk-author[bot] <9999+roloc-desk-author[bot]@users.noreply.github.com>" ]' "$OUT"
 
 echo "5. the git identity"
 OUT="$("$TOKEN" demo author --identity)"

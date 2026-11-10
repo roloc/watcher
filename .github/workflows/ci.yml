@@ -50,7 +50,7 @@ jobs:
       # systemd runs, and install.sh, autodeploy.sh and rollout.sh are what put it there.
       - name: Shell syntax
         run: |
-          for f in bin/spawn.sh bin/shim/claude bin/shim/gh bin/shim/gh-credential bin/gh-app-token.sh bin/review-submit.sh bin/test-gh-app-token.sh bin/test-review-submit.sh bin/test-install-apps.sh bin/worktree.sh bin/detect.sh bin/hygiene-run.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/eval.sh bin/receipt-check.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-hygiene-run.sh bin/test-install-hygiene.sh bin/desk.sh bin/floor-api.sh bin/desk-read.sh bin/desk-gh.sh bin/test-desk.sh bin/test-install-desk.sh bin/test-tail.sh bin/test-eval-ledger.sh bin/test-eval-cases.sh bin/test-receipt.sh bin/test-add-project.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh deploy/bootstrap.sh evals/cases/*.sh; do
+          for f in bin/spawn.sh bin/shim/claude bin/shim/gh bin/shim/gh-credential bin/gh-app-token.sh bin/review-submit.sh bin/test-gh-app-token.sh bin/test-review-submit.sh bin/test-install-apps.sh bin/worktree.sh bin/detect.sh bin/hygiene-run.sh bin/doctor.sh bin/tail.sh bin/hygiene.sh bin/eval.sh bin/receipt-check.sh bin/test-spawn.sh bin/test-deploy.sh bin/test-detect.sh bin/test-hygiene-run.sh bin/test-install-hygiene.sh bin/desk.sh bin/floor-api.sh bin/desk-read.sh bin/desk-gh.sh bin/test-desk.sh bin/test-install-desk.sh bin/test-tail.sh bin/test-eval-ledger.sh bin/test-eval-cases.sh bin/test-receipt.sh bin/test-add-project.sh deploy/install.sh deploy/rollout.sh deploy/autodeploy.sh deploy/add-project.sh deploy/bootstrap.sh deploy/mac-setup.sh bin/test-mac-setup.sh evals/cases/*.sh; do
             bash -n "$f" && echo "ok  $f"
           done
 
@@ -89,6 +89,9 @@ jobs:
 
       - name: The App setup helper suite
         run: python3 bin/test-app-setup.py
+
+      - name: The Mac setup suite
+        run: bash bin/test-mac-setup.sh
 
       - name: The move-a-project suite
         run: python3 bin/test-move-project.py

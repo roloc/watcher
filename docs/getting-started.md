@@ -83,9 +83,14 @@ gone.
 - The **reviewer** App files the review verdict as a real GitHub review. Its key is read by a
   separate system user (`watcher-reviewer`), so a tick cannot approve its own PR.
 
-On a Mac the same helper (`python3 deploy/app-setup.py myproject --org myorg --roles author`,
-as yourself, no ssh) writes under `~/.config/roloc-apps/myproject/`. There is no reviewer App
-there: no process boundary.
+Your own Claude sessions on a Mac get one App of their own, not a project's, so a card can
+tell your hand, a Mac session and the lane apart: `python3 deploy/app-setup.py desk --all-repos
+--org myorg` (as yourself, no ssh; the install step says **All repositories**) writes under
+`~/.config/roloc-apps/desk/`, and `deploy/mac-setup.sh` points your Claude sessions at it
+(README, "The Mac's own App"). From then on a comment from one of them is signed
+`roloc-desk-author[bot]`, the lane's `roloc-myproject-author[bot]`, and your own login is
+yours alone — the one whose comment is the owner's answer. There is no reviewer App on a Mac:
+no process boundary.
 
 A lane reads its key folder when its process starts, so a lane that was already running when
 its Apps landed keeps acting as whatever it had — the fallback bot account, or nothing — until
