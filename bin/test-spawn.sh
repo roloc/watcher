@@ -1387,6 +1387,28 @@ grep -q "WATCHER_HOME=$CANARY " "$CANARY_LOG" && pass "…with WATCHER_HOME reco
 grep -q "CLAUDE_CONFIG_DIR=/home/watcher/.claude-canary" "$CANARY_LOG" && pass "…and its own Claude config dir, never the one every other lane shares" || flunk "CLAUDE_CONFIG_DIR not set" "$(cat "$CANARY_LOG")"
 grep -q "args=--dry-run" "$CANARY_LOG" && pass "…passed the same arguments spawn.sh itself was given" || flunk "args not forwarded" "$(cat "$CANARY_LOG")"
 
+# Card #262: the commit under test brings its own projects/<name>.env; the re-exec'd spawner
+# reads that one, not the stable checkout's. A stub that sources $WATCHER_PROJECT and logs
+# the board it names stands in for the canary's spawn.sh.
+CANARY2="$TMP/canary-checkout-2"
+mkdir -p "$CANARY2/bin" "$CANARY2/projects" "$TMP/stable-projects"
+cat > "$CANARY2/bin/spawn.sh" <<'STUB'
+#!/usr/bin/env bash
+. "$WATCHER_PROJECT"
+echo "canary read: BOARD_NUMBER=$BOARD_NUMBER file=$WATCHER_PROJECT" >> "$CANARY_LOG"
+STUB
+chmod +x "$CANARY2/bin/spawn.sh"
+echo "BOARD_NUMBER=1" > "$TMP/stable-projects/lane.env"
+echo "BOARD_NUMBER=2" > "$CANARY2/projects/lane.env"
+: > "$CANARY_LOG"
+fresh_state
+WATCHER_PROJECT="$TMP/stable-projects/lane.env" LANE_CHANNEL=canary WATCHER_CANARY_DIR="$CANARY2" run --dry-run >/dev/null 2>&1
+if grep -q "canary read: BOARD_NUMBER=2 file=$CANARY2/projects/lane.env" "$CANARY_LOG"; then pass "canary re-exec reads the canary checkout's own project file"; else flunk "canary read the stable project file" "$(cat "$CANARY_LOG")"; fi
+rm "$CANARY2/projects/lane.env"; : > "$CANARY_LOG"
+fresh_state
+WATCHER_PROJECT="$TMP/stable-projects/lane.env" LANE_CHANNEL=canary WATCHER_CANARY_DIR="$CANARY2" run --dry-run >/dev/null 2>&1
+if grep -q "canary read: BOARD_NUMBER=1 file=$TMP/stable-projects/lane.env" "$CANARY_LOG"; then pass "…and the stable file when the canary checkout has no copy"; else flunk "missing canary copy should keep the stable file" "$(cat "$CANARY_LOG")"; fi
+
 : > "$CANARY_LOG"
 fresh_state
 board_list $'12\tP2\tbuilder\t-\tCard twelve'
