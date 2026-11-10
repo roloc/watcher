@@ -177,28 +177,24 @@ merge, and file the port as a card once you have.
 From **your own machine**, never the box, authenticated as **yourself**:
 
 ```
-BOT_LOGIN=<a bot login> deploy/add-project.sh <name> <owner/repo>
+deploy/add-project.sh <name> <owner/repo>
+```
 ```
 
 It builds the board (`BOARD_OWNER` defaults to the repo's owner — your organization, on the
-Apps path), then stops once and prints the one thing GitHub gives no API for — granting a
-bot account access to the new board — and asks you to confirm you did it. (The board's
-Auto-add workflow is not needed: the watcher puts every open issue of the repo on the
-board itself, within five minutes.)
-Do it, answer yes, and it goes on to the labels, `main`'s branch protection and
-`projects/<name>.env`. Answering no, or piping it non-interactively, stops the script
-there; re-run the same command once it is done — everything it already built is left alone
-the second time.
+Apps path), the labels, `main`'s branch protection and `projects/<name>.env`, and asks for
+nothing by hand: installing the author App on the repo (step 2) is the grant, and an App
+owned by the organization reaches the organization's boards with no board-level grant at
+all. The file carries `OWNER_LOGIN=<your own login>`, read from the `gh` login you ran it
+as, so a Stuck card pings you and not the organization. (The board's Auto-add workflow is
+not needed: the watcher puts every open issue of the repo on the board itself, within five
+minutes.) Everything it already built is left alone when you run it again.
 
-**The script is still written for the single-bot-account path.** It requires `BOT_LOGIN`
-and refuses to start until that login has write access to the repo. With the Apps from
-step 2 there is no such login: installing the author App on the repo is the grant, and an
-App owned by the organization reaches the organization's boards with no board-level grant
-at all — so on that path both of its asks are already answered, and the `BOT_LOGIN` it
-insists on is a leftover, open as a card. The script also does not write `OWNER_LOGIN`:
-when `BOARD_OWNER` is an organization, add `OWNER_LOGIN=<your own login>` to
-`projects/<name>.env` before you commit it, or every Stuck card pings the organization
-instead of you. A project that already lives under a user and is moving into an
+**One bot account instead of Apps:** give it `BOT_LOGIN=<a bot login>`. The script then
+refuses to start until that login has write access to the repo, and pauses once for the
+board access GitHub gives no API for, asking you to confirm you did it.
+
+A project that already lives under a user and is moving into an
 organization uses `deploy/move-project.py <name> --to <org>` (November 9, 2026) instead:
 it transfers the repo into the org, copies the watcher board as the template
 (`gh project copy`: fields, views and every workflow except Auto-add come across), carries

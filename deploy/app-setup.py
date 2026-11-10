@@ -30,7 +30,8 @@ out with the two links that fix it, because App permissions cannot be changed th
   Mac          ~/.config/roloc-apps/<repo name>/                                (author only: no process
                boundary on a Mac, so no reviewer App there)
 
-App names are roloc-<repo name>-<role>. The author gets Contents, Pull requests, Workflows,
+App names are <prefix>-<repo name>-<role>, the prefix `roloc` unless --prefix says otherwise (a fork
+names its own; bin/receipt-check.sh's RECEIPT_REVIEWER_APPS and bin/gh-app-token.sh's GH_APP_PREFIX match it). The author gets Contents, Pull requests, Workflows,
 Issues, Actions and Projects (organization) write, Checks and Commit statuses read — what a tick
 needs to push, open and merge a PR, read its checks and rerun a failed job. The reviewer gets
 Pull requests write and Contents read: it reads the PR's head and files one review, nothing
@@ -74,8 +75,11 @@ def ui_permission(key, level):
     return f"{UI_NAMES.get(key, key)}: {UI_LEVELS.get(level, level)}"
 
 
+PREFIX = "roloc"
+
+
 def app_name(key, role):
-    return f"roloc-{key}-{role}"
+    return f"{PREFIX}-{key}-{role}"
 
 
 def build_manifest(key, role, org, port):
@@ -354,7 +358,10 @@ def main(argv=None):
     ap.add_argument("--roles", help="default: author,reviewer as root on the box; author alone elsewhere")
     ap.add_argument("--apps-dir", help="default: /etc/watcher/apps as root, else ~/.config/roloc-apps; each project under it by repo name")
     ap.add_argument("--port", type=int, default=8799)
+    ap.add_argument("--prefix", default="roloc", help="the Apps are named <prefix>-<repo name>-<role>")
     a = ap.parse_args(argv)
+    global PREFIX
+    PREFIX = a.prefix
     root = os.geteuid() == 0
     roles = (a.roles or ("author,reviewer" if root else "author")).split(",")
     if any(r not in PERMISSIONS for r in roles):
