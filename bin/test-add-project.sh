@@ -51,6 +51,7 @@ case "$1" in
   api)
     case " $* " in
       *" -X PUT "*) : ;;
+      *" user "*) echo testowner ;;
       *collaborators*permission*) cat "$TMP/bot-permission" 2>/dev/null || echo write ;;
       *branches/main/protection*) [ -f "$TMP/protection.json" ] && cat "$TMP/protection.json" || exit 1 ;;
     esac
@@ -59,6 +60,7 @@ esac
 EOF
 chmod +x "$BIN"/*
 export PATH="$BIN:$PATH"
+unset BOARD_OWNER   # a lane's own environment must not leak into the cases
 export WATCHER_GH=gh ADD_PROJECT_YES=1 BOT_LOGIN=testbot
 
 REPO_ROOT="$TMP/repo"
@@ -170,17 +172,40 @@ done
 no_owner_default() { ! grep -oE 'roloc/[A-Za-z0-9_.-]+|Needs @[a-z]' "$HERE/../templates/board.md" | grep -vqE '^roloc/watcher$'; }
 check "templates/board.md names nobody's board or login as a default" no_owner_default
 
-# 6. BOT_LOGIN unset (card #157): a forker who has not made a bot account yet gets one
-#    clear line, never a query against riffmap-bot (an account that is not theirs).
+# 6. BOT_LOGIN unset (card #272): the Apps path. No collaborator call, no board-access ask,
+#    OWNER_LOGIN written; with BOT_LOGIN set it is the single-bot path as before.
 project_list '{"projects":[{"title":"testproj","number":42}]}'
 fields "{\"fields\":[$STATUS_DONE,$STAGE_DONE,$PRIORITY_DONE]}"
 : > "$CALLS"
 rm -f "$REPO_ROOT/projects/testproj.env"
-BOT_LOGIN= bash "$REPO_ROOT/deploy/add-project.sh" testproj roloc/testproj > "$TMP/out" 2>&1
+env -u BOT_LOGIN HOME="$TMP/nohome" bash "$REPO_ROOT/deploy/add-project.sh" testproj roloc/testproj > "$TMP/out" 2>&1
 echo $? > "$TMP/rc"
-check "no BOT_LOGIN: exits non-zero"                       [ "$(rc)" != 0 ]
-check "no BOT_LOGIN: one clear line naming BOT_LOGIN"      out_has "set BOT_LOGIN="
-check "no BOT_LOGIN: never queries a permission it has no business asking about" not_called "collaborators"
+ENVF="$REPO_ROOT/projects/testproj.env"
+check "no BOT_LOGIN: exits 0"                              [ "$(rc)" = 0 ]
+check "no BOT_LOGIN: never queries a collaborator's permission" not_called "collaborators"
+check "no BOT_LOGIN: asks for no board access"             bash -c '! grep -qF "board access" "$1"' _ "$TMP/out"
+check "no BOT_LOGIN: points at app-setup.py"               out_has "python3 deploy/app-setup.py testproj --org roloc"
+check "no BOT_LOGIN: still sets main's protection"         called "branches/main/protection"
+check "no BOT_LOGIN: OWNER_LOGIN follows BOARD_OWNER"      bash -c 'grep -A3 "^BOARD_OWNER=roloc$" "$1" | grep -qx "OWNER_LOGIN=testowner"' _ "$ENVF"
+check "no BOT_LOGIN: OWNER_LOGIN carries its comment"      grep -qF "# A Stuck comment addresses the owner's own login" "$ENVF"
+
+mkdir -p "$TMP/home/.config/roloc-apps/testproj"; echo AUTHOR_APP_ID=1 > "$TMP/home/.config/roloc-apps/testproj/config"
+rm -f "$ENVF"
+env -u BOT_LOGIN HOME="$TMP/home" bash "$REPO_ROOT/deploy/add-project.sh" testproj roloc/testproj > "$TMP/out" 2>&1
+check "no BOT_LOGIN, Apps config present: says so"         out_has "Apps already set up for testproj"
+
+: > "$CALLS"
+rm -f "$ENVF"
+BOT_LOGIN=testbot bash "$REPO_ROOT/deploy/add-project.sh" testproj roloc/testproj > "$TMP/out" 2>&1
+echo $? > "$TMP/rc"
+check "BOT_LOGIN set: exits 0"                             [ "$(rc)" = 0 ]
+check "BOT_LOGIN set: checks the collaborator permission"  called "repos/roloc/testproj/collaborators/testbot/permission"
+check "BOT_LOGIN set: asks for board access for the bot"   out_has "testbot with Write"
+echo none > "$TMP/bot-permission"
+rm -f "$ENVF"
+BOT_LOGIN=testbot bash "$REPO_ROOT/deploy/add-project.sh" testproj roloc/testproj > "$TMP/out" 2>&1
+check "BOT_LOGIN set, no write access: still refuses"      [ "$?" != 0 ]
+rm -f "$TMP/bot-permission"
 
 echo
 if [ "$fail" = 0 ]; then echo "$n cases, all passed"; else echo "FAILED (of $n cases)"; fi

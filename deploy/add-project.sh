@@ -14,10 +14,13 @@
 # purpose (bin/doctor.sh's own header explains why). Run it from inside a checkout of this
 # repo (projects/<name>.env is written next to this script's own projects/ directory).
 #
-#   BOT_LOGIN=yourbot deploy/add-project.sh riffmap yourorg/riffmap
+#   deploy/add-project.sh riffmap yourorg/riffmap                    # GitHub Apps (card #272)
+#   BOT_LOGIN=yourbot deploy/add-project.sh riffmap yourorg/riffmap  # one machine account
 #
-# Env (BOT_LOGIN is required; everything else has a sane default, and TEMPLATE_BOARD is
-# optional — card #156):
+# On the Apps path (BOT_LOGIN unset) there is nothing to grant by hand: installing the
+# author App on the repo (deploy/app-setup.py) is the grant, and an organization's App
+# reaches the organization's boards with no board grant at all. Env (everything has a sane
+# default, and TEMPLATE_BOARD is optional — card #156):
 #   TEMPLATE_BOARD     <owner>/<number> of a clean, existing board to copy — Status
 #                      (Backlog/Ready/In progress/In review/Done/Stuck - Needs help),
 #                      Stage and Priority already set up, no live cards on it. `gh project
@@ -28,10 +31,11 @@
 #                      from nothing instead — `gh project create`, then the Status, Stage
 #                      and Priority fields built to match what bin/doctor.sh requires.
 #   BOARD_OWNER        who owns the new board                   (default: the owner in <owner/repo>)
-#   BOT_LOGIN           required; the bot account the watcher runs as — a GitHub account
-#                      of its own (never yours), created at https://github.com/join and
-#                      given write access to the repo (this script's own ask-first
-#                      checklist, below, prompts for the grant)
+#   BOT_LOGIN           optional; set it only for the single-bot-account path: the account
+#                      the watcher runs as — a GitHub account of its own (never yours),
+#                      created at https://github.com/join and given write access to the
+#                      repo (this script's own ask-first checklist, below, prompts for
+#                      the grant). Unset, the two asks are skipped.
 #   REQUIRED_CHECK      the CI check name to require on main     (default: verify)
 #   ADD_PROJECT_YES     1 = treat every "have you done this?" confirmation as yes, and
 #                        never prompt — for a non-interactive run (scripting, this script's
@@ -52,7 +56,7 @@ case "$REPO" in */*) ;; *) echo "add-project.sh: <owner/repo> must contain a /, 
 REPO_OWNER="${REPO%%/*}"
 
 BOARD_OWNER="${BOARD_OWNER:-$REPO_OWNER}"
-BOT_LOGIN="${BOT_LOGIN:?add-project.sh: set BOT_LOGIN=<a GitHub login for the bot> — an account of its own, never yours, created at https://github.com/join}"
+BOT_LOGIN="${BOT_LOGIN:-}"
 REQUIRED_CHECK="${REQUIRED_CHECK:-verify}"
 ADD_PROJECT_YES="${ADD_PROJECT_YES:-0}"
 TEMPLATE_BOARD="${TEMPLATE_BOARD:-}"
@@ -81,19 +85,36 @@ confirm() {
 # Granting access is the board/repo owner's alone — GitHub gives no API a script can use to
 # invite a collaborator onto a Projects v2 board, and a repo collaborator grant is exactly
 # the kind of standing access decision that stays a human's, not something to script past.
-say "ask first — $BOT_LOGIN needs access"
-perm="$($WATCHER_GH api "repos/$REPO/collaborators/$BOT_LOGIN/permission" --jq .permission 2>/dev/null || true)"
-case "$perm" in
-  admin|maintain|write) echo "  repo: $BOT_LOGIN already has '$perm' on $REPO" ;;
-  *)
-    cat >&2 <<EOF
+# Only the single-bot-account path (BOT_LOGIN set) has this ask. On the Apps path there is no
+# login to grant: the author App's installation on the repo is the grant (card #272).
+if [ -n "$BOT_LOGIN" ]; then
+  say "ask first — $BOT_LOGIN needs access"
+  perm="$($WATCHER_GH api "repos/$REPO/collaborators/$BOT_LOGIN/permission" --jq .permission 2>/dev/null || true)"
+  case "$perm" in
+    admin|maintain|write) echo "  repo: $BOT_LOGIN already has '$perm' on $REPO" ;;
+    *)
+      cat >&2 <<EOF
 add-project.sh: $BOT_LOGIN does not have write access to $REPO (permission: '${perm:-none}').
 Grant it, then run this script again:
   $REPO → Settings → Collaborators → Add people → $BOT_LOGIN → Write
 EOF
-    exit 1
-    ;;
-esac
+      exit 1
+      ;;
+  esac
+else
+  say "GitHub Apps — no login to grant"
+  repo_dir="${REPO##*/}"
+  apps_config=""
+  for d in "/etc/watcher/apps/$repo_dir" "$HOME/.config/roloc-apps/$repo_dir" "/etc/watcher/apps/$NAME" "$HOME/.config/roloc-apps/$NAME"; do
+    if [ -r "$d/config" ]; then apps_config="$d/config"; break; fi
+  done
+  if [ -n "$apps_config" ]; then
+    echo "  Apps already set up for $NAME: $apps_config"
+  else
+    echo "  No Apps set up for $NAME yet (no config under /etc/watcher/apps/$repo_dir or ~/.config/roloc-apps/$repo_dir)."
+    echo "  Next step, once projects/$NAME.env is committed: python3 deploy/app-setup.py $NAME --org $BOARD_OWNER"
+  fi
+fi
 
 # --- the board's required fields, for when there is no template to copy (card #156) -------
 # bin/doctor.sh is the spec: the board this builds is the board it accepts, and it checks
@@ -214,15 +235,17 @@ echo "  linked to $REPO"
 # Auto-add workflow used to be a second ask here and is not any more (cards #200, #267):
 # cards the watcher files go on the board through `board file`, and an issue a person files
 # from the GitHub UI or app is added by the watcher's own `board.py sweep-strays`.
-say "ask first — board access"
-cat <<EOF
+if [ -n "$BOT_LOGIN" ]; then
+  say "ask first — board access"
+  cat <<EOF
   Board access: $BOARD_OWNER/#$BOARD_NUMBER → ⋯ menu → Settings → Manage access → add
   $BOT_LOGIN with Write.
 
   Not asked: the board's Auto-add workflow. The watcher puts every open issue of the repo
   on the board itself, in Backlog, within five minutes.
 EOF
-confirm "Board access done?" || { echo "add-project.sh: stopping here — re-run once they are" >&2; exit 1; }
+  confirm "Board access done?" || { echo "add-project.sh: stopping here — re-run once they are" >&2; exit 1; }
+fi
 
 # --- labels on the repo ---------------------------------------------------------------------
 say "labels"
@@ -300,14 +323,31 @@ else
       echo "  stdin is not a terminal — leaving WORKTREE_COPY_DIRS empty; set it by hand in $ENV_FILE"
     fi
   fi
-  cat > "$ENV_FILE" <<EOF
+  # A Stuck comment addresses OWNER_LOGIN, which falls back to BOARD_OWNER: an organization,
+  # when the board lives in one. This script runs as the owner, so their own login is the
+  # right value (card #272).
+  owner_login="$($WATCHER_GH api user --jq .login 2>/dev/null || true)"
+  {
+    cat <<EOF
 PROJECT_NAME=$NAME
 PROJECT_ROOT=/home/watcher/projects/$NAME
 PROJECT_REPO=$REPO
 BOARD_OWNER=$BOARD_OWNER
+EOF
+    if [ -n "$owner_login" ]; then
+      cat <<EOF
+# A Stuck comment addresses the owner's own login, not the organization that owns the board
+# (OWNER_LOGIN falls back to BOARD_OWNER).
+OWNER_LOGIN=$owner_login
+EOF
+    else
+      echo "  could not read your login (gh api user) — add OWNER_LOGIN=<your login> to $ENV_FILE by hand" >&2
+    fi
+    cat <<EOF
 BOARD_NUMBER=$BOARD_NUMBER
 WORKTREE_COPY_DIRS="$copy_dirs"
 EOF
+  } > "$ENV_FILE"
   echo "  wrote $ENV_FILE"
 fi
 
@@ -315,6 +355,8 @@ say "done"
 cat <<EOF
 Next:
   - Commit and push projects/$NAME.env (git add/commit/push — this script does not).
+  - GitHub Apps (skip if BOT_LOGIN was given): python3 deploy/app-setup.py $NAME --org $BOARD_OWNER
+    creates the author and reviewer Apps; installing the author App on $REPO is the grant.
   - On the box: deploy/install.sh $NAME; systemctl enable --now watcher@$NAME
   - bin/doctor.sh (run by install.sh) is the read-only check that everything above landed.
   - In the project's own CLAUDE.md: paste templates/project-CLAUDE.md and fill it in. A

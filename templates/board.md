@@ -40,8 +40,7 @@ gh issue view <n> -R <owner/repo> --json title,state,labels,body,comments,projec
   on this board is a report or a proposal, never the owner's answer. The lane writes as the
   project's author GitHub App (`…-<project>-author[bot]`, the name `deploy/app-setup.py`
   gave it) and the reviewer's verdict is a PR review from its reviewer App
-  (`…-<project>-reviewer[bot]`); on a watcher that runs on a single bot account instead,
-  that bot's login plays the author's part. If the owner's own desktop sessions write as
+  (`…-<project>-reviewer[bot]`). If the owner's own desktop sessions write as
   something other than `<owner login>` (the author App, usually), name it here so nobody
   mistakes one for the other.
 - **The column** is `projectItems[].status.name` (Backlog, Ready, In progress, In review,

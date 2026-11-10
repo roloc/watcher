@@ -106,6 +106,13 @@ check("the reviewer App: Pull requests write, Contents read — and no Actions",
 check("named roloc-<repo name>-<role>, private, no webhook, back to this helper naming the project",
       a["name"] == "roloc-demo-author" and r["name"] == "roloc-demo-reviewer" and a["public"] is False
       and a["hook_attributes"]["active"] is False and a["redirect_url"] == "http://localhost:8799/created?project=demo&role=author", a)
+mod.PREFIX = "acme"
+check("--prefix acme: named acme-<repo name>-<role>",
+      mod.build_manifest("demo", "author", "lonestarprod", 8799)["name"] == "acme-demo-author"
+      and mod.build_manifest("demo", "reviewer", "lonestarprod", 8799)["name"] == "acme-demo-reviewer")
+mod.PREFIX = "roloc"
+out = subprocess.run([sys.executable, os.path.join(HERE, "..", "deploy", "app-setup.py"), "--help"], capture_output=True, text=True, timeout=30)
+check("the command line takes --prefix, default roloc", "--prefix" in out.stdout and "<prefix>-<repo name>-<role>" in out.stdout, out.stdout)
 
 print("2. a project's repo comes from its env file; the key folder is the repo's own name")
 root = os.path.join(tmp, "root")
@@ -238,6 +245,17 @@ print("5. the offline token script reads what this wrote")
 env = dict(os.environ, GH_APP_DIR=demo.dir)
 out = subprocess.run([os.path.join(HERE, "gh-app-token.sh"), "demo", "author", "--identity"], env=env, capture_output=True, text=True)
 check("gh-app-token.sh --identity finds the config", out.stdout.strip() == "roloc-demo-author[bot] <3333+roloc-demo-author[bot]@users.noreply.github.com>", out.stdout + out.stderr)
+
+cfgdir = os.path.join(tmp, "noslug")
+os.makedirs(cfgdir)
+open(os.path.join(cfgdir, "config"), "w").write("AUTHOR_APP_ID=1\nAUTHOR_INSTALLATION_ID=2\n")
+for prefix, want in ((None, "roloc-demo-author[bot]"), ("acme", "acme-demo-author[bot]")):
+    env = dict(os.environ, GH_APP_DIR=cfgdir)
+    env.pop("GH_APP_PREFIX", None)
+    if prefix:
+        env["GH_APP_PREFIX"] = prefix
+    out = subprocess.run([os.path.join(HERE, "gh-app-token.sh"), "demo", "author", "--identity"], env=env, capture_output=True, text=True)
+    check(f"--identity with no SLUG falls back to {want.split('[')[0]}", out.stdout.startswith(want), out.stdout + out.stderr)
 
 stub.shutdown()
 srv.shutdown()

@@ -256,14 +256,11 @@ Then by hand, once:
    `/etc/watcher/apps/<project>/` the box leaves `gh` alone, and the verdict is a PR comment
    instead of a review. GitHub's terms allow one machine account per person; more is what got
    the watcher's own owner suspended.
-3. **Project:** `BOT_LOGIN=<a bot login> deploy/add-project.sh riffmap yourorg/riffmap`
+3. **Project:** `deploy/add-project.sh riffmap yourorg/riffmap`
    (from your own machine, see "Add a project" below) sets up the board, the labels, and
-   `projects/riffmap.env`. The script is written for the single-bot-account path: it
-   requires `BOT_LOGIN` and checks that login has write access to the repo before it does
-   anything else, even though with Apps the installation from step 2 is the grant and no
-   such login exists (open as a card; see "Add a project"). With an organization as
-   `BOARD_OWNER`, add `OWNER_LOGIN=<your own login>` to the file it wrote, so a Stuck card
-   pings you and not the organization. Commit and push that file, then
+   `projects/riffmap.env`, with `OWNER_LOGIN` set to your own login so a Stuck card pings you
+   and not the organization that owns the board. With Apps there is nothing to grant by
+   hand; `BOT_LOGIN=<a bot login>` in front is the one-bot-account path. Commit and push that file, then
    `deploy/install.sh riffmap` clones the repo under `/home/watcher/projects/` and drop its
    `.env.local` and any private inputs in place.
 4. **Start:** `systemctl enable --now watcher@riffmap watcher@riffmap-design
@@ -586,7 +583,7 @@ Now it is one idempotent script, run from the owner's Mac (or wherever), authent
 **yourself** — never as the bot or an App, since two of its steps (main's branch
 protection, the board itself) need admin/ownership neither is ever given:
 
-    BOT_LOGIN=<a bot login> TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
+    TEMPLATE_BOARD=<owner>/<number> deploy/add-project.sh <name> <owner/repo>
 
 `TEMPLATE_BOARD` is a clean, existing board to copy — `gh project copy` works on any board
 the caller can read, so it does not have to be a GitHub "template" (that flag is
@@ -600,15 +597,17 @@ repo, creates the `in-flight` / `blocked` / `owner-decision` labels, sets `main`
 protection (the named check required, PR required, 0 approvals, admins not enforced), and
 writes `projects/<name>.env`.
 
-**It is the single-bot-account path.** The script requires `BOT_LOGIN` — a machine
-account's login — refuses to start until that login has write access to the repo, and
-pauses once more, as an ask-first checklist waiting for a yes, for the one thing GitHub
-gives no API for: granting that account access to the new board. On the GitHub Apps path
-there is no such login: `deploy/app-setup.py <name> [<name>…] --org <org>`
-creates each project's author and reviewer Apps and installing each on the repo *is* the
-grant, and an App owned by the organization reaches the organization's boards with no
-board-level grant at all. The script does not know that yet and still insists on a
-`BOT_LOGIN` with write access — a leftover from before the Apps, open as a card. For a
+**It sets the project up on the GitHub Apps path.** There is no login to grant: installing the
+author App on the repo (`deploy/app-setup.py <name> --org <org>`, which the script's last
+lines print) *is* the grant, and an App owned by the organization reaches the organization's
+boards with no board-level grant at all. The script checks that the project's Apps exist
+(`/etc/watcher/apps/<repo name>/config`, or `~/.config/roloc-apps/<repo name>/config`) or
+prints that command as the next step, and writes `OWNER_LOGIN` (your own `gh` login) into the
+env file. Give it `BOT_LOGIN=<a bot login>` for the single-bot-account path instead: it then
+refuses to start until that login has write access to the repo, and pauses once as an
+ask-first checklist for the one thing GitHub gives no API for, granting that account access
+to the new board. A fork names its Apps with `deploy/app-setup.py --prefix <prefix>` (default
+`roloc`), and sets `RECEIPT_REVIEWER_APPS` and `GH_APP_PREFIX` to match. For a
 project that already exists under a user and is moving into an organization,
 `deploy/move-project.py <name> --to <org>` (November 9, 2026) transfers the repo into the
 org, copies the watcher board as the template (`gh project copy`: fields, views and every

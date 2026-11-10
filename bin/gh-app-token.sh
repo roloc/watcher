@@ -18,6 +18,8 @@
 #
 # Exit 0 with the token (or identity) on stdout and nothing else there; exit 1 with one line
 # on stderr when the App is not set up or GitHub refused; exit 2 on a bad call.
+# GH_APP_PREFIX: the App-name prefix a fork chose with app-setup.py --prefix (default roloc); only
+# the --identity fallback for a config with no SLUG reads it.
 # Test seams: GH_APP_API (the API base), GH_APP_CACHE (the token cache folder), GH_APP_NOW
 # (the clock, epoch seconds).
 set -euo pipefail
@@ -50,7 +52,7 @@ app_id="$(get APP_ID)"; inst="$(get INSTALLATION_ID)"; slug="$(get SLUG)"; bot_i
 [ -n "$app_id" ] && [ -n "$inst" ] || { echo "gh-app-token: $dir/config has no ${ROLE}_APP_ID / ${ROLE}_INSTALLATION_ID" >&2; exit 1; }
 
 if [ "$mode" = --identity ]; then
-  [ -n "$slug" ] || slug="roloc-$project-$role"
+  [ -n "$slug" ] || slug="${GH_APP_PREFIX:-roloc}-$project-$role"
   if [ -n "$bot_id" ]; then
     printf '%s[bot] <%s+%s[bot]@users.noreply.github.com>\n' "$slug" "$bot_id" "$slug"
   else
