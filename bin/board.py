@@ -110,7 +110,16 @@ STUCK_STATUS = "Stuck - Needs help"
 
 
 def _board_url():
-    return f"https://github.com/users/{_require_owner()}/projects/{NUMBER}"
+    """The board's own address for the Stuck post's `Board:` link (card #278): the project
+    cache's `url` (what `cmd_board_url` prints), else the `orgs/` or `users/` form by the
+    owner's type the cache holds, else `users/` (the form every board had before #255)."""
+    owner = _require_owner()
+    cached = _cache_read_any_age(_project_cache_name()) or {}
+    url = (cached.get("project") or {}).get("url")
+    if url:
+        return url
+    kind = "orgs" if cached.get("owner_type") == "Organization" else "users"
+    return f"https://github.com/{kind}/{owner}/projects/{NUMBER}"
 
 
 # --- the board cache (card #98) ---------------------------------------------------------
@@ -461,7 +470,7 @@ def project(fresh=False):
             if cached is not None:
                 return cached["project"], cached["fields"]
         q = """query($owner:String!,$number:Int!){ rateLimit{ remaining resetAt limit cost }
-          repositoryOwner(login:$owner){ ... on ProjectV2Owner{ projectV2(number:$number){
+          repositoryOwner(login:$owner){ __typename ... on ProjectV2Owner{ projectV2(number:$number){
           id title url
           fields(first:40){ nodes{ ... on ProjectV2SingleSelectField{ name id options{ id name } } } } } } } }"""
         try:
@@ -474,7 +483,7 @@ def project(fresh=False):
             sys.exit(f"board.py: no project {OWNER}/#{NUMBER} — BOARD_OWNER is the user or "
                      "organization that owns the board, and the token must be able to read it")
         fields = {f["name"]: f for f in p["fields"]["nodes"] if f.get("name")}
-        _cache_write(name, {"project": p, "fields": fields})
+        _cache_write(name, {"project": p, "fields": fields, "owner_type": u.get("__typename")})
         return p, fields
 
     if not fresh:

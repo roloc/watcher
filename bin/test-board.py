@@ -389,6 +389,25 @@ board.OWNER, board.NUMBER = "lonestarprod", 7
 check("_owner_node still reads the older `user` and `organization` keys",
       board._owner_node({"user": {"a": 1}}) == {"a": 1} and board._owner_node({"organization": {"b": 2}}) == {"b": 2}
       and board._owner_node({"repositoryOwner": None}) is None)
+
+print("14c. the Stuck post's Board: link is the board's own address (card #278)")
+_posts = []
+_real_enabled, _real_post = board.notify.enabled, board.notify.post
+board.notify.enabled = lambda: True
+board.notify.post = lambda kind, card, **kw: _posts.append(kw.get("board_url"))
+board.announce("stuck", {"number": 1, "title": "t"})
+check("an organization's Stuck post carries the orgs/ address",
+      _posts[-1] == "https://github.com/orgs/lonestarprod/projects/7", _posts)
+board.OWNER, board.NUMBER = "someone", 3
+board.subprocess.run = lambda cmd, **kw: (FakeResult(json.dumps({"data": {"repositoryOwner": {
+    "__typename": "User", "projectV2": {"id": "PVT_U", "title": "t", "fields": {"nodes": []}}}}}))
+    if cmd[:3] == ["gh", "api", "graphql"] else stub_run(cmd, **kw))
+board.project(fresh=True)
+board.announce("stuck", {"number": 1, "title": "t"})
+check("a user's board with no cached url falls back to users/", 
+      _posts[-1] == "https://github.com/users/someone/projects/3", _posts)
+board.OWNER, board.NUMBER = "lonestarprod", 7
+board.notify.enabled, board.notify.post = _real_enabled, _real_post
 board.subprocess.run = graphql_stub_run
 
 board.OWNER, board.NUMBER = "roloc", 99  # a fresh cache namespace for the miss-retry case
