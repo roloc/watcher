@@ -10,5 +10,9 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/opt/watcher/deploy/autodeploy.sh
 StateDirectory=watcher-deploy
+# gh as the author App, not the watcher user's login (card #273). autodeploy.sh passes these
+# two through its `su -` (a login shell resets PATH), so they are named here and read there.
+Environment=PATH=/opt/watcher/bin/shim:/usr/local/bin:/usr/bin:/bin
+Environment=WATCHER_APP_PROJECT=watcher
 # The replay suite runs live ticks (up to ~8 min a case); a run can take a while.
 TimeoutStartSec=90min

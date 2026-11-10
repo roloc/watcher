@@ -17,5 +17,8 @@ Group=watcher
 WorkingDirectory=/opt/watcher
 EnvironmentFile=/etc/watcher/env
 Environment=HOME=/home/watcher
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# gh through the author App like a tick (card #273): the shim first on PATH mints its token; the
+# box's own project is the one whose App is installed on every organization repo.
+Environment=PATH=/opt/watcher/bin/shim:/usr/local/bin:/usr/bin:/bin
+Environment=WATCHER_APP_PROJECT=watcher
 ExecStart=/opt/watcher/bin/detect.sh %i

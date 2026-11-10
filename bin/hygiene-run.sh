@@ -44,6 +44,9 @@ set -uo pipefail
 WATCHER_DIR="${WATCHER_DIR:-/opt/watcher}"
 PROJECT="${1:?usage: hygiene-run.sh <project>}"
 
+# gh as the project's author App, like a tick's (card #273); no Apps set up, the shim changes nothing.
+export PATH="$WATCHER_DIR/bin/shim:$PATH" WATCHER_APP_PROJECT="${WATCHER_APP_PROJECT:-watcher}"
+
 say() { printf '%s hygiene(%s): %s\n' "$(date -u +%FT%TZ)" "$PROJECT" "$*"; }
 
 PROJECT_ENV="$WATCHER_DIR/projects/$PROJECT.env"
