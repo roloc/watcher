@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """deploy/move-project.py <name> --to <org> --template <owner>/<number> [--title T] [--required-checks a,b]
                           [--no-protection] [--dry-run]                                   (card #268)
+       deploy/move-project.py <name> --to <org> --template <owner>/<number> --recheck --from <owner>/<number>
 
 Moves a project the watcher already works — its repo and its board — into a GitHub
 organization, so that project's GitHub Apps can reach the board (an App has no permission for
@@ -25,6 +26,10 @@ retried on the spot (card #274); a timeout GitHub reports as HTTP 200 with an `e
                      both). Read back until nothing differs: the board's own "Item added" workflow
                      sets Backlog a moment after an add, and would otherwise win the race. Draft
                      items and pull requests are not carried; the count of each is printed.
+                     Then both boards are read once more and compared card by card (card #277):
+                     a card missing from the new board is added and set again, once; one still
+                     missing or still different is printed by number and the run exits 1 before
+                     the env file. The result is one line: `reconciled: 52 cards, 52 match`.
   4. protection      main's branch protection as the old repo had it (read before the transfer):
                      the same required checks, a PR required, 0 approvals, admins not enforced —
                      the shape deploy/add-project.sh sets. A private repo in a GitHub Free
@@ -36,6 +41,9 @@ retried on the spot (card #274); a timeout GitHub reports as HTTP 200 with an `e
                      OWNER_LOGIN added (the old owner: the person who answers Stuck cards), so a
                      `Needs @…` comment still names a human. Commit and push it yourself; the
                      deployer ships it and the lane follows on its next idle poll.
+
+--recheck --from <owner>/<number> runs that comparison alone, read-only, on a project already
+moved (the env file no longer names the old board): the old board is the one --from names.
 
 It prints what is left for a person at the end: the project's Apps (deploy/app-setup.py), and
 the project's own docs/board.md. The old board is left open for you to close when the new one
@@ -381,6 +389,60 @@ def carry_cards(old_owner, old_number, org, new_number, repos, dry_run):
     raise Stop(f"{len(sets)} field values still differ after four passes; run this again")
 
 
+# --- reconciliation ---------------------------------------------------------------------------
+
+def compare_cards(mine, new_items, new_fields):
+    """(missing content ids, {content id: [(field, wanted, has)]}) of the old board's cards
+    against the new board's."""
+    missing, differ = [], {}
+    for cid, it in mine.items():
+        new = new_items.get(cid)
+        if not new:
+            missing.append(cid)
+            continue
+        wanted, _ = wanted_values(it, new_fields)
+        bad = [(name, value, new["values"].get(name)) for name, value in wanted.items() if new["values"].get(name) != value]
+        if bad:
+            differ[cid] = bad
+    return missing, differ
+
+
+def reconcile(old_owner, old_number, org, new_number, repos, repair):
+    """The last word on a move (card #277): read both boards afresh and compare by content id.
+    With `repair`, a card missing or different is added and set once, after which the boards are
+    read and compared again. Prints one line and returns the problems: [] when every card matches."""
+    _, _, old_items, _ = read_board(old_owner, old_number)
+    mine = {cid: it for cid, it in old_items.items() if it["repo"].lower() in repos}
+    for attempt in range(2 if repair else 1):
+        new_id, new_fields, new_items, _ = read_board(org, new_number)
+        missing, differ = compare_cards(mine, new_items, new_fields)
+        if not (missing or differ) or attempt == 1 or not repair:
+            break
+        print(f"  {len(missing)} missing and {len(differ)} different on the new board; adding and setting them again")
+        for cid, item_id in add_items(new_id, missing, False).items():
+            new_items[cid] = {"item": item_id, "number": mine[cid]["number"], "repo": "", "values": {}}
+        sets = []
+        for cid in list(missing) + list(differ):
+            wanted, _ = wanted_values(mine[cid], new_fields)
+            for name, value in wanted.items():
+                if new_items[cid]["values"].get(name) != value:
+                    sets.append((new_items[cid]["item"], new_fields[name]["id"], new_fields[name]["options"][value]))
+        set_values(new_id, sets, False)
+        pause(15)
+    n = len(mine)
+    if not (missing or differ):
+        print(f"reconciled: {n} cards, {n} match")
+        return []
+    print(f"reconciled: {n} cards, {len(missing)} missing ({', '.join('#' + str(mine[c]['number']) for c in missing) or 'none'}), "
+          f"{len(differ)} differ")
+    problems = [f"#{mine[c]['number']} is not on the new board" for c in missing]
+    for cid, bad in differ.items():
+        problems.append(f"#{mine[cid]['number']} " + ", ".join(f"{f}: old board {w}, new board {h or 'empty'}" for f, w, h in bad))
+    for p in problems:
+        print(f"  {p}")
+    return problems
+
+
 # --- protection -------------------------------------------------------------------------------
 
 def protect(new_repo, checks, dry_run):
@@ -428,9 +490,13 @@ def main(argv=None):
     ap.add_argument("--required-checks", metavar="A,B", help="main's required checks when the old repo's cannot be read")
     ap.add_argument("--no-protection", action="store_true", help="skip branch protection on purpose")
     ap.add_argument("--dry-run", action="store_true", help="read everything, write nothing")
+    ap.add_argument("--recheck", action="store_true", help="only compare the old board with the new one, on a project already moved")
+    ap.add_argument("--from", dest="old_board", metavar="OWNER/NUMBER", help="with --recheck: the old board")
     a = ap.parse_args(argv)
     if "/" not in a.template:
         ap.error("--template is <owner>/<number>")
+    if a.recheck and not (a.old_board and re.fullmatch(r"[^/]+/\d+", a.old_board)):
+        ap.error("--recheck needs --from <owner>/<number>, the old board")
 
     env_path = os.path.join(ROOT, "projects", f"{a.name}.env")
     if not os.path.exists(env_path):
@@ -441,6 +507,16 @@ def main(argv=None):
             raise Stop(f"{env_path} has no {k}")
     old_repo, old_owner, old_number = env["PROJECT_REPO"], env["BOARD_OWNER"], int(env["BOARD_NUMBER"])
     org = a.to
+    if a.recheck:
+        if not (old_owner.lower() == org.lower() and old_repo.lower().startswith(org.lower() + "/")):
+            raise Stop(f"{a.name} is not under {org} yet ({old_repo}); --recheck is for a project already moved")
+        from_owner, from_number = a.old_board.split("/")
+        say(f"reconciling {from_owner}/#{from_number} against {org}/#{old_number}")
+        repos = {old_repo.lower(), f"{from_owner}/{old_repo.split('/', 1)[1]}".lower()}
+        problems = reconcile(from_owner, int(from_number), org, old_number, repos, repair=False)
+        if problems:
+            raise Stop(f"{len(problems)} card(s) do not match; nothing was written. Put the env file's old BOARD_* and PROJECT_REPO back and run the move again")
+        return 0
     if old_owner.lower() == org.lower() and old_repo.lower().startswith(org.lower() + "/"):
         print(f"move-project: {a.name} is already under {org} ({old_repo}, board #{old_number}); nothing to do")
         return 0
@@ -458,7 +534,12 @@ def main(argv=None):
     new_number = copy_board(a.template, org, title, new_repo, dry)
 
     say("the cards")
-    carry_cards(old_owner, old_number, org, new_number, {old_repo.lower(), new_repo.lower()}, dry)
+    repos = {old_repo.lower(), new_repo.lower()}
+    carry_cards(old_owner, old_number, org, new_number, repos, dry)
+    if not dry and new_number is not None:
+        problems = reconcile(old_owner, old_number, org, new_number, repos, repair=True)
+        if problems:
+            raise Stop(f"{len(problems)} card(s) could not be placed on the new board; the env file is untouched, run this again")
 
     say("branch protection on main")
     if a.no_protection:

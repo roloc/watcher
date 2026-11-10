@@ -77,6 +77,9 @@ if args[0] == "api" and args[1] == "graphql":
             contents = load("contents.json", {})
             c = contents[cid]
             item_id = f"ITEM_{number}_{len(b['items'])}"
+            if cid in load("never-add.json", []):   # accepted, answered with an item, never kept
+                result[alias] = {"item": {"id": "LOST_" + cid}}
+                continue
             b["items"].append({"id": item_id, "type": "ISSUE", "content": {"__typename": "Issue", "id": cid,
                                "number": c["number"], "repository": {"nameWithOwner": c["repo"]}}, "values": {}})
             save(board_file(owner, number), b)
@@ -88,6 +91,9 @@ if args[0] == "api" and args[1] == "graphql":
             b = load(board_file(owner, number), None)
             field = next(f for f in b["fields"] if f["id"] == field_id)
             opt = next(o["name"] for o in field["options"] if o["id"] == opt_id)
+            if item_id.startswith("LOST_"):
+                result[alias] = {"projectV2Item": {"id": item_id}}
+                continue
             it = next(i for i in b["items"] if i["id"] == item_id)
             it["values"][field["name"]] = opt
             if drift and field["name"] == "Status":
@@ -107,6 +113,11 @@ if args[0] == "api" and args[1] == "graphql":
     for it in b["items"]:
         fv = [{"name": v, "field": {"name": k}} for k, v in it.get("values", {}).items()]
         nodes.append({"id": it["id"], "type": it["type"], "content": it["content"], "fieldValues": {"nodes": fv}})
+    ghosts = load("ghost-once.json", {})   # {board number: [item, ...]}: shown on the first read of that board only
+    if ghosts.get(number):
+        nodes += [{"id": "GHOST_" + g["content"]["id"], "type": "ISSUE", "content": g["content"],
+                   "fieldValues": {"nodes": [{"name": v, "field": {"name": k}} for k, v in g["values"].items()]}} for g in ghosts.pop(number)]
+        save("ghost-once.json", ghosts)
     out({"data": {"repositoryOwner": {"projectV2": {"id": b["id"], "fields": {"nodes": b["fields"]},
          "items": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}}})
 
@@ -435,6 +446,66 @@ def main():
     check("12 cards, each once", len(items) == 12 and len({it["content"]["id"] for it in items}) == 12, len(items))
     check("every card has its values", all(it["values"] == {"Status": "Backlog", "Priority": "P2"} for it in items),
           [it["values"] for it in items if it["values"] != {"Status": "Backlog", "Priority": "P2"}])
+    w.close()
+
+    print("10. the new-board read shows a card that is not there, once (November 9's moment-ahead read)")
+    w = World()
+    w.put("ghost-once.json", {"9": [{"content": {"__typename": "Issue", "id": "I_2", "number": 2,
+                                                  "repository": {"nameWithOwner": "lonestarprod/thing"}},
+                                     "values": {"Status": "Ready", "Stage": "PR open"}}]})
+    r = w.run()
+    check("exits 0", r.returncode == 0, r.stderr[-300:] + r.stdout[-300:])
+    check("the first read counted the card as there, the comparison found it missing and added it again",
+          "1 missing and 0 different" in r.stdout, r.stdout)
+    new = {it["content"]["id"]: it["values"] for it in w.get("board-lonestarprod-9.json")["items"]}
+    check("every card is on the new board with its values", sorted(new) == ["I_1", "I_2", "I_3"]
+          and new["I_2"] == {"Status": "Ready", "Stage": "PR open"}, new)
+    check("says reconciled: 3 cards, 3 match", "reconciled: 3 cards, 3 match" in r.stdout, r.stdout)
+    check("ends in done, env written", "== done ==" in r.stdout and "BOARD_NUMBER=9\n" in w.env_text())
+    w.close()
+
+    print("10b. a card that cannot be placed: named by number, exit 1, env untouched")
+    w = World()
+    w.put("never-add.json", ["I_2"])
+    r = w.run()
+    check("exits 1", r.returncode == 1, r.returncode)
+    check("prints the line with the card missing", "reconciled: 3 cards, 1 missing (#2), 0 differ" in r.stdout, r.stdout)
+    check("names the card on stderr", "1 card(s) could not be placed" in r.stderr, r.stderr)
+    check("tried once more, not forever: the carry's add and one repair add", len([c for c in w.called() if "addProjectV2ItemById" in c]) == 2, w.called())
+    check("env untouched, no protection PUT, no done", w.env_text() == ENV_TEXT and not any("PUT" in c for c in w.called())
+          and "== done ==" not in r.stdout)
+    w.close()
+
+    print("10c. a Status the board's own workflow resets late still ends reconciled")
+    w = World()
+    touch(w, "drift-once")
+    r = w.run()
+    check("exits 0 with every card matching", r.returncode == 0 and "reconciled: 3 cards, 3 match" in r.stdout,
+          r.stdout[-300:])
+    w.close()
+
+    print("11. --recheck --from roloc/4 on a moved project reads both boards and writes nothing")
+    w = World()
+    w.run()
+    env_after = w.env_text()
+    r = w.run("--recheck", "--from", "roloc/4")
+    calls = w.called()
+    check("exits 0", r.returncode == 0, r.stderr[-300:] + r.stdout[-300:])
+    check("reconciled: 3 cards, 3 match", "reconciled: 3 cards, 3 match" in r.stdout, r.stdout)
+    check("read the old board and the new one", any("owner=roloc" in c and "number=4" in c for c in calls)
+          and any("owner=lonestarprod" in c and "number=9" in c for c in calls), calls)
+    check("no mutation, no transfer, no copy, no PUT", not any(x in c for c in calls for x in ("mutation", "transfer", "project copy", "PUT")), calls)
+    check("env unchanged", w.env_text() == env_after)
+    new = w.get("board-lonestarprod-9.json")
+    new["items"] = [it for it in new["items"] if it["content"]["id"] != "I_3"]
+    new["items"][0]["values"]["Status"] = "Backlog"
+    w.put("board-lonestarprod-9.json", new)
+    r = w.run("--recheck", "--from", "roloc/4")
+    check("a card gone and a value off: exit 1, both named, still nothing written",
+          r.returncode == 1 and "reconciled: 3 cards, 1 missing (#3), 1 differ" in r.stdout and "#1 Status: old board Done, new board Backlog" in r.stdout
+          and not any("mutation" in c for c in w.called()), r.stdout + r.stderr)
+    r = w.run("--recheck")
+    check("without --from it refuses", r.returncode == 2 and "--from" in r.stderr, r.stderr)
     w.close()
 
     print("7. a wrong env file is refused before anything is touched")
