@@ -32,34 +32,68 @@ own 5,000-requests-per-hour budget per installation. So the watcher acts as Apps
 user. A user-owned Projects board is out of an App's reach, which is why the repos and boards
 live in an **organization**.
 
-**By hand:** create a free organization at `https://github.com/organizations/plan` and move
-(or create) the repo there. Then, on the box as root, naming every project you want Apps
+**Know these before you move anything** (the watcher's own owner met each one on the day of
+the move, November 9, 2026, after the work was under way):
+
+- **A Free organization cannot protect a branch on a private repo.** The watcher needs
+  `main` protected (a required check, a PR required), so a private repo in the organization
+  needs the **Team** plan, billed per member — one seat for you, plus one for each machine
+  account still a member. A public repo is protected on Free. Decide which before the move;
+  `deploy/move-project.py` stops at the protection step and says so, but the repo is already
+  transferred by then.
+- **A transfer refuses with "insufficient collaborator seats"** when the repo carries a
+  collaborator who has no seat in the organization — a retired or suspended machine account
+  is the usual one. Remove that collaborator from the repo's Settings → Collaborators first.
+- **An App's permissions are set once, by hand, and cannot be changed through the API.**
+  The helper below creates each App with the full set, and flags one that lost some; the fix
+  is two clicks in GitHub's settings, described below.
+
+**By hand:** create an organization at `https://github.com/organizations/plan` and move
+(or create) the repo there. Then, from your own machine, naming every project you want Apps
 for (each is a `projects/<name>.env`; the repo comes from that file):
 
 ```
-python3 /opt/watcher/deploy/app-setup.py myproject otherproject --org myorg
+ssh -L 8799:127.0.0.1:8799 root@<box> 'python3 /opt/watcher/deploy/app-setup.py myproject otherproject --org myorg'
 ```
 
-The address it prints is `localhost`, and GitHub sends your browser back to it, so on a box
-open a tunnel from your own machine first: `ssh -L 8799:127.0.0.1:8799 root@<box>`. Then open
-the address in your browser. The page has a section per project with two buttons, **Create
-roloc-myproject-author** and **Create roloc-myproject-reviewer**; click each, then click the
-**Install it** link, choose *Only select repositories*, pick the repo it names and click
-Install. The helper receives each App's ID and private key and writes them under
-`/etc/watcher/apps/myproject/` itself (the folder is the repo's own name), and exits when every
-App of every project is installed. You never download or paste a key. About thirty seconds a
-project. A project whose Apps already exist is listed as done, and an App that was created
-with fewer permissions than a tick needs is flagged with the two links that fix it: GitHub
-gives no API for changing an App's permissions, so that is a click in the organization's App
-settings and one more to accept it on the installation. A project with no env file yet takes
-`--repos owner/name` (one project at a time).
+The helper answers on the box's own `localhost`, and GitHub sends your browser back to that
+address, which is why the command carries the tunnel: it runs the helper on the box and brings
+its port to your machine in one go. Open `http://127.0.0.1:8799/` in your browser. The page has
+a section per project with two buttons, **Create roloc-myproject-author** and **Create
+roloc-myproject-reviewer**; click each, then click the **Install it** link, choose *Only
+select repositories*, pick the repo it names and click Install. The helper receives each
+App's ID and private key and writes them under `/etc/watcher/apps/myproject/` itself (the
+folder is the repo's own name), prints one line per App, and exits when every App of every
+project is installed — the ssh command ends with it. You never download or paste a key. About
+thirty seconds a project. A project with no env file yet takes `--repos owner/name` (one
+project at a time).
+
+Run the same command again whenever you want a check: a project whose Apps already exist is
+listed, nothing is created, and an App that has fewer permissions than a tick needs is
+flagged `MISSING permissions: Actions: Read and write; …` — the names as GitHub's settings page
+spells them — with the two links that fix it. The first link is the App's **Permissions &
+events** page in the organization's settings: set each named permission and save. The second
+is the App's installation: GitHub shows the new permissions there as pending until you click
+**Accept**, and the flag stays until you have (an email to the organization's owners says the
+same). GitHub gives no API for either click. The helper read the state when it printed, so a
+line printed before your second click is stale: run the command once more and the flag is
+gone.
 
 - The **author** App pushes, opens PRs, comments and moves cards.
 - The **reviewer** App files the review verdict as a real GitHub review. Its key is read by a
   separate system user (`watcher-reviewer`), so a tick cannot approve its own PR.
 
-On a Mac the same command (as yourself, `--roles author`) writes under
-`~/.config/roloc-apps/myproject/`. There is no reviewer App there: no process boundary.
+On a Mac the same helper (`python3 deploy/app-setup.py myproject --org myorg --roles author`,
+as yourself, no ssh) writes under `~/.config/roloc-apps/myproject/`. There is no reviewer App
+there: no process boundary.
+
+A lane reads its key folder when its process starts, so a lane that was already running when
+its Apps landed keeps acting as whatever it had — the fallback bot account, or nothing — until
+its next re-exec: the next deploy (any merge to your fork's `main` moves the `/opt/watcher`
+pointer and every idle lane follows it), or `systemctl restart watcher@<name>` while the
+lane is idle. From then on the lane's comments, PRs and commits are signed
+`roloc-myproject-author[bot]`, which is the sign from the board's side that the switch
+happened.
 
 **Fallback, one machine account.** Not everyone wants an organization. A single bot account
 (`https://github.com/join`, never your own, one per person) still works: skip this step's
@@ -67,8 +101,8 @@ helper and do `su - watcher; gh auth login; gh auth setup-git` in step 4. The bo
 that `/etc/watcher/apps/myproject/` is absent and leaves `gh` alone. The reviewer's verdict is
 then a PR comment instead of a review.
 
-**Check:** `bin/gh-app-token.sh myproject author --identity`, run on the box, prints
-`roloc-myproject-author[bot]` and an address.
+**Check:** `ssh root@<box> '/opt/watcher/bin/gh-app-token.sh myproject author --identity'`
+prints `roloc-myproject-author[bot]` and an address.
 
 The reviewer runs as its own system user, so `/etc/watcher` must be mode 751 (the installer sets
 it): that user can then reach its key under `apps/` without being able to list or read the rest.
@@ -168,7 +202,11 @@ organization uses `deploy/move-project.py <name> --to <org>` (November 9, 2026) 
 it transfers the repo into the org, copies the watcher board as the template
 (`gh project copy`: fields, views and every workflow except Auto-add come across), carries
 every card with its Status, Priority and Stage, re-applies main's branch protection, and
-rewrites `projects/<name>.env`.
+rewrites `projects/<name>.env`. Read step 2's "know these before you move anything" first:
+the collaborator seats refuse the transfer itself, and the plan question stops the
+protection step, by which point the repo is already in the organization. `--dry-run` writes
+nothing and says what it would do; a run that stopped is safe to run again, and does only
+what is left.
 
 ```
 git add projects/<name>.env
