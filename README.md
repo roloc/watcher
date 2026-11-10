@@ -245,9 +245,11 @@ Then by hand, once:
    page with a Create button per App, receives each App's ID and private key and
    writes them into `/etc/watcher/apps/riffmap/` (`deploy/install.sh` sets owners; the
    reviewer's key goes to its own system user, so a tick cannot approve its own PR). The
-   page answers on `localhost`, so from the box open `ssh -L 8799:127.0.0.1:8799 root@<box>`
-   first and click from your own browser (`docs/getting-started.md`, step 2, has the
-   whole walk-through).
+   page answers on the box's `localhost`, so run it from your own machine with the tunnel
+   in the same command, `ssh -L 8799:127.0.0.1:8799 root@<box> 'python3 /opt/watcher/deploy/app-setup.py riffmap --org yourorg'`,
+   and open `http://127.0.0.1:8799/` in your browser. Run it again any time for a permissions check;
+   it creates nothing that exists (`docs/getting-started.md`, step 2, has the whole
+   walk-through, and the two things to know about GitHub plans and seats before a move).
    `bin/shim/gh` and `bin/shim/gh-credential` mint a short-lived token per call
    (`bin/gh-app-token.sh`); nothing is stored with `gh auth login`. *Fallback:* one bot
    account, `su - watcher`, `gh auth login`, `gh auth setup-git` — with no
@@ -611,7 +613,13 @@ project that already exists under a user and is moving into an organization,
 `deploy/move-project.py <name> --to <org>` (November 9, 2026) transfers the repo into the
 org, copies the watcher board as the template (`gh project copy`: fields, views and every
 workflow except Auto-add come across), carries every card with its Status, Priority and
-Stage, re-applies main's branch protection, and rewrites `projects/<name>.env`.
+Stage, re-applies main's branch protection, and rewrites `projects/<name>.env`. Two things
+GitHub only tells you once the move is under way (both met November 9, 2026): a **Free**
+organization cannot protect a branch on a **private** repo, so a private repo needs the
+Team plan or has to go public before `main` can require `verify` again; and a transfer is
+refused with "insufficient collaborator seats" while the repo still lists a collaborator
+without a seat in the organization (a retired machine account, say) — remove them from the
+repo first. `docs/getting-started.md`, step 2, lists both before the first command.
 
 The board's **Auto-add to project** workflow is no longer asked for (card
 [#200](https://github.com/lonestarprod/watcher/issues/200)): every card the watcher files
