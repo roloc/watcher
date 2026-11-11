@@ -2239,11 +2239,11 @@ if [ "$RC" = 0 ] && [ "$OUT" = "real-claude token=tok-from-file discord=unset ar
 # are different files, so `-ef` never caught them and each exec'd the other forever.
 mkdir -p "$TMP/rel1/bin/shim" "$TMP/rel2/bin/shim"
 cp "$SHIM" "$TMP/rel1/bin/shim/claude"; cp "$SHIM" "$TMP/rel2/bin/shim/claude"
-OUT="$(env WATCHER_REAL_CLAUDE="$TMP/rel1/bin/shim/claude" PATH="$TMP/nobin" "$TMP/rel2/bin/shim/claude" -p hi 2>&1)"; RC=$?
+OUT="$(env WATCHER_REAL_CLAUDE="$TMP/rel1/bin/shim/claude" PATH="$TMP/rel1/bin/shim:$TMP/nobin" "$TMP/rel2/bin/shim/claude" -p hi 2>&1)"; RC=$?
 if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "a second shim as WATCHER_REAL_CLAUDE exits 127, no exec loop (card #290)"; else flunk "shim pointed at another release's shim" "rc=$RC [$OUT]"; fi
 # One that carries the marker but sits outside a shim/ directory is refused too.
 cp "$SHIM" "$TMP/rel1/claude-copy"
-OUT="$(env WATCHER_REAL_CLAUDE="$TMP/rel1/claude-copy" PATH="$TMP/nobin" "$TMP/rel2/bin/shim/claude" -p hi 2>&1)"; RC=$?
+OUT="$(env WATCHER_REAL_CLAUDE="$TMP/rel1/claude-copy" PATH="$TMP/rel1/bin/shim:$TMP/nobin" "$TMP/rel2/bin/shim/claude" -p hi 2>&1)"; RC=$?
 if [ "$RC" = 127 ]; then pass "…and so is a file carrying the shim's marker line, wherever it lives"; else flunk "shim pointed at a marker-bearing copy" "rc=$RC [$OUT]"; fi
 
 # The spawner's side (card #290): a process re-exec'd by follow_pointer inherits a PATH with the

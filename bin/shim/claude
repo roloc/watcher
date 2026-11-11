@@ -37,21 +37,23 @@ case "$real" in */*) ;; *) real="" ;; esac
 # Nor is another release's shim (card #290): after a pointer move the old release's shim can be
 # what WATCHER_REAL_CLAUDE names, and two shims that are different files exec each other
 # forever — `-ef` only catches this one. A file named claude in a shim/ directory, or one whose
-# first bytes carry the marker above, is refused the same way. `read` is a builtin and takes
-# only the head of the file, so a multi-megabyte real binary is never slurped.
-if [ -n "$real" ]; then
-  case "$real" in */shim/claude) real="" ;; esac
-fi
-if [ -n "$real" ] && [ -r "$real" ]; then
-  head=""; IFS= read -r -d '' -n 512 head < "$real" 2>/dev/null || true
-  case "$head" in *watcher-claude-shim*) real="" ;; esac
-fi
+# first bytes carry the marker above, is a shim. `read` is a builtin and takes only the head of
+# the file, so a multi-megabyte real binary is never slurped.
+is_shim() {
+  case "$1" in */shim/claude) return 0 ;; esac
+  [ -r "$1" ] || return 1
+  local head=""; IFS= read -r -d '' -n 512 head < "$1" 2>/dev/null || true
+  case "$head" in *watcher-claude-shim*) return 0 ;; esac
+  return 1
+}
+[ -n "$real" ] && is_shim "$real" && real=""
 if [ -z "$real" ]; then
   # Run by hand, outside a tick: the next `claude` on PATH that is not this file.
   IFS=: read -r -a dirs <<< "$PATH"
   for d in "${dirs[@]}"; do
     [ -n "$d" ] && [ -x "$d/claude" ] || continue
     [ "$d/claude" -ef "$self" ] && continue
+    is_shim "$d/claude" && continue
     real="$d/claude"; break
   done
 fi
