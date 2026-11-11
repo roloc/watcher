@@ -2235,6 +2235,29 @@ OUT="$(env WATCHER_REAL_CLAUDE="$SHIM" PATH="$HERE/shim:$TMP/nobin" "$SHIM" -p h
 if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "WATCHER_REAL_CLAUDE naming the shim itself is ignored, not exec'd in a loop"; else flunk "shim pointed at itself" "rc=$RC [$OUT]"; fi
 OUT="$(env -u CLAUDE_CODE_OAUTH_TOKEN WATCHER_REAL_CLAUDE=claude WATCHER_TOKEN_FILE="$TMP/watcher.env" PATH="$HERE/shim:$TMP/realclaude:$TMP/nobin" "$SHIM" -p hi 2>&1)"; RC=$?
 if [ "$RC" = 0 ] && [ "$OUT" = "real-claude token=tok-from-file discord=unset args=-p hi" ]; then pass "WATCHER_REAL_CLAUDE as a bare name is not trusted: the PATH walk finds the real one, never itself"; else flunk "shim with a bare-name WATCHER_REAL_CLAUDE" "rc=$RC [$OUT]"; fi
+# Card #290: a second release's shim as WATCHER_REAL_CLAUDE is refused, not exec'd — two shims
+# are different files, so `-ef` never caught them and each exec'd the other forever.
+mkdir -p "$TMP/rel1/bin/shim" "$TMP/rel2/bin/shim"
+cp "$SHIM" "$TMP/rel1/bin/shim/claude"; cp "$SHIM" "$TMP/rel2/bin/shim/claude"
+OUT="$(env WATCHER_REAL_CLAUDE="$TMP/rel1/bin/shim/claude" PATH="$TMP/rel1/bin/shim:$TMP/nobin" "$TMP/rel2/bin/shim/claude" -p hi 2>&1)"; RC=$?
+if [ "$RC" = 127 ] && printf '%s' "$OUT" | grep -q 'no real claude found'; then pass "a second shim as WATCHER_REAL_CLAUDE exits 127, no exec loop (card #290)"; else flunk "shim pointed at another release's shim" "rc=$RC [$OUT]"; fi
+# One that carries the marker but sits outside a shim/ directory is refused too.
+cp "$SHIM" "$TMP/rel1/claude-copy"
+OUT="$(env WATCHER_REAL_CLAUDE="$TMP/rel1/claude-copy" PATH="$TMP/rel1/bin/shim:$TMP/nobin" "$TMP/rel2/bin/shim/claude" -p hi 2>&1)"; RC=$?
+if [ "$RC" = 127 ]; then pass "…and so is a file carrying the shim's marker line, wherever it lives"; else flunk "shim pointed at a marker-bearing copy" "rc=$RC [$OUT]"; fi
+
+# The spawner's side (card #290): a process re-exec'd by follow_pointer inherits a PATH with the
+# OLD release's shim directory first. WATCHER_REAL_CLAUDE must still be the real binary, and the
+# plugin probe must return. Run in the background under a watchdog: on main this hangs.
+mkdir -p "$TMP/rel2/bin"; cp "$SPAWN" "$TMP/rel2/bin/spawn.sh"; chmod +x "$TMP/rel2/bin/spawn.sh"
+fresh_state; board_list $'37\tP1\tbuilder\t-\tCard thirty-seven'
+( OLD_SPAWN="$SPAWN"; SPAWN="$TMP/rel2/bin/spawn.sh"
+  PATH="$TMP/rel1/bin/shim:$TMP/rel2/bin/shim:$BIN:$PATH" WATCHER_CLAUDE_OVERRIDE=claude WATCHER_MAX_POLLS=1 run >/dev/null 2>&1 ) &
+RUN_PID=$!
+( sleep 20; pkill -P $RUN_PID 2>/dev/null; kill $RUN_PID 2>/dev/null ) >/dev/null 2>&1 &
+WD_PID=$!
+wait $RUN_PID 2>/dev/null; kill $WD_PID 2>/dev/null; wait $WD_PID 2>/dev/null
+if grepped "claude-env path-head=$TMP/rel2/bin/shim real=$BIN/claude"; then pass "a pointer move with the old release's shim already on PATH: the real claude is found and the probe returns (card #290)"; else flunk "WATCHER_REAL_CLAUDE after a pointer move" "$(grep claude-env "$TESTLOG")"; fi
 # The spawner's side of the same loop: a WATCHER_CLAUDE that PATH cannot resolve is refused
 # at startup, never handed to the shim as "the real binary".
 fresh_state; board_list $'36\tP1\tbuilder\t-\tCard thirty-six'
