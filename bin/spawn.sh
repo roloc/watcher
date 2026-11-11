@@ -228,7 +228,20 @@ WATCHER_SHIM_DIR="${WATCHER_SHIM_DIR:-$WATCHER_HERE/shim}"
 # name as "the real binary" the shim would find itself on PATH and exec in a loop until the
 # watchdog (found in review). Before the shim the same misconfiguration was an immediate
 # 127 per tick; now it is one journal line and systemd's restart, until someone fixes PATH.
-WATCHER_REAL_CLAUDE="$(command -v -- "$WATCHER_CLAUDE" 2>/dev/null || true)"
+# Resolved against a PATH with every shim directory taken off (card #290): this process may
+# have been re-exec'd by follow_pointer, and `exec` carries the PATH the OLD release exported
+# below — its shim/ first — so `command -v` found the old release's shim as "the real claude",
+# and two releases' shims then exec each other forever (plugin_probe never returned, every lane
+# went dark, November 9-11, 2026). A directory ending in /bin/shim is any release's shim
+# directory; one holding a claude that carries the shim's marker is a shim directory too.
+real_path=""
+IFS=: read -r -a path_dirs <<< "$PATH"
+for d in ${path_dirs[@]+"${path_dirs[@]}"}; do
+  case "$d" in "$WATCHER_SHIM_DIR"|*/bin/shim) continue ;; esac
+  if [ -f "$d/claude" ] && head -c 512 "$d/claude" 2>/dev/null | grep -q 'watcher-claude-shim'; then continue; fi
+  real_path="${real_path:+$real_path:}$d"
+done
+WATCHER_REAL_CLAUDE="$(PATH="$real_path" command -v -- "$WATCHER_CLAUDE" 2>/dev/null || true)"
 [ -n "$WATCHER_REAL_CLAUDE" ] || { echo "spawn.sh: claude not found: '$WATCHER_CLAUDE' is not an executable on PATH ($PATH); nothing can be launched" >&2; exit 69; }
 # With Apps set up, the lane's own `gh` calls (and board.py's, a child) go through the same shim
 # as the tick's — here, after the real claude is resolved above, so the shim directory's own

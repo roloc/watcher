@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# watcher-claude-shim — the marker line spawn.sh and this file look for to tell a shim from the real binary.
 # The `claude` a tick's shell finds first. bin/spawn.sh puts this directory at the head of
 # the tick's PATH and names the real binary in WATCHER_REAL_CLAUDE (resolved before the
 # shim's directory went on PATH, so this file can never find itself).
@@ -33,6 +34,18 @@ real="${WATCHER_REAL_CLAUDE:-}"
 # A bare name is not a resolved binary: `exec claude` would search PATH and find this file.
 case "$real" in */*) ;; *) real="" ;; esac
 [ -n "$real" ] && [ "$real" -ef "$self" ] && real=""
+# Nor is another release's shim (card #290): after a pointer move the old release's shim can be
+# what WATCHER_REAL_CLAUDE names, and two shims that are different files exec each other
+# forever — `-ef` only catches this one. A file named claude in a shim/ directory, or one whose
+# first bytes carry the marker above, is refused the same way. `read` is a builtin and takes
+# only the head of the file, so a multi-megabyte real binary is never slurped.
+if [ -n "$real" ]; then
+  case "$real" in */shim/claude) real="" ;; esac
+fi
+if [ -n "$real" ] && [ -r "$real" ]; then
+  head=""; IFS= read -r -d '' -n 512 head < "$real" 2>/dev/null || true
+  case "$head" in *watcher-claude-shim*) real="" ;; esac
+fi
 if [ -z "$real" ]; then
   # Run by hand, outside a tick: the next `claude` on PATH that is not this file.
   IFS=: read -r -a dirs <<< "$PATH"
