@@ -293,6 +293,15 @@ reset to 0 the moment the label went on. State is `awaiting-rebuild/<n>.since` (
 wait was first seen) and `.noted` (the one FYI comment went out); both are cleared when the
 card is picked normally or parked for staleness.
 
+A project can also let the lane ask instead of wait to be told (card #292): `REBUILD_STATUS_CMD`
+in its env file is a command printing one line of JSON about the downstream rebuild
+(`{"result":"success|failed","exit_status":"<n>","finished_at":"<ISO time>","active":true|false}`;
+riffmap's is `ssh riffmap-share rebuild-status`, so the staging box holds no GitHub token).
+The same sweep runs it, at most once per poll, when a card carries the label; a rebuild that is
+not active and finished **after** the card's `.since` marker drops the label, posts one comment
+with the result and finish time, and the next poll launches the tick. A command that fails or
+times out (`REBUILD_STATUS_TIMEOUT_SEC`) changes nothing, so the 12-hour park still applies.
+
 ## Lanes
 
 A project can run as **two spawner instances side by side** — two systemd units, two

@@ -495,8 +495,9 @@ the owner. **Do not do those.** Go straight to Stuck with the options laid out (
     when it does; `gh issue edit <n> --add-label awaiting-rebuild`; `board unclaim <n>`;
     leave the card **In progress**; stop with `Outcome: awaiting rebuild`. The PR still says
     `Refs #<n>` and nothing else that names the card (above) — the card is not done, only
-    unblocked from a wasted wait. The spawner skips a card carrying that label until a project's own workflow
-    removes it (riffmap [#637](https://github.com/roloc/riffmap/issues/637)), then hands it
+    unblocked from a wasted wait. The spawner skips a card carrying that label until it comes off — a project's own workflow
+    removes it (riffmap [#637](https://github.com/roloc/riffmap/issues/637)), or the spawner itself
+    does, when the project's status command reports the rebuild finished (card #292) — then hands it
     to the next tick to re-check the artifact and close or park on what it now shows. Any
     other reason the artifact has not moved — the deploy is red, or its log shows no such
     job starting — is still Stuck, same as always; this is not a general license to wait
