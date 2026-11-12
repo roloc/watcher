@@ -246,6 +246,7 @@ if [ "$1" = --version ]; then echo "2.1.263 (Claude Code)"; exit 0; fi
 echo "claude $* [cwd=$PWD]" >> "$TEST_LOG"
 echo "claude-env background-tasks-disabled=${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-unset}" >> "$TEST_LOG"
 echo "claude-env path-head=${PATH%%:*} real=${WATCHER_REAL_CLAUDE:-unset}" >> "$TEST_LOG"
+echo "claude-env shim-dirs=$(printf '%s' "$PATH" | tr ':' '\n' | grep -c '/shim$')" >> "$TEST_LOG"
 echo "claude-env watcher-home=${WATCHER_HOME:-unset}" >> "$TEST_LOG"
 echo "claude-env app project=${WATCHER_APP_PROJECT:-unset} author=${GIT_AUTHOR_NAME:-unset} <${GIT_AUTHOR_EMAIL:-unset}> helpers=${GIT_CONFIG_COUNT:-0}:${GIT_CONFIG_VALUE_1:-none}" >> "$TEST_LOG"
 # CLAUDE_FLIP_POINTER="<symlink>:<new target>" (card #106 test only): flips the pointer as
@@ -2258,6 +2259,32 @@ RUN_PID=$!
 WD_PID=$!
 wait $RUN_PID 2>/dev/null; kill $WD_PID 2>/dev/null; wait $WD_PID 2>/dev/null
 if grepped "claude-env path-head=$TMP/rel2/bin/shim real=$BIN/claude"; then pass "a pointer move with the old release's shim already on PATH: the real claude is found and the probe returns (card #290)"; else flunk "WATCHER_REAL_CLAUDE after a pointer move" "$(grep claude-env "$TESTLOG")"; fi
+# Card #293: …and the tick's PATH then holds exactly one shim directory, not the old release's too.
+if [ -e "$STATE/heartbeat" ]; then pass "every poll touches the lane's heartbeat, which the floor page reads (card #293)"; else flunk "no heartbeat file in the state directory" "$(ls "$STATE")"; fi
+if grepped "claude-env shim-dirs=1"; then pass "after a pointer move the tick's PATH holds exactly one shim directory (card #293)"; else flunk "shim directories on the tick's PATH after a pointer move" "$(grep 'claude-env shim-dirs' "$TESTLOG")"; fi
+# Card #293: doctor.sh's external calls run under a timeout — a gh that never returns is "doctor
+# failed" in the log, not a lane held forever with nothing logged. A stock Mac has no `timeout`,
+# so the suite stands one in (the way test-deploy.sh stubs flock).
+mkdir -p "$TMP/hungbin"
+cat > "$TMP/hungbin/gh" <<'STUB'
+#!/usr/bin/env bash
+sleep 30
+STUB
+chmod +x "$TMP/hungbin/gh"
+if ! command -v timeout >/dev/null 2>&1; then
+  cat > "$TMP/hungbin/timeout" <<'STUB'
+#!/usr/bin/env bash
+secs="$1"; shift
+"$@" & pid=$!
+( sleep "$secs"; kill "$pid" 2>/dev/null ) & killer=$!
+wait "$pid" 2>/dev/null; rc=$?
+kill "$killer" 2>/dev/null; exit "$rc"
+STUB
+  chmod +x "$TMP/hungbin/timeout"
+fi
+START=$(date +%s)
+OUT="$(PATH="$TMP/hungbin:$PATH" WATCHER_GH="$TMP/hungbin/gh" DOCTOR_TIMEOUT=1 BOARD_OWNER=o BOARD_NUMBER=1 PROJECT_REPO=o/r PROJECT_ROOT="$TMP" bash "$HERE/doctor.sh" 2>&1)"; RC=$?
+if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q '^doctor: board' && [ $(( $(date +%s) - START )) -lt 25 ]; then pass "a gh that never returns fails doctor.sh on its timeout instead of hanging (card #293)"; else flunk "doctor.sh with a hung gh" "rc=$RC after $(( $(date +%s) - START ))s: $OUT"; fi
 # The spawner's side of the same loop: a WATCHER_CLAUDE that PATH cannot resolve is refused
 # at startup, never handed to the shim as "the real binary".
 fresh_state; board_list $'36\tP1\tbuilder\t-\tCard thirty-six'

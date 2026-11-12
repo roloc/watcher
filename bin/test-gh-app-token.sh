@@ -143,6 +143,21 @@ check "no real gh anywhere: exit 127, never an exec loop" '[ "$RC" = 127 ]' "rc=
 OUT="$(PATH="$HERE/shim:$BIN:/usr/bin:/bin" GH_APP_NOW=$NOW PROJECT_NAME=demo gh api user)"
 check "first on PATH, it finds the next gh and never itself" 'printf "%s" "$OUT" | grep -q "^real-gh token=ghs_"' "$OUT"
 
+# Card #293: two releases' shims on one PATH (a long-lived lane keeps the old release's) must
+# reach the real gh in one hop, and with no real gh exit 127 instead of exec'ing each other.
+mkdir -p "$TMP/bashonly"; ln -sf "$(command -v bash)" "$TMP/bashonly/bash"
+mkdir -p "$TMP/relA/bin/shim" "$TMP/relB/bin/shim"
+cp "$SHIM" "$TMP/relA/bin/shim/gh"; cp "$SHIM" "$TMP/relB/bin/shim/gh"
+OUT="$(env -u WATCHER_REAL_GH GH_TOKEN=mine PATH="$TMP/relA/bin/shim:$TMP/relB/bin/shim:$BIN:/usr/bin:/bin" "$TMP/relB/bin/shim/gh" api user 2>&1)"; RC=$?
+check "the new release's shim, the old one's first on PATH: one hop to the real gh" '[ "$RC" = 0 ] && [ "$OUT" = "real-gh token=mine args=api user" ]' "rc=$RC $OUT"
+OUT="$(env -u WATCHER_REAL_GH PATH="$TMP/relA/bin/shim:$TMP/relB/bin/shim:$TMP/bashonly" "$TMP/relB/bin/shim/gh" api user 2>&1)"; RC=$?
+check "two shims and no real gh: exit 127, never a loop" '[ "$RC" = 127 ] && printf "%s" "$OUT" | grep -q "no real gh"' "rc=$RC $OUT"
+cp "$SHIM" "$TMP/relA/gh-copy"
+OUT="$(env WATCHER_REAL_GH="$TMP/relA/gh-copy" PATH="$TMP/bashonly" "$TMP/relB/bin/shim/gh" api user 2>&1)"; RC=$?
+check "WATCHER_REAL_GH naming a file with the shim's marker is refused" '[ "$RC" = 127 ]' "rc=$RC $OUT"
+OUT="$(env WATCHER_GH_SHIM_DEPTH=8 PATH="$BIN:/usr/bin:/bin" "$SHIM" api user 2>&1)"; RC=$?
+check "the recursion guard: a shim called through eight shims exits 127 loudly" '[ "$RC" = 127 ] && printf "%s" "$OUT" | grep -q "refusing to loop"' "rc=$RC $OUT"
+
 echo "7. bin/shim/gh-credential: git's helper protocol"
 CRED="$HERE/shim/gh-credential"
 rm -rf "$GH_APP_CACHE"

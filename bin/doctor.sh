@@ -28,6 +28,11 @@
 set -uo pipefail
 
 WATCHER_GH="${WATCHER_GH:-gh}"
+# Every external call runs under a timeout (card #293): a hung gh used to hold a lane forever,
+# logging nothing — no "doctor failed", no alert. A timeout is one more failed call, and a
+# failed call is a problem line, so spawn.sh logs "doctor failed" and retries in 10 minutes.
+DOCTOR_TIMEOUT="${DOCTOR_TIMEOUT:-60}"
+gh_t() { timeout "$DOCTOR_TIMEOUT" $WATCHER_GH "$@"; }
 ERR="$(mktemp)"; trap 'rm -f "$ERR"' EXIT
 
 fail=0
@@ -44,7 +49,7 @@ if [ "$fail" = 1 ]; then
 fi
 
 # --- the board: reads, and carries Status/Stage/Priority --------------------------------
-if FIELDS_JSON="$($WATCHER_GH project field-list "$BOARD_NUMBER" --owner "$BOARD_OWNER" --format json 2>"$ERR")"; then
+if FIELDS_JSON="$(gh_t project field-list "$BOARD_NUMBER" --owner "$BOARD_OWNER" --format json 2>"$ERR")"; then
   if ! python3 - "$FIELDS_JSON" <<'PY' >&2
 import json, sys
 required_statuses = ["Backlog", "Ready", "In progress", "In review", "Done", "Stuck - Needs help"]
@@ -72,7 +77,7 @@ else
 fi
 
 # --- labels on the repo ------------------------------------------------------------------
-if LABELS_JSON="$($WATCHER_GH label list --repo "$PROJECT_REPO" --json name --limit 200 2>"$ERR")"; then
+if LABELS_JSON="$(gh_t label list --repo "$PROJECT_REPO" --json name --limit 200 2>"$ERR")"; then
   if ! python3 - "$LABELS_JSON" "$PROJECT_REPO" <<'PY' >&2
 import json, sys
 required = ["in-flight", "blocked", "owner-decision"]
@@ -104,7 +109,7 @@ else
   [ -n "$CHECK_NAME" ] || warn "$PROJECT_ROOT/CLAUDE.md does not use the exact words \"required CI check is \`<name>\`\" — could not confirm main requires one (templates/project-CLAUDE.md uses that phrase; consider matching it)"
 fi
 if [ -n "$CHECK_NAME" ]; then
-  if PROTECTION_JSON="$($WATCHER_GH api "repos/$PROJECT_REPO/branches/main/protection" 2>"$ERR")"; then
+  if PROTECTION_JSON="$(gh_t api "repos/$PROJECT_REPO/branches/main/protection" 2>"$ERR")"; then
     if ! python3 - "$CHECK_NAME" "$PROTECTION_JSON" <<'PY' >&2
 import json, sys
 check, raw = sys.argv[1], sys.argv[2]
@@ -129,7 +134,7 @@ fi
 # Every project gets bin/browse.py; it needs a Chrome or Chromium on the box. A warning,
 # never a failure: plenty of cards touch no page, and a lane refused over this would stop
 # those too.
-python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
+timeout "$DOCTOR_TIMEOUT" python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
   || warn "no Chrome or Chromium on this box — a tick cannot look at a page (apt install chromium)"
 
 # --- the desk (card #205): a note, never a failure ---------------------------------------
@@ -137,7 +142,7 @@ python3 "$(dirname "$0")/browse.py" find >/dev/null 2>&1 \
 # because nobody has done its one-time login yet. Nothing a lane needs; a reader on the box
 # is the one who acts on it. Skipped where there is no systemd at all (a Mac).
 if command -v systemctl >/dev/null 2>&1; then
-  case "$(systemctl is-active watcher-desk.service 2>/dev/null)" in
+  case "$(timeout "$DOCTOR_TIMEOUT" systemctl is-active watcher-desk.service 2>/dev/null)" in
     active|"") ;;
     *) warn "the desk session is not running (watcher-desk.service) — once, on the box: sudo -u watcher-desk -H claude auth login (docs/owner-cheat-sheet.md, \"The desk\")" ;;
   esac
@@ -149,9 +154,9 @@ fi
 # retired knowing nothing there still depends on it. Skipped where no App is set up at all.
 if [ -d /etc/watcher/apps/watcher ]; then
   if id -u watcher >/dev/null 2>&1 && [ "$(id -un)" != watcher ] && command -v sudo >/dev/null 2>&1; then
-    app_id="$(sudo -n -u watcher "$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
+    app_id="$(timeout "$DOCTOR_TIMEOUT" sudo -n -u watcher "$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
   else
-    app_id="$("$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
+    app_id="$(timeout "$DOCTOR_TIMEOUT" "$(dirname "$0")/gh-app-token.sh" watcher author --identity 2>/dev/null)"
   fi
   if [ -n "$app_id" ]; then
     echo "doctor: the watcher user's gh (floor page, timers, deployer) mints as the App: $app_id"
