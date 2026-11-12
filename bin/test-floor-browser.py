@@ -468,7 +468,7 @@ POSTED_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs
 SILENT_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs_steve_total: 0},
   projects: [{name: 'gamma', board_url: '#', counts: {ready: 0, in_progress: 0, backlog: 0},
     lanes: [{lane: 'gamma', kind: 'Build', unit: 'watcher@gamma', pill: 'silent', link: '#',
-             reason: 'Nothing logged for 21h; this lane is stuck, not idle.'}],
+             reason: 'Nothing logged for 21h; this lane is not responding, not idle.'}],
     ship: {ci: {state: 'passing', sha: 'abc1234', url: '#'}}}], recent: []}"""
 
 
@@ -1528,14 +1528,14 @@ try:
         check("no uncaught exception", b.errors == [], b.errors)
         shot(b, "floor-plan-posted.png")
 
-    print("19c. card #293: a lane that has logged nothing for hours reads Stuck, not Idle, "
+    print("19c. card #293: a lane that has logged nothing for hours reads Not responding, not Idle, "
           "and the light over the door is not green")
     with browse.Browser(width=390, height=844) as b:
         b.goto(URL)
         b.wait_for(DESKS_DRAWN)
         b.eval(f"render({SILENT_STATE}); renderStudio({SILENT_STATE}); true")
-        check("the pill says Stuck, in the pill's own class",
-              b.eval("document.querySelector('.desk .pill.silent')?.textContent") == "Stuck")
+        check("the pill says Not responding, in the pill's own class",
+              b.eval("document.querySelector('.desk .pill.silent')?.textContent") == "Not responding")
         check("the desk says how long, in words, and never 'Idle'",
               "Nothing logged for 21h" in b.text() and b.eval("!document.querySelector('.desk .pill.idle')"), b.text())
         check("the light over the owner's door is amber, not green",

@@ -386,7 +386,7 @@ open(beat, "w").close()
 set_mtime(beat, 21 * 60)
 d = floor.lane_desk(silent_lane, {}, "https://board", NOW)
 check("card #293: no card in hand, heartbeat 21 hours old: pill silent, says so in hours",
-      d["pill"] == "silent" and "21h" in d["reason"] and "stuck" in d["reason"], d)
+      d["pill"] == "silent" and "21h" in d["reason"] and "not responding" in d["reason"], d)
 set_mtime(beat, 3)
 check("card #293: a heartbeat 3 minutes old is a plain idle lane",
       floor.lane_desk(silent_lane, {}, "https://board", NOW)["pill"] == "idle")
@@ -394,6 +394,8 @@ os.remove(beat)
 check("card #293: no heartbeat file at all (an older release) is not guessed at",
       floor.lane_desk(silent_lane, {}, "https://board", NOW)["pill"] == "idle")
 open(beat, "w").close(); set_mtime(beat, 21 * 60)
+check("card #293: a lane whose unit someone stopped on purpose is not called hung",
+      floor.lane_desk(silent_lane, {}, "https://board", NOW, unit_active=False)["pill"] == "idle")
 cur = os.path.join(silent_lane["state_dir"], "current")
 open(cur, "w").write("5\n"); set_mtime(cur, 40)
 check("card #293: a card in hand is working however old the heartbeat (a tick can run for hours)",

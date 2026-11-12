@@ -790,17 +790,18 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
         return desk
 
     # No card in hand and no heartbeat for SILENT_AFTER_MIN: the lane is hung, whether or not
-    # it is paused. A lane that never wrote one (an older release) is not guessed at.
+    # it is paused. A lane that never wrote one (an older release) is not guessed at, and one whose
+    # unit someone stopped on purpose is not hung.
     try:
         beat = datetime.fromtimestamp(os.path.getmtime(os.path.join(state_dir, "heartbeat")),
                                       tz=timezone.utc)
     except OSError:
         beat = None
-    if beat is not None and _minutes_since(beat, now) >= SILENT_AFTER_MIN:
+    if beat is not None and unit_active is not False and _minutes_since(beat, now) >= SILENT_AFTER_MIN:
         mins = _minutes_since(beat, now)
         ago = f"{mins // 60}h" if mins >= 120 else f"{mins} minutes"
         return {**base, "pill": "silent", "link": board_url,
-                "reason": f"Nothing logged for {ago}; this lane is stuck, not idle."}
+                "reason": f"Nothing logged for {ago}; this lane is not responding, not idle."}
 
     if paused:
         return {**base, "pill": "paused", "link": board_url}
@@ -2215,7 +2216,7 @@ window.addEventListener("unhandledrejection", function () {
 </div>
 <script id="main">
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs the owner",
-                     paused: "Paused", sleeping: "Sleeping", silent: "Stuck"};
+                     paused: "Paused", sleeping: "Sleeping", silent: "Not responding"};
 // Card #154: a needs_steve pill addresses the GitHub login the owning project's own
 // `OWNER_LOGIN` names, not a fixed word — a fork of this repo reads its own
 // owner's name here. Falls back to PILL_LABEL's own "Needs the owner" for a lane the backend
