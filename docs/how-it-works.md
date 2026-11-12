@@ -295,7 +295,7 @@ card is picked normally or parked for staleness.
 
 A project can also let the lane ask instead of wait to be told (card #292): `REBUILD_STATUS_CMD`
 in its env file is a command printing one line of JSON about the downstream rebuild
-(`{"result":"success|failed","exit_status":"<n>","finished_at":"<ISO time>","active":true|false}`;
+(`{"result":"success|<systemd Result=>","exit_status":"<n>","finished_at":"<ISO time>","active":true|false}`;
 riffmap's is `ssh riffmap-share rebuild-status`, so the staging box holds no GitHub token).
 The same sweep runs it, at most once per poll, when a card carries the label; a rebuild that is
 not active and finished **after** the card's `.since` marker drops the label, posts one comment

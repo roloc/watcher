@@ -1979,11 +1979,11 @@ if not_grepped "remove-label awaiting-rebuild"; then pass "a timed-out command (
 fresh_state
 board_list $'623\tP2\tbuilder\tawaiting-rebuild\tFix merged D'
 mkdir -p "$STATE/awaiting-rebuild"; echo 1 > "$STATE/awaiting-rebuild/623.since"
-status_is "echo '{\"result\":\"failed\",\"exit_status\":\"2\",\"finished_at\":\"2026-11-12T20:00:00+00:00\",\"active\":false}'"
+status_is "echo '{\"result\":\"exit-code\",\"exit_status\":\"2\",\"finished_at\":\"2026-11-12T20:00:00+00:00\",\"active\":false}'"
 PATH="$TMP/tbin:$PATH" REBUILD_STATUS_CMD="$STATUS" run --dry-run >/dev/null 2>&1 || true
 if not_grepped "remove-label" && [ ! -s "$STATUS_COUNT" ]; then pass "dry-run never asks and never writes"; else flunk "dry-run asked" "$(cat "$TESTLOG")"; fi
 arb_poll
-if grep 'gh issue comment 623' "$TESTLOG" | grep -q 'failed (exit status 2)'; then pass "a failed rebuild is reported as failed, label still off"; else flunk "failed result" "$(cat "$TESTLOG")"; fi
+if grep 'gh issue comment 623' "$TESTLOG" | grep -q 'exit-code (exit status 2)'; then pass "a failed rebuild (systemd's exit-code) is reported with its result, label still off"; else flunk "failed result" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "In review sweep (watcher#18): a column nothing read becomes one the spawner empties"

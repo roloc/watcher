@@ -27,7 +27,7 @@
 #                    a fork of this repo pings its own owner with no config at all.
 #   REBUILD_STATUS_CMD  optional; a command printing one line of JSON about the downstream
 #                    rebuild a card may be waiting on (`awaiting-rebuild`, card #292):
-#                    {"result":"success|failed","exit_status":"<n>","finished_at":"<ISO time>",
+#                    {"result":"success|<systemd Result=>","exit_status":"<n>","finished_at":"<ISO time>",
 #                    "active":true|false}. When it reports a rebuild finished after the card
 #                    began waiting, this lane comments and drops the label itself. Unset =
 #                    only the project's own workflow drops it. REBUILD_STATUS_TIMEOUT_SEC
@@ -331,7 +331,7 @@ case "$STAGE_SWEEP_SEC" in ''|*[!0-9]*) echo "spawn.sh: STAGE_SWEEP_SEC must be 
 AWAITING_REBUILD_STALE_SEC="${AWAITING_REBUILD_STALE_SEC:-43200}"
 case "$AWAITING_REBUILD_STALE_SEC" in ''|*[!0-9]*) echo "spawn.sh: AWAITING_REBUILD_STALE_SEC must be a number, not '$AWAITING_REBUILD_STALE_SEC'" >&2; exit 64 ;; esac
 # Card #292: optional, per project. A command that prints one line of JSON about the
-# downstream rebuild a card may be waiting on — {"result":"success|failed","exit_status":"<n>",
+# downstream rebuild a card may be waiting on — {"result":"success|<systemd Result=>","exit_status":"<n>",
 # "finished_at":"<ISO time>","active":true|false} (riffmap: `ssh riffmap-share rebuild-status`).
 # Unset = no asking: only a project's own workflow drops `awaiting-rebuild`, as before.
 REBUILD_STATUS_CMD="${REBUILD_STATUS_CMD:-}"
@@ -1755,7 +1755,8 @@ sweep_awaiting_rebuild() {
 # rebuild_status_fields — run REBUILD_STATUS_CMD (bounded, no stdin) and print
 # "<result>\t<epoch>\t<exit_status>\t<finished_at>" for a finished rebuild, nothing for
 # anything else: a failing or slow command, output that is not the one JSON line, a rebuild
-# still active, a result other than success/failed, or a time that does not parse.
+# still active, an empty result, or a time that does not parse. Any result but "success" is a
+# failed rebuild (the verb reports systemd's own Result=: exit-code, signal, timeout, ...).
 rebuild_status_fields() {
   local out
   out="$(timeout "$REBUILD_STATUS_TIMEOUT_SEC" bash -c "$REBUILD_STATUS_CMD" </dev/null 2>/dev/null)" || return 1
@@ -1763,7 +1764,7 @@ rebuild_status_fields() {
 from datetime import datetime,timezone
 try:
     d=json.loads(sys.argv[1])
-    if d.get("active") is not False or d.get("result") not in ("success","failed"): sys.exit(1)
+    if d.get("active") is not False or not d.get("result"): sys.exit(1)
     t=str(d["finished_at"]); dt=datetime.fromisoformat(t.replace("Z","+00:00"))
     if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
     print("%s\t%d\t%s\t%s" % (d["result"], int(dt.timestamp()), (str(d.get("exit_status","")).replace("\t"," ") or "unknown"), t.replace("\t"," ")))
@@ -1781,7 +1782,7 @@ finish_awaiting_rebuild() {
   IFS=$'\t' read -r result epoch code at <<< "$3"
   [ "$epoch" -gt "$since" ] || return 1
   $WATCHER_GH issue edit "$n" --remove-label awaiting-rebuild || { log "could not drop awaiting-rebuild on #$n; retried on a later poll"; return 1; }
-  word="finished"; [ "$result" = failed ] && word="failed"
+  word="finished"; [ "$result" = success ] || word="failed"
   $WATCHER_GH issue comment "$n" --body "🤖 FYI: the downstream rebuild this card was waiting on has $word, so I took the waiting label off.
 - Result: $result (exit status $code), finished $at.
 - I pick the card up again on my next poll to check the artifact.
