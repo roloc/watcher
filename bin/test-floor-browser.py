@@ -464,6 +464,13 @@ POSTED_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs
              minutes: 17, plan_posted: true, plan_late: false}],
     ship: {ci: {state: 'passing', sha: 'abc1234', url: '#'}}}], recent: []}"""
 
+# card #293: a lane with no card in hand whose heartbeat is hours old.
+SILENT_STATE = """{header: {box: 'agents', time: new Date().toISOString(), needs_steve_total: 0},
+  projects: [{name: 'gamma', board_url: '#', counts: {ready: 0, in_progress: 0, backlog: 0},
+    lanes: [{lane: 'gamma', kind: 'Build', unit: 'watcher@gamma', pill: 'silent', link: '#',
+             reason: 'Nothing logged for 21h; this lane is stuck, not idle.'}],
+    ship: {ci: {state: 'passing', sha: 'abc1234', url: '#'}}}], recent: []}"""
+
 
 try:
     with browse.Browser(width=1280, height=900) as b:
@@ -1520,6 +1527,23 @@ try:
         check("...and the light goes back to green", b.eval("document.getElementById('beacon').className") == "beacon-green")
         check("no uncaught exception", b.errors == [], b.errors)
         shot(b, "floor-plan-posted.png")
+
+    print("19c. card #293: a lane that has logged nothing for hours reads Stuck, not Idle, "
+          "and the light over the door is not green")
+    with browse.Browser(width=390, height=844) as b:
+        b.goto(URL)
+        b.wait_for(DESKS_DRAWN)
+        b.eval(f"render({SILENT_STATE}); renderStudio({SILENT_STATE}); true")
+        check("the pill says Stuck, in the pill's own class",
+              b.eval("document.querySelector('.desk .pill.silent')?.textContent") == "Stuck")
+        check("the desk says how long, in words, and never 'Idle'",
+              "Nothing logged for 21h" in b.text() and b.eval("!document.querySelector('.desk .pill.idle')"), b.text())
+        check("the light over the owner's door is amber, not green",
+              b.eval("document.getElementById('beacon').className") == "beacon-amber")
+        check("still fits a phone, no horizontal scroll",
+              b.eval("document.documentElement.scrollWidth <= window.innerWidth"))
+        check("no uncaught exception", b.errors == [], b.errors)
+        shot(b, "floor-silent-phone.png")
 
     print("19b. card #103, on a phone: the amber pill and the words both still read at 390px")
     with browse.Browser(width=390, height=844) as b:

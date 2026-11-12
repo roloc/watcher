@@ -88,6 +88,11 @@ STUCK_STATUS = "Stuck - Needs help"  # board.py's own constant; kept as a litera
                                       # this file never imports board.py (which reads
                                       # BOARD_OWNER/BOARD_NUMBER as module-level globals —
                                       # wrong for a page that talks to several boards).
+# A lane with no card in hand polls at least every 10 minutes (spawn.sh's longest sleep) and
+# touches `heartbeat` in its state directory each time (card #293). Far past that, it is not
+# idle, it is stuck — every lane but the watcher's sat 21 hours inside a hung check, logging
+# nothing, and the page said "active".
+SILENT_AFTER_MIN = 30
 SLEEP_AFTER_FAILURE_MIN = 10  # spawn.sh: `wsleep 600` after any non-success exit
 PLAN_LATE_MIN = 10  # watch.md §2: the plan comment is the tick's first act — a working
                      # desk still with none past this many minutes reads as the lane's own
@@ -726,7 +731,7 @@ def _current_waiting(lane, n, claude_projects_dir, now):
 
 def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active=None, ask=None,
               images=None, plan=None, claude_projects_dir=None):
-    """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping.
+    """One lane's pill: exactly one of working | idle | needs_steve | paused | sleeping | silent.
     `last_tick` is the lane's own newest log entry (a `metrics.Tick`, or None — loaded
     once by the caller, not re-read here: a lane's own `Cache` refresh used to parse every
     log file twice, once for this and once for the recent-ticks list). `ask` is a callable
@@ -783,6 +788,19 @@ def lane_desk(lane, items_by_number, board_url, now, last_tick=None, unit_active
             desk["pausing"] = True
             desk["pausing_reason"] = _pause_reason(pause_path)
         return desk
+
+    # No card in hand and no heartbeat for SILENT_AFTER_MIN: the lane is hung, whether or not
+    # it is paused. A lane that never wrote one (an older release) is not guessed at.
+    try:
+        beat = datetime.fromtimestamp(os.path.getmtime(os.path.join(state_dir, "heartbeat")),
+                                      tz=timezone.utc)
+    except OSError:
+        beat = None
+    if beat is not None and _minutes_since(beat, now) >= SILENT_AFTER_MIN:
+        mins = _minutes_since(beat, now)
+        ago = f"{mins // 60}h" if mins >= 120 else f"{mins} minutes"
+        return {**base, "pill": "silent", "link": board_url,
+                "reason": f"Nothing logged for {ago}; this lane is stuck, not idle."}
 
     if paused:
         return {**base, "pill": "paused", "link": board_url}
@@ -1702,6 +1720,7 @@ INDEX_HTML = """<!doctype html>
   .pill.needs_steve { background: color-mix(in srgb, var(--needs) 18%, transparent); color: var(--needs); }
   .pill.paused { background: color-mix(in srgb, var(--paused) 18%, transparent); color: var(--paused); }
   .pill.sleeping { background: color-mix(in srgb, var(--sleep) 18%, transparent); color: var(--sleep); }
+  .pill.silent { background: color-mix(in srgb, var(--needs) 18%, transparent); color: var(--needs); }
   .detail { font-size: 13px; margin-top: 6px; color: var(--dim); }
   /* card #110: a working desk that is also pausing — a second fact, not a replacement
      for the Working pill, so it reads small and amber beside the detail line. */
@@ -2196,7 +2215,7 @@ window.addEventListener("unhandledrejection", function () {
 </div>
 <script id="main">
 const PILL_LABEL = {working: "Working", idle: "Idle", needs_steve: "Needs the owner",
-                     paused: "Paused", sleeping: "Sleeping"};
+                     paused: "Paused", sleeping: "Sleeping", silent: "Stuck"};
 // Card #154: a needs_steve pill addresses the GitHub login the owning project's own
 // `OWNER_LOGIN` names, not a fixed word — a fork of this repo reads its own
 // owner's name here. Falls back to PILL_LABEL's own "Needs the owner" for a lane the backend
@@ -2240,7 +2259,7 @@ function relTime(iso) {
 // One lane's character. Its shirt and screen take the pill's own colour, so the picture
 // and the pill always agree; the pose says the same thing the pill does.
 const PILL_COLOR = {working: "--working", idle: "--idle", needs_steve: "--needs",
-                    paused: "--paused", sleeping: "--sleep"};
+                    paused: "--paused", sleeping: "--sleep", silent: "--needs"};
 function spriteSVG(pill) {
   const c = `var(${PILL_COLOR[pill] || "--idle"})`;
   const screenLit = pill === "working" || pill === "needs_steve";
@@ -2560,7 +2579,7 @@ function deskHTML(d) {
   const planLate = d.pill === "working" && d.plan_late === true;
   if (d.pill === "working") detail = `#${d.card.number} · ${d.stage ? esc(d.stage) : "—"} · ${d.minutes}m${planSuffix(d)}`;
   else if (d.pill === "needs_steve") detail = `#${d.card.number}: ${d.ask ? renderAsk(d.ask) : "needs a decision"}`;
-  else if (d.pill === "idle" || d.pill === "sleeping") detail = esc(d.reason || "");
+  else if (d.pill === "idle" || d.pill === "sleeping" || d.pill === "silent") detail = esc(d.reason || "");
   const dispatcher = d.kind === "Triage";
   // Peek is on every lane's desk, whatever its pill: live while the lane works, its last
   // session when it does not. (It used to exist only on a working desk — so on a quiet
@@ -3744,7 +3763,7 @@ function renderBeacon(state) {
     let amber = false;
     for (const p of state.projects || []) {
       for (const l of p.lanes || [])
-        if (l.pill === "paused" || l.pill === "sleeping" || l.plan_late === true) amber = true;
+        if (l.pill === "paused" || l.pill === "sleeping" || l.pill === "silent" || l.plan_late === true) amber = true;
       if (["blocked", "backed_up"].includes(shipState(p.ship).pill)) amber = true;
     }
     color = amber ? "amber" : "green";

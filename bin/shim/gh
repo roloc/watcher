@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# watcher-gh-shim — the marker line spawn.sh and this file look for to tell a shim from the real gh.
 # The `gh` a tick's shell (and board.py, which calls `gh`) finds first (card #255). When the
 # project has GitHub Apps set up (bin/gh-app-token.sh finds its config), this exports a fresh
 # author-App installation token as GH_TOKEN and execs the real gh; otherwise it execs the real
@@ -12,14 +13,38 @@
 set -u
 self="${BASH_SOURCE[0]}"
 here="$(cd "$(dirname "$self")" && pwd)"
+# Never exec another watcher shim (card #293). After a release flip a long-lived lane still
+# carries the OLD release's bin/shim on its PATH, so "skip my own directory" found that
+# release's shim, which found this one: two different files exec'ing each other forever, a hung
+# doctor.sh on every lane (November 11-12, 2026). A file named gh in a shim/ directory, or one
+# whose first bytes carry the marker above, is a shim. `read` is a builtin and takes only the
+# head of the file, so a multi-megabyte real gh is never slurped.
+is_shim() {
+  case "$1" in */shim/gh) return 0 ;; esac
+  [ -r "$1" ] || return 1
+  local head=""; IFS= read -r -d '' -n 512 head < "$1" 2>/dev/null || true
+  case "$head" in *watcher-gh-shim*) return 0 ;; esac
+  return 1
+}
+# Backstop for any loop the checks above miss: each hop adds one, and a real gh that runs `gh`
+# itself (an extension, an alias) is a hop or two, never eight. Loud, not a silent hang.
+depth="${WATCHER_GH_SHIM_DEPTH:-0}"
+case "$depth" in ''|*[!0-9]*) depth=0 ;; esac
+if [ "$depth" -ge 8 ]; then
+  echo "gh shim: called itself $depth times (two watcher shims finding each other?); refusing to loop" >&2
+  exit 127
+fi
+export WATCHER_GH_SHIM_DEPTH=$((depth + 1))
 real="${WATCHER_REAL_GH:-}"
 case "$real" in */*) ;; *) real="" ;; esac
 [ -n "$real" ] && [ "$real" -ef "$self" ] && real=""
+[ -n "$real" ] && is_shim "$real" && real=""
 if [ -z "$real" ]; then
   IFS=: read -r -a dirs <<< "$PATH"
   for d in "${dirs[@]}"; do
     [ -n "$d" ] && [ -x "$d/gh" ] || continue
     [ "$d/gh" -ef "$self" ] && continue
+    is_shim "$d/gh" && continue
     real="$d/gh"; break
   done
 fi

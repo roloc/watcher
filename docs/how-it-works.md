@@ -594,6 +594,15 @@ missing it re-reads **only** the token from `/etc/watcher/env` (a file the watch
 already read) and execs the real binary, resolved by the spawner before the shim's directory
 went on `PATH` so it can never find itself. A tick needs to do nothing — `claude` just works.
 
+A release flip must never leave two releases' shims on one `PATH` (card #293, November 11-12,
+2026: every lane but the watcher's sat 21 hours in `doctor.sh`, the old release's `gh` shim and
+the new one's each finding the other). So `spawn.sh` takes every `bin/shim` directory off `PATH`
+at start and again before a re-launch, both shims refuse to exec another shim (a `*/shim/gh`, or
+a file carrying `watcher-gh-shim` in its first lines) and the `gh` shim exits 127 after eight
+nested calls; `doctor.sh` runs each external call under `timeout`; and each poll touches
+`heartbeat` in the lane's state directory, so the floor page shows a lane with no card and a
+heartbeat older than 30 minutes as **Stuck**, never Idle.
+
 So every dollar amount the loop reports is **imputed**: `total_cost_usd` in a tick's JSON
 result is copied from `modelUsage.<model>.costUSD`, which is **tokens × API list price,
 computed client-side**. It is what the run *would* have cost on the API. It is a **usage

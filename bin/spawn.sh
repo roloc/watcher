@@ -234,13 +234,24 @@ WATCHER_SHIM_DIR="${WATCHER_SHIM_DIR:-$WATCHER_HERE/shim}"
 # and two releases' shims then exec each other forever (plugin_probe never returned, every lane
 # went dark, November 9-11, 2026). A directory ending in /bin/shim is any release's shim
 # directory; one holding a claude that carries the shim's marker is a shim directory too.
-real_path=""
-IFS=: read -r -a path_dirs <<< "$PATH"
-for d in ${path_dirs[@]+"${path_dirs[@]}"}; do
-  case "$d" in "$WATCHER_SHIM_DIR"|*/bin/shim) continue ;; esac
-  if [ -f "$d/claude" ] && head -c 512 "$d/claude" 2>/dev/null | grep -q 'watcher-claude-shim'; then continue; fi
-  real_path="${real_path:+$real_path:}$d"
-done
+# The same list, as a function, is what the re-launch and the process start both put PATH
+# through (card #293): the new process would otherwise inherit the old release's shim/ first
+# on PATH, and the old release's `gh` shim and the new one found each other forever.
+path_without_shims() {
+  local d out="" dirs
+  IFS=: read -r -a dirs <<< "$PATH"
+  for d in ${dirs[@]+"${dirs[@]}"}; do
+    case "$d" in "$WATCHER_SHIM_DIR"|*/bin/shim) continue ;; esac
+    if [ -f "$d/claude" ] && head -c 512 "$d/claude" 2>/dev/null | grep -q 'watcher-claude-shim'; then continue; fi
+    if [ -f "$d/gh" ] && head -c 512 "$d/gh" 2>/dev/null | grep -q 'watcher-gh-shim'; then continue; fi
+    out="${out:+$out:}$d"
+  done
+  printf '%s' "$out"
+}
+real_path="$(path_without_shims)"
+# From here on PATH holds no shim directory at all; the one this release owns is put back
+# below (WATCHER_APP_PROJECT) and on each tick's own command line.
+PATH="$real_path"; export PATH
 WATCHER_REAL_CLAUDE="$(PATH="$real_path" command -v -- "$WATCHER_CLAUDE" 2>/dev/null || true)"
 [ -n "$WATCHER_REAL_CLAUDE" ] || { echo "spawn.sh: claude not found: '$WATCHER_CLAUDE' is not an executable on PATH ($PATH); nothing can be launched" >&2; exit 69; }
 # With Apps set up, the lane's own `gh` calls (and board.py's, a child) go through the same shim
@@ -1050,7 +1061,7 @@ launch_tick() {
   set -m
   local launch_pwd="$PWD"
   cd "$dir"
-  PATH="$WATCHER_SHIM_DIR:$PATH" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" WATCHER_CARD="$n" \
+  PATH="$WATCHER_SHIM_DIR:$(path_without_shims)" WATCHER_REAL_CLAUDE="$WATCHER_REAL_CLAUDE" WATCHER_CARD="$n" \
   "$WATCHER_REAL_CLAUDE" -p "$LAUNCH_COMMAND $n" \
       --dangerously-skip-permissions ${PLUGIN_ARGV[@]+"${PLUGIN_ARGV[@]}"} \
       --max-turns $TICK_MAX_TURNS --max-budget-usd $TICK_MAX_BUDGET_USD \
@@ -1809,6 +1820,9 @@ follow_pointer() {
   # the trap the LANE_CHANNEL=canary shim's own `unset WATCHER_HOME` (above) already avoids,
   # for the same reason: `exec` hands the whole environment to the new process, not just argv.
   unset WATCHER_HOME
+  # Card #293: and never carry this release's shim/ on PATH into the new one — the new
+  # process puts its own back, and two releases' shims on one PATH is what froze every lane.
+  PATH="$(path_without_shims)"; export PATH
   # Card #115: move into the new release's folder before handing off, the same reason the
   # process-start `cd` above exists — so this long-running process is never left standing
   # in the OLD release once a later deploy sweeps it. $new_here is .../bin; the release
@@ -1832,6 +1846,11 @@ record_release() {
 
 # --- one poll iteration --------------------------------------------------------------------
 tick_once() {
+  # Card #293: the lane's own "I am polling", one touch per poll before anything that can
+  # hang. The floor page reads its age: a lane with no card in hand whose heartbeat is far
+  # older than a poll shows as stuck instead of "active" (every lane sat 21 hours inside a
+  # hung doctor.sh, November 11-12, 2026, logging nothing).
+  touch "$WATCHER_STATE/heartbeat" 2>/dev/null || true
   follow_pointer
 
   # Every poll, before anything else — see reconcile_stale_current's own comment for why
