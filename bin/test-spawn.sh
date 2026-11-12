@@ -490,7 +490,7 @@ run() {
   BOARD_REVIEW_FILE="${BOARD_REVIEW_FILE:-/dev/null}" BOARD_REVIEW_FAIL="${BOARD_REVIEW_FAIL:-0}" \
   INREVIEW_NO_PR_GRACE_SEC="${INREVIEW_NO_PR_GRACE_SEC:-}" INREVIEW_STALE_SEC="${INREVIEW_STALE_SEC:-}" \
   STAGE_SWEEP_SEC="${STAGE_SWEEP_SEC:-}" BOARD_SWEEP_FILE="${BOARD_SWEEP_FILE:-}" BOARD_SWEEP_FAIL="${BOARD_SWEEP_FAIL:-0}" \
-  AWAITING_REBUILD_STALE_SEC="${AWAITING_REBUILD_STALE_SEC:-}" \
+  AWAITING_REBUILD_STALE_SEC="${AWAITING_REBUILD_STALE_SEC:-}" REBUILD_STATUS_CMD="${REBUILD_STATUS_CMD:-}" \
   BOARD_SHOW_FILE="${BOARD_SHOW_FILE:-/dev/null}" BOARD_SHOW_FAIL="${BOARD_SHOW_FAIL:-0}" \
   BOARD_MOVE_FAIL="${BOARD_MOVE_FAIL:-0}" \
   BOARD_MOVE_FAIL_COUNT="${BOARD_MOVE_FAIL_COUNT:-}" BOARD_MOVE_COUNTER_FILE="${BOARD_MOVE_COUNTER_FILE:-}" \
@@ -1927,6 +1927,63 @@ if grepped "gh issue edit 613 --remove-label in-flight --remove-label awaiting-r
 else
   flunk "recovery poll did not finish the park" "$(cat "$TESTLOG")"
 fi
+
+echo "33f. …a project that sets REBUILD_STATUS_CMD (card #292): the lane asks, once per poll, and"
+echo "     drops the label itself only for a rebuild that finished AFTER the card began waiting"
+# a stock Mac ships no `timeout`; the suite stands one in (the way test-deploy.sh stubs flock)
+mkdir -p "$TMP/tbin"; printf '#!/bin/sh\nshift\nexec "$@"\n' > "$TMP/tbin/timeout"; chmod +x "$TMP/tbin/timeout"
+STATUS="$TMP/rebuild-status.sh"; STATUS_COUNT="$TMP/rebuild-status.count"
+status_is() { printf '#!/bin/sh\necho x >> "%s"\n%s\n' "$STATUS_COUNT" "$1" > "$STATUS"; chmod +x "$STATUS"; : > "$STATUS_COUNT"; }
+arb_poll() { PATH="$TMP/tbin:$PATH" REBUILD_STATUS_CMD="$STATUS" run --once >/dev/null 2>&1 || true; }
+fresh_state
+board_list $'620\tP2\tbuilder\tawaiting-rebuild\tFix merged A' $'621\tP2\tbuilder\tawaiting-rebuild\tFix merged B'
+mkdir -p "$STATE/awaiting-rebuild"; echo 1000 > "$STATE/awaiting-rebuild/620.since"; echo 1000 > "$STATE/awaiting-rebuild/621.since"
+status_is "echo '{\"result\":\"success\",\"exit_status\":\"0\",\"finished_at\":\"2026-11-12T20:00:00Z\",\"active\":false}'"
+arb_poll
+if grepped "gh issue edit 620 --remove-label awaiting-rebuild" && grepped "gh issue edit 621 --remove-label awaiting-rebuild" \
+   && [ "$(grep -c 'gh issue comment 620 --body 🤖 FYI: the downstream rebuild' "$TESTLOG")" = 1 ] \
+   && grep 'gh issue comment 620' "$TESTLOG" | grep -q 'success (exit status 0), finished 2026-11-12T20:00:00Z'; then
+  pass "finished after .since: label off and one comment (result, exit status, finish time), for every waiting card"
+else
+  flunk "rebuild-finished drop" "$(cat "$TESTLOG")"
+fi
+if [ "$(wc -l < "$STATUS_COUNT")" = 1 ]; then pass "the status command ran once for two waiting cards"; else flunk "status ran per card" "$(cat "$STATUS_COUNT")"; fi
+if not_grepped "gh issue comment 620 --body 🤖 FYI: this card is waiting" && not_grepped "/watcher:watch 620" \
+   && [ ! -f "$STATE/awaiting-rebuild/620.since" ]; then
+  pass "no 'still waiting' FYI in the same poll; markers cleared; the tick comes on the next poll"
+else
+  flunk "same-poll noise" "$(cat "$TESTLOG")"
+fi
+for case_ in \
+  "finished before .since|echo '{\"result\":\"success\",\"exit_status\":\"0\",\"finished_at\":\"1970-01-01T00:00:10Z\",\"active\":false}'" \
+  "still active|echo '{\"result\":\"\",\"exit_status\":\"\",\"finished_at\":\"2026-11-12T20:00:00Z\",\"active\":true}'" \
+  "command fails|exit 3" \
+  "not JSON|echo rebuild is fine" \
+  "no such time|echo '{\"result\":\"success\",\"exit_status\":\"0\",\"finished_at\":\"soon\",\"active\":false}'"; do
+  fresh_state
+  board_list $'622\tP2\tbuilder\tawaiting-rebuild\tFix merged C'
+  mkdir -p "$STATE/awaiting-rebuild"; date +%s > "$STATE/awaiting-rebuild/622.since"
+  status_is "${case_#*|}"
+  arb_poll
+  if not_grepped "remove-label awaiting-rebuild" && not_grepped "board.py move 622" && [ -f "$STATE/awaiting-rebuild/622.since" ]; then
+    pass "${case_%%|*}: the card keeps waiting, untouched"
+  else
+    flunk "${case_%%|*}" "$(cat "$TESTLOG")"
+  fi
+done
+fresh_state
+board_list $'622\tP2\tbuilder\tawaiting-rebuild\tFix merged C'
+mkdir -p "$STATE/awaiting-rebuild"; date +%s > "$STATE/awaiting-rebuild/622.since"
+PATH="$TMP/tbin:$PATH" REBUILD_STATUS_CMD="exit 124" run --once >/dev/null 2>&1 || true
+if not_grepped "remove-label awaiting-rebuild"; then pass "a timed-out command (exit 124) changes nothing"; else flunk "timeout" "$(cat "$TESTLOG")"; fi
+fresh_state
+board_list $'623\tP2\tbuilder\tawaiting-rebuild\tFix merged D'
+mkdir -p "$STATE/awaiting-rebuild"; echo 1 > "$STATE/awaiting-rebuild/623.since"
+status_is "echo '{\"result\":\"exit-code\",\"exit_status\":\"2\",\"finished_at\":\"2026-11-12T20:00:00+00:00\",\"active\":false}'"
+PATH="$TMP/tbin:$PATH" REBUILD_STATUS_CMD="$STATUS" run --dry-run >/dev/null 2>&1 || true
+if not_grepped "remove-label" && [ ! -s "$STATUS_COUNT" ]; then pass "dry-run never asks and never writes"; else flunk "dry-run asked" "$(cat "$TESTLOG")"; fi
+arb_poll
+if grep 'gh issue comment 623' "$TESTLOG" | grep -q 'exit-code (exit status 2)'; then pass "a failed rebuild (systemd's exit-code) is reported with its result, label still off"; else flunk "failed result" "$(cat "$TESTLOG")"; fi
 
 # ============================================================================
 echo "In review sweep (watcher#18): a column nothing read becomes one the spawner empties"
